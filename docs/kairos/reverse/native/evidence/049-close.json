@@ -1,0 +1,12 @@
+{
+  "request": {
+    "name": "close_binary",
+    "arguments": {}
+  },
+  "started": "2026-10-18T12:47:53.959Z",
+  "finished": "2026-10-18T12:47:54.369Z",
+  "isError": false,
+  "response": {
+    "result": null
+  }
+}

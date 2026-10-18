@@ -1,0 +1,139 @@
+{
+  "targetSha256AfterClose": "e97cc2612b79ab154076844a13ec01cdeb70be0f14cf20675ce0e39dff81ecc8",
+  "bundleSha256": "d4470ca5e0e64f9b8c6d50569064ee26776b41c8a7b1f5442bce8ffb72058da9",
+  "bundleBytes": 3682311,
+  "bundleRecords": 44,
+  "rawRecords": 49,
+  "rawErrors": 0,
+  "nativeSessionClosed": true,
+  "remainingNativeDirectories": 0,
+  "remainingProviderProcesses": 0,
+  "node": "24.18.0",
+  "rea": "6.4.0",
+  "ghidra": "12.1.4",
+  "jdk": "Temurin 21.0.12.1+1 x64",
+  "analysisProfile": "249564812a8d83b9b3f461098fc485ccde60c516d4497547a124081c91d654bf",
+  "functions": [
+    {
+      "file": "012-createitem.json",
+      "procedure": "0x1400bdc40",
+      "body": {
+        "available": true,
+        "provenance": "ghidra-function-body-address-set",
+        "ranges": [
+          {
+            "start": "0x1400bdc40",
+            "end": "0x1400be21b"
+          }
+        ],
+        "total_bytes": 1500,
+        "span_bytes": 1500,
+        "non_contiguous": false,
+        "contains_entry": true
+      },
+      "valueFlowAvailable": true,
+      "truncated": false,
+      "knownOmittedEdges": 0,
+      "knownOmittedInputs": 0,
+      "omittedOperationsLowerBound": 0
+    },
+    {
+      "file": "013-finishitem.json",
+      "procedure": "0x1400be6b0",
+      "body": {
+        "available": true,
+        "provenance": "ghidra-function-body-address-set",
+        "ranges": [
+          {
+            "start": "0x1400be6b0",
+            "end": "0x1400be78e"
+          }
+        ],
+        "total_bytes": 223,
+        "span_bytes": 223,
+        "non_contiguous": false,
+        "contains_entry": true
+      },
+      "valueFlowAvailable": true,
+      "truncated": false,
+      "knownOmittedEdges": 0,
+      "knownOmittedInputs": 0,
+      "omittedOperationsLowerBound": 0
+    },
+    {
+      "file": "014-snip.json",
+      "procedure": "0x1400c3300",
+      "body": {
+        "available": true,
+        "provenance": "ghidra-function-body-address-set",
+        "ranges": [
+          {
+            "start": "0x1400c3300",
+            "end": "0x1400c35f5"
+          }
+        ],
+        "total_bytes": 758,
+        "span_bytes": 758,
+        "non_contiguous": false,
+        "contains_entry": true
+      },
+      "valueFlowAvailable": true,
+      "truncated": false,
+      "knownOmittedEdges": 0,
+      "knownOmittedInputs": 0,
+      "omittedOperationsLowerBound": 0
+    },
+    {
+      "file": "015-extracttext.json",
+      "procedure": "0x1400be5b0",
+      "body": {
+        "available": true,
+        "provenance": "ghidra-function-body-address-set",
+        "ranges": [
+          {
+            "start": "0x1400be5b0",
+            "end": "0x1400be6ae"
+          }
+        ],
+        "total_bytes": 255,
+        "span_bytes": 255,
+        "non_contiguous": false,
+        "contains_entry": true
+      },
+      "valueFlowAvailable": true,
+      "truncated": false,
+      "knownOmittedEdges": 0,
+      "knownOmittedInputs": 0,
+      "omittedOperationsLowerBound": 0
+    },
+    {
+      "file": "016-screenshot.json",
+      "procedure": "0x1400c2e50",
+      "body": {
+        "available": true,
+        "provenance": "ghidra-function-body-address-set",
+        "ranges": [
+          {
+            "start": "0x1400c2e50",
+            "end": "0x1400c2f98"
+          }
+        ],
+        "total_bytes": 329,
+        "span_bytes": 329,
+        "non_contiguous": false,
+        "contains_entry": true
+      },
+      "valueFlowAvailable": true,
+      "truncated": false,
+      "knownOmittedEdges": 0,
+      "knownOmittedInputs": 0,
+      "omittedOperationsLowerBound": 0
+    }
+  ],
+  "bundleIdsMatchRaw": true,
+  "allBundleSubjectsMatchTarget": true,
+  "allBundleAnalysisProfilesMatch": true,
+  "completeRecordsDeepEqual": 44,
+  "powershellSyntaxValid": true,
+  "nodeSyntaxValid": true
+}

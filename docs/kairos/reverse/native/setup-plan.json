@@ -1,0 +1,33 @@
+{
+  "target": "C:\\Users\\Axel_desktop\\AppData\\Local\\Programs\\SunnyCapturer\\SunnyCapturer.exe",
+  "targetSha256": "e97cc2612b79ab154076844a13ec01cdeb70be0f14cf20675ce0e39dff81ecc8",
+  "toolRoot": "C:\\Users\\Axel_desktop\\.t3\\worktrees\\kapture\\t3-f80e737e\\.tools\\reverse",
+  "freeBytes": 20583485440,
+  "assets": [
+    {
+      "name": "ghidra_12.1.4_PUBLIC_20260921.zip",
+      "bytes": 569649598,
+      "sha256": "ddac49f903da9d5bac833e5cc79395098b9c33cfd3279be5f31bd00387d2d4db",
+      "url": "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.1.4_build/ghidra_12.1.4_PUBLIC_20260921.zip",
+      "extract": "ghidra"
+    },
+    {
+      "name": "OpenJDK21U-jdk_x64_windows_hotspot_21.0.12.1_1.zip",
+      "bytes": 205073461,
+      "sha256": "f9d6e191ab098c0d416e7d588a24420a8621cd2f4720dab2459b8b7b2d2d8b4e",
+      "url": "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12.1%2B1/OpenJDK21U-jdk_x64_windows_hotspot_21.0.12.1_1.zip",
+      "extract": "jdk"
+    }
+  ],
+  "node": "C:\\Users\\Axel_desktop\\.t3\\projects\\clockify\\.rea-runtime\\node-v24.18.0-win-x64\\node.exe",
+  "rea": "C:\\Users\\Axel_desktop\\.t3\\projects\\clockify\\.rea-runtime\\node_modules\\rea-agents\\scripts\\rea.mjs",
+  "sources": [
+    "https://github.com/NationalSecurityAgency/ghidra/releases/tag/Ghidra_12.1.4_build",
+    "https://raw.githubusercontent.com/NationalSecurityAgency/ghidra/Ghidra_12.1.4_build/GhidraDocs/GettingStarted.md",
+    "https://api.adoptium.net/v3/assets/latest/21/hotspot?architecture=x64&image_type=jdk&os=windows&vendor=eclipse"
+  ],
+  "changes": "New portable files only; no overwrite, global install, registry, persistent PATH, MCP config, package setup, or target execution.",
+  "pathConstraint": "Root scope correction forbids short names, junctions, drive mappings and path aliases. Use the explicitly authorized normal resolved runtimeRoot for private runtime and Ghidra projects. Target admission remains binding.",
+  "runtimeRoot": "C:\\Users\\Axel_desktop\\AppData\\Local\\KairosCapture\\ReverseTools\\97cc3309-5721-48c0-984b-21dc6de14109",
+  "scopeCorrection": "Initial short-name proposal was withdrawn before any REA/Ghidra launch. Only read-only alias lookup occurred. Existing archive downloads and extraction are unchanged in ignored .tools/reverse; no duplicate downloads."
+}

@@ -1,0 +1,99 @@
+{
+  "request": {
+    "name": "procedure_pseudo_code",
+    "arguments": {
+      "procedure": "0x1400bdbb0"
+    }
+  },
+  "started": "2026-10-18T12:44:07.467Z",
+  "finished": "2026-10-18T12:44:07.491Z",
+  "isError": false,
+  "response": {
+    "evidence_id": "ev_59bea9c9f695832d02f89b8dad0eb954ee3a842be31d537692e441c16e87dd8f",
+    "subject": {
+      "name": "C:\\Users\\Axel_desktop\\AppData\\Local\\Programs\\SunnyCapturer\\SunnyCapturer.exe",
+      "digest": {
+        "sha256": "e97cc2612b79ab154076844a13ec01cdeb70be0f14cf20675ce0e39dff81ecc8"
+      },
+      "format": "pe",
+      "architecture": "x86_64",
+      "local_path": "C:\\Users\\Axel_desktop\\AppData\\Local\\Programs\\SunnyCapturer\\SunnyCapturer.exe"
+    },
+    "provider": {
+      "id": "ghidra",
+      "name": "Ghidra",
+      "version": "12.1.4"
+    },
+    "analysis_profile": {
+      "provider": {
+        "id": "ghidra",
+        "name": "Ghidra",
+        "version": "12.1.4"
+      },
+      "parameters": {
+        "target_kind": "executable",
+        "target_format": "pe",
+        "executable_role": "application",
+        "managed": false,
+        "native_aot_metadata": {
+          "contract_revision": "rtr-9.1-x64-pe-read-only-v3",
+          "source_bytes": 134217728,
+          "work_units": 67108864,
+          "working_memory_bytes": 67108864,
+          "report_bytes": 4194304
+        },
+        "architecture": "x86_64",
+        "available_architectures": [
+          "x86_64"
+        ],
+        "import_mode": "ephemeral-source-immutable",
+        "annotation_policy": "atomic-function-entry-metadata-v1",
+        "load_image_observations": "source-mappings-entry-context-v2",
+        "function_body_evidence": "complete-inclusive-ranges-v1",
+        "function_references": "complete-body-and-entry-reference-manager-v2",
+        "string_inventory_evidence": "defined-data-coverage-v1",
+        "location_resolution": "explicit-address-exact-entry-symbol-first-v3",
+        "instruction_flow_evidence": "decoded-return-pcode-v1",
+        "function_boundary_observations": "ghidra-terminal-call-limitations-v1",
+        "no_return_repair": "disabled-windows-p0",
+        "process_launch": "official-headless-script-v1",
+        "jump_table_evidence": "typed-case-default-blocks-v1",
+        "decompiler_jump_loads": true,
+        "loader": "auto-from-header",
+        "language_id": "auto-from-header",
+        "compiler_spec_id": "auto-default",
+        "analyzer_preset": "ghidra-default"
+      },
+      "digest": "249564812a8d83b9b3f461098fc485ccde60c516d4497547a124081c91d654bf"
+    },
+    "predicate_type": "rea.analysis",
+    "operation": "procedure_pseudo_code",
+    "parameters": {
+      "procedure": "0x1400bdbb0"
+    },
+    "raw_result": {
+      "value": "\r\nvoid FUN_1400bdbb0(undefined8 param_1)\r\n\r\n{\r\n  longlong *plVar1;\r\n  int *piVar2;\r\n  int iVar3;\r\n  longlong lVar4;\r\n  undefined8 uVar5;\r\n  undefined1 local_38 [8];\r\n  longlong *local_30;\r\n  QPixmap local_28 [32];\r\n  \r\n  uVar5 = FUN_1400c3300(param_1,local_28);\r\n  FUN_14001d150(local_38,uVar5);\r\n  if (local_30 != (longlong *)0x0) {\r\n    LOCK();\r\n    plVar1 = local_30 + 1;\r\n    lVar4 = *plVar1;\r\n    *(int *)plVar1 = (int)*plVar1 + -1;\r\n    UNLOCK();\r\n    if ((int)lVar4 == 1) {\r\n      (**(code **)*local_30)(local_30);\r\n      LOCK();\r\n      piVar2 = (int *)((longlong)local_30 + 0xc);\r\n      iVar3 = *piVar2;\r\n      *piVar2 = *piVar2 + -1;\r\n      UNLOCK();\r\n      if (iVar3 == 1) {\r\n        (**(code **)(*local_30 + 8))(local_30);\r\n      }\r\n    }\r\n  }\r\n  QPixmap::~QPixmap(local_28);\r\n  FUN_1400be4e0(param_1);\r\n  return;\r\n}\r\n\r\n",
+      "limitations": [
+        "Ghidra Listing reports a terminal call at 0x1400bdc2e to 0x1400be4e0 FUN_1400be4e0 (external=false, thunk=false, hasNoReturn=false); fallthrough is excluded by Ghidra's flow model. The reason for the terminal flow is not established by this observation."
+      ]
+    },
+    "normalized_result": "\r\nvoid FUN_1400bdbb0(undefined8 param_1)\r\n\r\n{\r\n  longlong *plVar1;\r\n  int *piVar2;\r\n  int iVar3;\r\n  longlong lVar4;\r\n  undefined8 uVar5;\r\n  undefined1 local_38 [8];\r\n  longlong *local_30;\r\n  QPixmap local_28 [32];\r\n  \r\n  uVar5 = FUN_1400c3300(param_1,local_28);\r\n  FUN_14001d150(local_38,uVar5);\r\n  if (local_30 != (longlong *)0x0) {\r\n    LOCK();\r\n    plVar1 = local_30 + 1;\r\n    lVar4 = *plVar1;\r\n    *(int *)plVar1 = (int)*plVar1 + -1;\r\n    UNLOCK();\r\n    if ((int)lVar4 == 1) {\r\n      (**(code **)*local_30)(local_30);\r\n      LOCK();\r\n      piVar2 = (int *)((longlong)local_30 + 0xc);\r\n      iVar3 = *piVar2;\r\n      *piVar2 = *piVar2 + -1;\r\n      UNLOCK();\r\n      if (iVar3 == 1) {\r\n        (**(code **)(*local_30 + 8))(local_30);\r\n      }\r\n    }\r\n  }\r\n  QPixmap::~QPixmap(local_28);\r\n  FUN_1400be4e0(param_1);\r\n  return;\r\n}\r\n\r\n",
+    "confidence": "observed",
+    "authority": "shipped-artifact",
+    "environment": null,
+    "limitations": [
+      "The session serves operations only after Ghidra reports default auto-analysis complete; incomplete analysis does not expose partial results.",
+      "The imported Program and temporary project are ephemeral and deleted on close. Annotation operations edit session database metadata; original executable bytes are never written.",
+      "Cancelling an active Ghidra request terminates its ephemeral database and discards session annotations. The selected target remains open; the next provider query imports the original artifact again.",
+      "Default-space addresses use lowercase 0x-prefixed hexadecimal; other address spaces use <percent-encoded-space>:0x<hex>.",
+      "Pseudocode is Ghidra decompiler output, not original source and not text-equivalent to Hopper output.",
+      "External functions and functions without an analyzable body return null; other decompiler failures remain explicit.",
+      "Ghidra Listing reports a terminal call at 0x1400bdc2e to 0x1400be4e0 FUN_1400be4e0 (external=false, thunk=false, hasNoReturn=false); fallthrough is excluded by Ghidra's flow model. The reason for the terminal flow is not established by this observation.",
+      "Windows Ghidra P0 accepts approved native x86 and x86-64 PE applications and DLLs; managed, hostile, sensitive, and mutable-path targets are unsupported.",
+      "The Windows bridge uses authenticated IPv4 loopback because Node path-based IPC does not expose Java AF_UNIX sockets; the endpoint file contains no bearer token.",
+      "Windows sessions require the matching packaged Windows x64 native addon, local NTFS targets and runtimes, and Windows 10 or later. Native handles enforce path admission, private DACLs, and Job Object ownership automatically."
+    ],
+    "locations": [],
+    "evidence_links": []
+  }
+}

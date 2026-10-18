@@ -1,0 +1,788 @@
+{
+  "authority": "ordinary-shell-static-byte-parsing; not REA Evidence",
+  "target": "C:/Users/Axel_desktop/AppData/Local/Programs/SunnyCapturer/SunnyCapturer.exe",
+  "sha256": "e97cc2612b79ab154076844a13ec01cdeb70be0f14cf20675ce0e39dff81ecc8",
+  "inventory_path": "C:\\Users\\Axel_desktop\\.t3\\projects\\kapture\\docs\\kairos\\reverse\\static\\inventory.json",
+  "inventory_sha256": "743d2bc59abc6a4caf9467d6428ed965ac88534fd85a52a46c3a88749e175095",
+  "layout": "PE32+ image base/section mapping; Qt6 QMetaObject static_metacall pointer at object+24; method ordinals from supplied inventory. Validate dispatch in actual decompilation.",
+  "classes": [
+    {
+      "class_name": "ScreenShoter",
+      "object_offset": 1676376,
+      "object_address": "0x14019a658",
+      "static_metacall_address": "0x140004f10",
+      "metadata_offset": 1685664,
+      "methods": [
+        {
+          "index": 0,
+          "name": "pinData",
+          "kind": "signal",
+          "argc": 1,
+          "argument_types_raw": [
+            2147483651
+          ]
+        },
+        {
+          "index": 1,
+          "name": "sigSaved",
+          "kind": "signal",
+          "argc": 1,
+          "argument_types_raw": [
+            10
+          ]
+        },
+        {
+          "index": 2,
+          "name": "start",
+          "kind": "slot",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 3,
+          "name": "exit",
+          "kind": "slot",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 4,
+          "name": "repeat",
+          "kind": "slot",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 5,
+          "name": "imageTranslate",
+          "kind": "slot",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 6,
+          "name": "extractText",
+          "kind": "slot",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 7,
+          "name": "onImgTransFinshed",
+          "kind": "slot",
+          "argc": 1,
+          "argument_types_raw": [
+            10
+          ]
+        },
+        {
+          "index": 8,
+          "name": "onSave",
+          "kind": "slot",
+          "argc": 1,
+          "argument_types_raw": [
+            1
+          ]
+        },
+        {
+          "index": 9,
+          "name": "copy",
+          "kind": "slot",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 10,
+          "name": "pin",
+          "kind": "slot",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 11,
+          "name": "snip",
+          "kind": "slot",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 12,
+          "name": "setStyle",
+          "kind": "slot",
+          "argc": 1,
+          "argument_types_raw": [
+            2147483667
+          ]
+        },
+        {
+          "index": 13,
+          "name": "moveMenu",
+          "kind": "slot",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 14,
+          "name": "updateCursor",
+          "kind": "slot",
+          "argc": 1,
+          "argument_types_raw": [
+            2147483671
+          ]
+        },
+        {
+          "index": 15,
+          "name": "screenshot",
+          "kind": "slot",
+          "argc": 1,
+          "argument_types_raw": [
+            2147483673
+          ]
+        },
+        {
+          "index": 16,
+          "name": "setBackground",
+          "kind": "slot",
+          "argc": 2,
+          "argument_types_raw": [
+            4097,
+            2147483673
+          ]
+        },
+        {
+          "index": 17,
+          "name": "createItem",
+          "kind": "slot",
+          "argc": 1,
+          "argument_types_raw": [
+            26
+          ]
+        },
+        {
+          "index": 18,
+          "name": "finishItem",
+          "kind": "slot",
+          "argc": 0,
+          "argument_types_raw": []
+        }
+      ]
+    },
+    {
+      "class_name": "Communication",
+      "object_offset": 1677016,
+      "object_address": "0x14019a8d8",
+      "static_metacall_address": "0x140005990",
+      "metadata_offset": 1678224,
+      "methods": [
+        {
+          "index": 0,
+          "name": "sigShowSystemMessagebox",
+          "kind": "signal",
+          "argc": 3,
+          "argument_types_raw": [
+            10,
+            10,
+            2
+          ]
+        },
+        {
+          "index": 1,
+          "name": "sigShowSystemMessagebox",
+          "kind": "signal",
+          "argc": 2,
+          "argument_types_raw": [
+            10,
+            10
+          ]
+        },
+        {
+          "index": 2,
+          "name": "sigOcrFinished",
+          "kind": "signal",
+          "argc": 3,
+          "argument_types_raw": [
+            10,
+            10,
+            10
+          ]
+        },
+        {
+          "index": 3,
+          "name": "sigImgTransFinshed",
+          "kind": "signal",
+          "argc": 1,
+          "argument_types_raw": [
+            10
+          ]
+        },
+        {
+          "index": 4,
+          "name": "onExtractText",
+          "kind": "slot",
+          "argc": 0,
+          "argument_types_raw": []
+        }
+      ]
+    },
+    {
+      "class_name": "EditingMenu",
+      "object_offset": 1679400,
+      "object_address": "0x14019b228",
+      "static_metacall_address": "0x140005fe0",
+      "metadata_offset": 1693216,
+      "methods": [
+        {
+          "index": 0,
+          "name": "sigTranslate",
+          "kind": "signal",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 1,
+          "name": "sigExtractText",
+          "kind": "signal",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 2,
+          "name": "scroll",
+          "kind": "signal",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 3,
+          "name": "sigSave",
+          "kind": "signal",
+          "argc": 1,
+          "argument_types_raw": [
+            1
+          ]
+        },
+        {
+          "index": 4,
+          "name": "pin",
+          "kind": "signal",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 5,
+          "name": "copy",
+          "kind": "signal",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 6,
+          "name": "exit",
+          "kind": "signal",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 7,
+          "name": "undo",
+          "kind": "signal",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 8,
+          "name": "redo",
+          "kind": "signal",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 9,
+          "name": "graphChanged",
+          "kind": "signal",
+          "argc": 1,
+          "argument_types_raw": [
+            2147483661
+          ]
+        },
+        {
+          "index": 10,
+          "name": "penChanged",
+          "kind": "signal",
+          "argc": 2,
+          "argument_types_raw": [
+            2147483661,
+            4108
+          ]
+        },
+        {
+          "index": 11,
+          "name": "fontChanged",
+          "kind": "signal",
+          "argc": 2,
+          "argument_types_raw": [
+            2147483661,
+            4096
+          ]
+        },
+        {
+          "index": 12,
+          "name": "fillChanged",
+          "kind": "signal",
+          "argc": 2,
+          "argument_types_raw": [
+            2147483661,
+            1
+          ]
+        },
+        {
+          "index": 13,
+          "name": "imageArrived",
+          "kind": "signal",
+          "argc": 1,
+          "argument_types_raw": [
+            4097
+          ]
+        },
+        {
+          "index": 14,
+          "name": "moved",
+          "kind": "signal",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 15,
+          "name": "canUndo",
+          "kind": "slot",
+          "argc": 1,
+          "argument_types_raw": [
+            1
+          ]
+        },
+        {
+          "index": 16,
+          "name": "canRedo",
+          "kind": "slot",
+          "argc": 1,
+          "argument_types_raw": [
+            1
+          ]
+        },
+        {
+          "index": 17,
+          "name": "paintGraph",
+          "kind": "slot",
+          "argc": 1,
+          "argument_types_raw": [
+            2147483661
+          ]
+        }
+      ]
+    },
+    {
+      "class_name": "PaddleOCR",
+      "object_offset": 1680488,
+      "object_address": "0x14019b668",
+      "static_metacall_address": "0x140004d20",
+      "metadata_offset": 1681232,
+      "methods": []
+    },
+    {
+      "class_name": "ImageView",
+      "object_offset": 1683368,
+      "object_address": "0x14019c1a8",
+      "static_metacall_address": "0x1400069f0",
+      "metadata_offset": 1683984,
+      "methods": [
+        {
+          "index": 0,
+          "name": "sigPaddleOCRFinish",
+          "kind": "signal",
+          "argc": 2,
+          "argument_types_raw": [
+            2147483651,
+            10
+          ]
+        },
+        {
+          "index": 1,
+          "name": "onSwitchImage",
+          "kind": "slot",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 2,
+          "name": "onLoadImage",
+          "kind": "slot",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 3,
+          "name": "onZoomInImage",
+          "kind": "slot",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 4,
+          "name": "onZoomOutImage",
+          "kind": "slot",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 5,
+          "name": "onPresetImage",
+          "kind": "slot",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 6,
+          "name": "onRotateImage",
+          "kind": "slot",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 7,
+          "name": "onSaveAsImage",
+          "kind": "slot",
+          "argc": 0,
+          "argument_types_raw": []
+        }
+      ]
+    },
+    {
+      "class_name": "OcrUI",
+      "object_offset": 1683496,
+      "object_address": "0x14019c228",
+      "static_metacall_address": "0x140006ce0",
+      "metadata_offset": 1676096,
+      "methods": [
+        {
+          "index": 0,
+          "name": "on_splitter_splitterMoved",
+          "kind": "slot",
+          "argc": 2,
+          "argument_types_raw": [
+            2,
+            2
+          ]
+        },
+        {
+          "index": 1,
+          "name": "onPaddleOCRFinish",
+          "kind": "slot",
+          "argc": 2,
+          "argument_types_raw": [
+            2147483654,
+            10
+          ]
+        },
+        {
+          "index": 2,
+          "name": "onEditEnable",
+          "kind": "slot",
+          "argc": 1,
+          "argument_types_raw": [
+            1
+          ]
+        },
+        {
+          "index": 3,
+          "name": "onOcrFinished",
+          "kind": "slot",
+          "argc": 3,
+          "argument_types_raw": [
+            10,
+            10,
+            10
+          ]
+        },
+        {
+          "index": 4,
+          "name": "on_tbImportPdf_released",
+          "kind": "slot",
+          "argc": 0,
+          "argument_types_raw": []
+        }
+      ]
+    },
+    {
+      "class_name": "Capturer",
+      "object_offset": 1688392,
+      "object_address": "0x14019d548",
+      "static_metacall_address": "0x140007790",
+      "metadata_offset": 1681360,
+      "methods": [
+        {
+          "index": 0,
+          "name": "onCpature",
+          "kind": "slot",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 1,
+          "name": "QuickLook",
+          "kind": "slot",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 2,
+          "name": "PreviewClipboard",
+          "kind": "slot",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 3,
+          "name": "PreviewMimeData",
+          "kind": "slot",
+          "argc": 1,
+          "argument_types_raw": [
+            2147483654
+          ]
+        },
+        {
+          "index": 4,
+          "name": "TogglePreviews",
+          "kind": "slot",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 5,
+          "name": "TransparentPreviewInput",
+          "kind": "slot",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 6,
+          "name": "ToggleCamera",
+          "kind": "slot",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 7,
+          "name": "OpenSettingsDialog",
+          "kind": "slot",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 8,
+          "name": "onRestart",
+          "kind": "slot",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 9,
+          "name": "UpdateHotkeys",
+          "kind": "slot",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 10,
+          "name": "TrayActivated",
+          "kind": "slot",
+          "argc": 1,
+          "argument_types_raw": [
+            2147483663
+          ]
+        },
+        {
+          "index": 11,
+          "name": "ShowMessage",
+          "kind": "slot",
+          "argc": 4,
+          "argument_types_raw": [
+            10,
+            10,
+            2147483668,
+            2
+          ]
+        },
+        {
+          "index": 12,
+          "name": "ShowMessage",
+          "kind": "slot",
+          "argc": 3,
+          "argument_types_raw": [
+            10,
+            10,
+            2147483668
+          ]
+        },
+        {
+          "index": 13,
+          "name": "ShowMessage",
+          "kind": "slot",
+          "argc": 2,
+          "argument_types_raw": [
+            10,
+            10
+          ]
+        },
+        {
+          "index": 14,
+          "name": "SetTheme",
+          "kind": "slot",
+          "argc": 1,
+          "argument_types_raw": [
+            10
+          ]
+        },
+        {
+          "index": 15,
+          "name": "switchLanguage",
+          "kind": "slot",
+          "argc": 1,
+          "argument_types_raw": [
+            10
+          ]
+        },
+        {
+          "index": 16,
+          "name": "UpdateScreenshotStyle",
+          "kind": "slot",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 17,
+          "name": "RecordVideo",
+          "kind": "slot",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 18,
+          "name": "RecordGIF",
+          "kind": "slot",
+          "argc": 0,
+          "argument_types_raw": []
+        }
+      ]
+    },
+    {
+      "class_name": "Selector",
+      "object_offset": 1694040,
+      "object_address": "0x14019eb58",
+      "static_metacall_address": "0x140008690",
+      "metadata_offset": 1682784,
+      "methods": [
+        {
+          "index": 0,
+          "name": "selecting",
+          "kind": "signal",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 1,
+          "name": "captured",
+          "kind": "signal",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 2,
+          "name": "moved",
+          "kind": "signal",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 3,
+          "name": "resized",
+          "kind": "signal",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 4,
+          "name": "locked",
+          "kind": "signal",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 5,
+          "name": "stopped",
+          "kind": "signal",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 6,
+          "name": "statusChanged",
+          "kind": "signal",
+          "argc": 1,
+          "argument_types_raw": [
+            2147483657
+          ]
+        },
+        {
+          "index": 7,
+          "name": "sigResizeCpaturedRect",
+          "kind": "signal",
+          "argc": 0,
+          "argument_types_raw": []
+        },
+        {
+          "index": 8,
+          "name": "start",
+          "kind": "slot",
+          "argc": 1,
+          "argument_types_raw": [
+            2147483660
+          ]
+        },
+        {
+          "index": 9,
+          "name": "status",
+          "kind": "slot",
+          "argc": 1,
+          "argument_types_raw": [
+            2147483657
+          ]
+        },
+        {
+          "index": 10,
+          "name": "setBorderStyle",
+          "kind": "slot",
+          "argc": 1,
+          "argument_types_raw": [
+            4108
+          ]
+        },
+        {
+          "index": 11,
+          "name": "setMaskStyle",
+          "kind": "slot",
+          "argc": 1,
+          "argument_types_raw": [
+            4099
+          ]
+        },
+        {
+          "index": 12,
+          "name": "showRegion",
+          "kind": "slot",
+          "argc": 0,
+          "argument_types_raw": []
+        }
+      ]
+    }
+  ]
+}

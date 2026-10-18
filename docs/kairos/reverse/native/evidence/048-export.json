@@ -1,0 +1,19 @@
+{
+  "request": {
+    "arguments": {
+      "path": "C:\\Users\\Axel_desktop\\.t3\\worktrees\\kapture\\t3-f80e737e\\docs\\kairos\\reverse\\native\\rea-evidence-bundle.json"
+    },
+    "name": "export_evidence_bundle"
+  },
+  "started": "2026-10-18T12:47:31.429Z",
+  "finished": "2026-10-18T12:47:31.580Z",
+  "isError": false,
+  "response": {
+    "result": {
+      "path": "C:\\Users\\Axel_desktop\\.t3\\worktrees\\kapture\\t3-f80e737e\\docs\\kairos\\reverse\\native\\rea-evidence-bundle.json",
+      "bytes": 3682311,
+      "records": 44,
+      "unknowns": 0
+    }
+  }
+}

@@ -1,0 +1,489 @@
+[
+  {
+    "file": "evidence/001-open.json",
+    "tool": "open_binary",
+    "arguments": {
+      "path": "C:\\Users\\Axel_desktop\\AppData\\Local\\Programs\\SunnyCapturer\\SunnyCapturer.exe",
+      "provider_id": "ghidra"
+    },
+    "evidence_id": null,
+    "sha256": "125febf311df81cbfe480a17d50c62fc8bf15f495f72d34429cbb759097583f9",
+    "isError": false
+  },
+  {
+    "file": "evidence/002-session.json",
+    "tool": "binary_session",
+    "arguments": {},
+    "evidence_id": null,
+    "sha256": "625a09567c5a79e422f86032ad204e280b1050ec27fadd715155ff678b07409b",
+    "isError": false
+  },
+  {
+    "file": "evidence/003-screenshoter-metacall.json",
+    "tool": "procedure_pseudo_code",
+    "arguments": {
+      "procedure": "0x140004f10"
+    },
+    "evidence_id": "ev_b4f6f3895594f132b0f22ddd24cdedd496572fe4a783aef7d4b02203d67d8a4a",
+    "sha256": "8c723a6e8cbe90032e84d144c6b3170bba4ca33d2e11fbabb4e7b264b1322306",
+    "isError": false
+  },
+  {
+    "file": "evidence/004-capturer-metacall.json",
+    "tool": "procedure_pseudo_code",
+    "arguments": {
+      "procedure": "0x140007790"
+    },
+    "evidence_id": "ev_df07fb5634a56c9e2efc442e4b58e810de085f0423397ec84493ae00d34b709f",
+    "sha256": "e3e5093d0935879bddec1b5e8c2d8bf874afaed434e67ada14351b0da9e26ae1",
+    "isError": false
+  },
+  {
+    "file": "evidence/005-editingmenu-metacall.json",
+    "tool": "procedure_pseudo_code",
+    "arguments": {
+      "procedure": "0x140005fe0"
+    },
+    "evidence_id": "ev_b865851f47d5b91f0d77552d826ce5ce566e00e043af043debfad4bcc96b92cc",
+    "sha256": "4b3c3f55e5f8fc54d7dfcc4477725ae3f55ddef2fddd6915539d85b11d1f12f1",
+    "isError": false
+  },
+  {
+    "file": "evidence/006-communication-metacall.json",
+    "tool": "procedure_pseudo_code",
+    "arguments": {
+      "procedure": "0x140005990"
+    },
+    "evidence_id": "ev_2f43e134c5b3af58867f07b3bbc3ac124cb09bcf2885dc38f300a07e4a4522ce",
+    "sha256": "920b97cf6ce66edb4e43f55daf08ec40b15286d85fe8ce60b5fc2ede9f23123b",
+    "isError": false
+  },
+  {
+    "file": "evidence/007-undostack-push-xrefs.json",
+    "tool": "xrefs",
+    "arguments": {
+      "address": "0x140195ae8"
+    },
+    "evidence_id": "ev_4ce969efd2dfe9755d86a082f0d43aff557fc1c6860b393297c9abe5ea3f895d",
+    "sha256": "5fb6c1daddae62ed276a1d850ab149916652f7fb7784e461d6aef5ae6c4849c9",
+    "isError": false
+  },
+  {
+    "file": "evidence/008-undostack-undo-xrefs.json",
+    "tool": "xrefs",
+    "arguments": {
+      "address": "0x140195ae0"
+    },
+    "evidence_id": "ev_0c142ca96edec64f213d1352751b27168873f2a766e790945a3f44e9c460cc8b",
+    "sha256": "a7656c596907f84b874ab39ee86f75d44a4ed3df78ea456c3c4953b166f730ac",
+    "isError": false
+  },
+  {
+    "file": "evidence/009-undostack-redo-xrefs.json",
+    "tool": "xrefs",
+    "arguments": {
+      "address": "0x140195ad8"
+    },
+    "evidence_id": "ev_667e2f6535e5d641f347d199b96ee2bf2ef3a06dfcfdea88666b3efe7f2fe7bd",
+    "sha256": "e4284885a33d16762a5bdc04c0b70f7420cb747b4529ca587bc56ad67b652065",
+    "isError": false
+  },
+  {
+    "file": "evidence/010-grabwindow-xrefs.json",
+    "tool": "xrefs",
+    "arguments": {
+      "address": "0x140195ac0"
+    },
+    "evidence_id": "ev_2388b152795e9d4f2dc833d36d04e7f9749f96a124bcf23ea85c2a112a2e3111",
+    "sha256": "c14be371ded775d00ac0e6200f725013290e45f0f762bbbec3678ca5d430b51b",
+    "isError": false
+  },
+  {
+    "file": "evidence/011-session-ready.json",
+    "tool": "binary_session",
+    "arguments": {},
+    "evidence_id": null,
+    "sha256": "306d5e39fcebbb0ef1caace6fa497f63c1dfa4557424c6522d64c64c6a66fd3d",
+    "isError": false
+  },
+  {
+    "file": "evidence/012-createitem.json",
+    "tool": "analyze_function",
+    "arguments": {
+      "procedure": "0x1400bdc40"
+    },
+    "evidence_id": "ev_3311e1568aa356689221e9f7c645ffb066711c30a635510603212db176db5e9c",
+    "sha256": "ade3885d00385c250c0d601a187689f3b9a5d8918ba8c188a7d81c888348506c",
+    "isError": false
+  },
+  {
+    "file": "evidence/013-finishitem.json",
+    "tool": "analyze_function",
+    "arguments": {
+      "procedure": "0x1400be6b0"
+    },
+    "evidence_id": "ev_5adeb3e0fdd0e60c4c2de36ff49ad8a669c87fa3d857b8efcdc81db4c5a56d97",
+    "sha256": "39450a87ad843f3452c073139df4b6fc50db56fd7846cb8f605a32aa41621db9",
+    "isError": false
+  },
+  {
+    "file": "evidence/014-snip.json",
+    "tool": "analyze_function",
+    "arguments": {
+      "procedure": "0x1400c3300"
+    },
+    "evidence_id": "ev_cd43692a968a9cd6d1069ddfb241fe61da37c14a0146965a1402aa6338e3b1fd",
+    "sha256": "b8d39c4500d8b27999e9230da24848ba71fe2ab9fd3f71472988a9dcb8be430b",
+    "isError": false
+  },
+  {
+    "file": "evidence/015-extracttext.json",
+    "tool": "analyze_function",
+    "arguments": {
+      "procedure": "0x1400be5b0"
+    },
+    "evidence_id": "ev_d4b68cffb291f78db568f770c827967f5a006965097f1e03e3499f037bf02772",
+    "sha256": "f96465392a426564f62c25020c478251a82e5a8ffc87d2f3f5a067de690327ab",
+    "isError": false
+  },
+  {
+    "file": "evidence/016-screenshot.json",
+    "tool": "analyze_function",
+    "arguments": {
+      "procedure": "0x1400c2e50"
+    },
+    "evidence_id": "ev_2f6583d6f4d5448ddffbeb00f324287988f21d1b1395a7fd014b29ba958ac23a",
+    "sha256": "eabd2d876cbd678ec6c8e6d14154f0e6e5a67588f77b10cf250f8d724c1679ac",
+    "isError": false
+  },
+  {
+    "file": "evidence/017-oncapture.json",
+    "tool": "procedure_pseudo_code",
+    "arguments": {
+      "procedure": "0x14001b6f0"
+    },
+    "evidence_id": "ev_11fcc1e25b11fdbc374844e1b2265627cb13d30cdee604afa6420102f2a0483d",
+    "sha256": "ec6e85389bc5624c2e8203b818bd2787ca89257124d5a70992b82cb8907a639c",
+    "isError": false
+  },
+  {
+    "file": "evidence/018-onsave.json",
+    "tool": "procedure_pseudo_code",
+    "arguments": {
+      "procedure": "0x1400c0b50"
+    },
+    "evidence_id": "ev_1e986c986d2196ca9298f9d33d47d1aaed0cc8f09fc4a9f6cc59e2bacd53f341",
+    "sha256": "41cd052e1be28b9de37d16c70540f3df615a4c0b23053fa907885699d0ab7b6e",
+    "isError": false
+  },
+  {
+    "file": "evidence/019-copy.json",
+    "tool": "procedure_pseudo_code",
+    "arguments": {
+      "procedure": "0x1400bdbb0"
+    },
+    "evidence_id": "ev_59bea9c9f695832d02f89b8dad0eb954ee3a842be31d537692e441c16e87dd8f",
+    "sha256": "0f73114e1ef880fa12a3b3d26797ef2a10d522e7ad59ef146e28a7993f9bd5f3",
+    "isError": false
+  },
+  {
+    "file": "evidence/020-pin.json",
+    "tool": "procedure_pseudo_code",
+    "arguments": {
+      "procedure": "0x1400c12c0"
+    },
+    "evidence_id": "ev_a50958c78bbce84d487543af09dc2c58a0ed5071e4b39f684022579e24c95863",
+    "sha256": "39af82fe5984ca7d4eb5370aa2ed4aa430829241967dcca771b753fe34607260",
+    "isError": false
+  },
+  {
+    "file": "evidence/021-undo-handler.json",
+    "tool": "resolve_containing_procedure",
+    "arguments": {
+      "address": "0x1400c1a98"
+    },
+    "evidence_id": "ev_7f070a419d28b4510b63d1aa2c67d40b8511dd06c6b57b4e063b361afd50f9e3",
+    "sha256": "7f7b3a68fc6c4ff9ede9eb6de6bfc68f20b9684dfbd50025edfcb0e098b90cc6",
+    "isError": false
+  },
+  {
+    "file": "evidence/022-redo-handler.json",
+    "tool": "resolve_containing_procedure",
+    "arguments": {
+      "address": "0x1400c1be0"
+    },
+    "evidence_id": "ev_64bf0706dbc6f38a63d1efb27796c1b7aeb2242229c376f36c1985856d6183ed",
+    "sha256": "2740c8d5738198b2ee817a9d11283c89ca050b30b35ef34a31ffd965d7272b34",
+    "isError": false
+  },
+  {
+    "file": "evidence/023-undo-connect.json",
+    "tool": "resolve_containing_procedure",
+    "arguments": {
+      "address": "0x1400bc998"
+    },
+    "evidence_id": "ev_d9d3b4713c9a327a2a876df8a4ae2826c39759acbce155c5623a3151f43f3017",
+    "sha256": "1df48f6006723a0f45a9473dd3b2dae5a963f0f486f7e04c0aea2b61d4b355da",
+    "isError": false
+  },
+  {
+    "file": "evidence/024-redo-connect.json",
+    "tool": "resolve_containing_procedure",
+    "arguments": {
+      "address": "0x1400bca35"
+    },
+    "evidence_id": "ev_5759aaa98dea4a521ccc3007e794ff95ec680e6d4caf1461bcec09d7fc88793c",
+    "sha256": "91fd3cd88ae68ace35bba14cfbb85248046bfb20ae9f5a39ec3038680b2e9982",
+    "isError": false
+  },
+  {
+    "file": "evidence/025-text-constructor.json",
+    "tool": "procedure_pseudo_code",
+    "arguments": {
+      "procedure": "0x1400a95a0"
+    },
+    "evidence_id": "ev_a8438bc4103abd3b5d684d6ea9a35bf0553810ad3f2a5e312e6c563250e6e711",
+    "sha256": "227b21a47316a2947905eefed40a70fcab0e7e867bd6bef0ecba9e49bfebc26c",
+    "isError": false
+  },
+  {
+    "file": "evidence/026-shape-constructor.json",
+    "tool": "procedure_pseudo_code",
+    "arguments": {
+      "procedure": "0x1400a94c0"
+    },
+    "evidence_id": "ev_34294dc1b8d17214e5eb4117792a0478125204038a058874ccb401371580b5c7",
+    "sha256": "ee4087b851a8922c833a5454412df4c8b45df654991b2f6418383d23bbc74876",
+    "isError": false
+  },
+  {
+    "file": "evidence/027-add-command-constructor.json",
+    "tool": "procedure_pseudo_code",
+    "arguments": {
+      "procedure": "0x1400a7670"
+    },
+    "evidence_id": "ev_8637735eda9bf5a9b30cfb6a2178cde007a04f4810e8989793ef2c5209367c92",
+    "sha256": "612d457e5b987beacb2dcad2f6b719b441b60cc125d785485b165d3aea267073",
+    "isError": false
+  },
+  {
+    "file": "evidence/028-scene-add-wrapper.json",
+    "tool": "procedure_pseudo_code",
+    "arguments": {
+      "procedure": "0x1400a73a0"
+    },
+    "evidence_id": "ev_19950df41fe406a6e2ad0fece9837f4ec5f8d6b1fe4e7605ac8cb59f35ecb455",
+    "sha256": "49372f0009fc334a7359f544f3ff5b37b28a70de62b5d9cd84d442dd4f4c1e43",
+    "isError": false
+  },
+  {
+    "file": "evidence/029-ocr-timer-callback.json",
+    "tool": "procedure_pseudo_code",
+    "arguments": {
+      "procedure": "0x1400bf670"
+    },
+    "evidence_id": "ev_5426f9a214f359113e350844c59a79be788c08a528429ff5617415813dc6ef8c",
+    "sha256": "348b912a3a8be4cc4b7d623973db612fc8ff4412f5cfe8d50ec985899281535a",
+    "isError": false
+  },
+  {
+    "file": "evidence/030-communication-ocr.json",
+    "tool": "procedure_pseudo_code",
+    "arguments": {
+      "procedure": "0x14001ddb0"
+    },
+    "evidence_id": "ev_4a8516cff4bbfd5740bb2186bb6fd61a34fb9ea64bc4509b73139cf0be600d62",
+    "sha256": "1d38576d4f7a00a03287fcc25aa79dab304d597d0e2bcb80c53c821ad2008187",
+    "isError": false
+  },
+  {
+    "file": "evidence/031-start.json",
+    "tool": "procedure_pseudo_code",
+    "arguments": {
+      "procedure": "0x1400c3600"
+    },
+    "evidence_id": "ev_1fa8413fd6135e437958d9eda1436c1a7e9dd136015438d2a068bf630b127a9e",
+    "sha256": "5ce88fe8128ac421c93e0a1f4aa62c07e0f75ca884708994c6e76508980063f5",
+    "isError": false
+  },
+  {
+    "file": "evidence/032-screenshoter-constructor.json",
+    "tool": "procedure_pseudo_code",
+    "arguments": {
+      "procedure": "0x1400bc0e0"
+    },
+    "evidence_id": "ev_25498c124ac92352b035d3b500f869562b1188914372b290465b7e9bdaf3119d",
+    "sha256": "a08ef1de99caf925437b7b520ea5f0eeab3b985fcd88293d8f3f187f0bc15ef3",
+    "isError": false
+  },
+  {
+    "file": "evidence/033-ocr-dispatch.json",
+    "tool": "procedure_pseudo_code",
+    "arguments": {
+      "procedure": "0x14001dbc0"
+    },
+    "evidence_id": "ev_e67e45efdbe22267598a8a5a30ed3a860f72ef2927d4289c9f911569765ac4f4",
+    "sha256": "5ae0112a056d0afeefb865d79b4a1502b653c7fab6d6c7d3edd0e2a4878b5349",
+    "isError": false
+  },
+  {
+    "file": "evidence/034-created-command-references.json",
+    "tool": "procedure_references",
+    "arguments": {
+      "procedure": "0x1400a7670",
+      "direction": "outgoing"
+    },
+    "evidence_id": "ev_7ab0b7e9c76409bb2a718f01578dfa43f0fd3c860f3e07c9e35053324dcf12c3",
+    "sha256": "17b3b57e03513005d4cfbd1cf496c8ebc7f4d6972543618482a4ade5793e238c",
+    "isError": false
+  },
+  {
+    "file": "evidence/035-ocrui-metacall.json",
+    "tool": "procedure_pseudo_code",
+    "arguments": {
+      "procedure": "0x140006ce0"
+    },
+    "evidence_id": "ev_cd72c00474262ce8886d4eb31fc872e547ae0269508b349c8bb5f019a69566a2",
+    "sha256": "8705b9a001c0b4da1c7cffac362e9baa98071f5e2a48ef139513c50b3ff6514f",
+    "isError": false
+  },
+  {
+    "file": "evidence/036-ocrui-load-pixmap.json",
+    "tool": "procedure_pseudo_code",
+    "arguments": {
+      "procedure": "0x1400cb360"
+    },
+    "evidence_id": "ev_acf602e0d977c90d4b84930a49f218e5cf483d9ea3b5ab26a140b7bcc268b3ec",
+    "sha256": "8634ea0cdb0a8ad66cb352685e7a2224f744929dac568f0ea6136b6e5a80a64b",
+    "isError": false
+  },
+  {
+    "file": "evidence/037-created-command-vtable.json",
+    "tool": "read_bytes",
+    "arguments": {
+      "length": 40,
+      "address": "0x1401ad568"
+    },
+    "evidence_id": "ev_2db0d1a91c737afcf2bd527af0f58d1af05f9c16802046d8aed3ea7e18bb6d6b",
+    "sha256": "a52ea75e26cbc024d818e2dc213a571b46e7012df25f48c0274a2f0a893c8fa2",
+    "isError": false
+  },
+  {
+    "file": "evidence/038-imageview-metacall.json",
+    "tool": "procedure_pseudo_code",
+    "arguments": {
+      "procedure": "0x1400069f0"
+    },
+    "evidence_id": "ev_448e5145708521d76a94b88ea39841e22d4f082a7b35b10c027db66ab491002a",
+    "sha256": "23a092c6599d137b367b1f198f30ac0bd8c0e9fcb7f6eb79fe23c262557b84b2",
+    "isError": false
+  },
+  {
+    "file": "evidence/039-created-command-slot1.json",
+    "tool": "procedure_pseudo_code",
+    "arguments": {
+      "procedure": "0x1400a7df0"
+    },
+    "evidence_id": "ev_7744342540242464bfa3dedb05fad5faf5862e83708da2fe71dbeae217163a37",
+    "sha256": "8fb49644e10368f200fe8c502db1cbcac640240e02b5c4f819ce40b8e42668b7",
+    "isError": false
+  },
+  {
+    "file": "evidence/040-created-command-slot2.json",
+    "tool": "procedure_pseudo_code",
+    "arguments": {
+      "procedure": "0x1400a7da0"
+    },
+    "evidence_id": "ev_7fb2dfa66a280028b03dc9d629d5cfa195256f695519fdb9a9e04b092d3cc378",
+    "sha256": "d6c50fe054f63d933e33cc1340bf40d054b3504da8d8d827dbcabf57810e5d6e",
+    "isError": false
+  },
+  {
+    "file": "evidence/041-imageview-ocr-input.json",
+    "tool": "procedure_pseudo_code",
+    "arguments": {
+      "procedure": "0x1400c70b0"
+    },
+    "evidence_id": "ev_ac4837b9f21cee4edf0b300e1713482e0680792a96bda888eac0eafb266dec1a",
+    "sha256": "cd06cf0b8361f2e635f722eb2f3cc0b7cb822b4105c659f3a093f1db45447743",
+    "isError": false
+  },
+  {
+    "file": "evidence/042-ocr-engine-dispatch.json",
+    "tool": "procedure_pseudo_code",
+    "arguments": {
+      "procedure": "0x1400c6200"
+    },
+    "evidence_id": "ev_1b76fcdb50214ef67cd23cb1b7d44c6504b3599ce41bbe117294bce5ccee8473",
+    "sha256": "074b9ff5b085816dc57722c9c4a5442a37dbeaf78cdbbef31d76ada66db5de1d",
+    "isError": false
+  },
+  {
+    "file": "evidence/043-ocr-backend-job.json",
+    "tool": "procedure_pseudo_code",
+    "arguments": {
+      "procedure": "0x1400c46e0"
+    },
+    "evidence_id": "ev_281f541a4ca8815c1dd897afb32d59042f07b2c4716c91ee9cdcd0915c682df0",
+    "sha256": "7a8d98bc4342ba4b6a6cb3caacde0a0e72e9494cc20777ef98b604d55c7297cf",
+    "isError": false
+  },
+  {
+    "file": "evidence/044-offline-availability.json",
+    "tool": "procedure_pseudo_code",
+    "arguments": {
+      "procedure": "0x140036860"
+    },
+    "evidence_id": "ev_aca90997a282a7d50a95cff060530c3dc2dd7eb26208b31b024d7345bdde86c0",
+    "sha256": "d37fa6923b5c69210d2de1e3d61d63099988bb6ca52cb212145371f9f5a6bfea",
+    "isError": false
+  },
+  {
+    "file": "evidence/045-paddleocr-initialize.json",
+    "tool": "procedure_pseudo_code",
+    "arguments": {
+      "procedure": "0x1400935e0"
+    },
+    "evidence_id": "ev_60a68c22f7c4f213a77ebfa51698188c6d790ff7e730ba63e5e0dc7fde37200e",
+    "sha256": "e014dd81ad792d06f148bfdc17adeca6643fe35f60d00885f6eb8fae564e0c74",
+    "isError": false
+  },
+  {
+    "file": "evidence/046-paddleocr-call.json",
+    "tool": "procedure_pseudo_code",
+    "arguments": {
+      "procedure": "0x140094360"
+    },
+    "evidence_id": "ev_a7df5768b6ea2e28f5823d3ac334e74f2132b80d191478d36b419a171d3409dd",
+    "sha256": "eefb65809c7474499b5bd9318eb6c393f56287c140d7f4cf40f221dd2504b36a",
+    "isError": false
+  },
+  {
+    "file": "evidence/047-paddleocr-library-bindings.json",
+    "tool": "procedure_pseudo_code",
+    "arguments": {
+      "procedure": "0x140093f60"
+    },
+    "evidence_id": "ev_3f35b9a9b8519972b64e252743fe42e02d5fe6a3c578b4fb2f8a08669a2b07b0",
+    "sha256": "a25d5a1c18de9a39bda568af4cd6fc63f20de5348d7cbe6bbe00102936bc3dbb",
+    "isError": false
+  },
+  {
+    "file": "evidence/048-export.json",
+    "tool": "export_evidence_bundle",
+    "arguments": {
+      "path": "C:\\Users\\Axel_desktop\\.t3\\worktrees\\kapture\\t3-f80e737e\\docs\\kairos\\reverse\\native\\rea-evidence-bundle.json"
+    },
+    "evidence_id": null,
+    "sha256": "79f6794a7d10c3060201f179971c9780ef27920f5cdd2c79fde67a35d764cd81",
+    "isError": false
+  },
+  {
+    "file": "evidence/049-close.json",
+    "tool": "close_binary",
+    "arguments": {},
+    "evidence_id": null,
+    "sha256": "6808826e0eacde0a4f9b786913f274360a3358b7accc2c7c11590b08427c5549",
+    "isError": false
+  }
+]
