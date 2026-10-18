@@ -26,6 +26,10 @@ Beide Bilder zeigen einen hellen ausgewählten Bildbereich, abgedunkelten Außen
 
 Im Deepin-Bild ist das Textwerkzeug aktiv. Die zweite Werkzeugzeile zeigt Schriftstil, Schriftfamilie, Schriftgröße und Farben. Im macOS-Bild ist ein Rechteckwerkzeug aktiv; die Eigenschaftenzeile zeigt Kontur/Füllung, Strichstärke und Farbpalette. Damit ist eine kontextabhängige Eigenschaftenleiste visuell belegt. Wiedereditieren, Verschieben, Größenänderung bereits angelegter Objekte und Exporttreue sind aus diesen Standbildern nicht nachgewiesen.
 
+## Ergänzende direkte Windows-Beobachtung
+
+Nach Bereitstellung der Bilder konnte Root das normale Einstellungsfenster erstmals als zurückgegebenes Computer-Use-Fenster auswählen (`Settings`, HWND `29498754`, Prozess `72416`, vorgegebener SunnyCapturer-Pfad). Die erste Aufnahme vor Aktivierung enthielt fremden Hintergrund und wurde verworfen; nach Aktivierung waren die Seite Devices und anschließend per Navigation „Über“ sichtbar. Die Versionsseite zeigt **SunnyCapturer, Version 5.3.0, Copyright © 2021–2025**. Der Dateihash der EXE wurde erneut unverändert geprüft. Dies ist eine direkte UI-Versionsangabe, keine nachträglich erfundene PE-VERSIONINFO. Die Accessibility-Ausgabe enthält nur Fenster/Titelleiste; die Inhalte wurden visuell gelesen. Es wurden keine Aufnahme, OCR-Anfrage oder Einstellungswertänderung ausgeführt. Die vollständige Windows-Editor-Prüfung bleibt offen.
+
 ## Folgen für Kairos
 
 Der Kernablauf lautet Aufnahme → direktes Editieren → gemeinsame Bitmap für Kopieren, Speichern und explizit ausgelöste OCR. Die eigene erste Windows-Fassung verwendet Strg+Alt+A statt Sunnys bereits belegtem F1. Annotationen bleiben bis zur Ausgabe getrennte, auswählbare und veränderbare Objekte. Eine deckende Schwärzung erhält einen eigenen Werkzeugtyp. Farbschema und Gestaltung kommen aus der ursprünglichen dunklen Violett-/Lavendel-/Gold-Vorlage.
