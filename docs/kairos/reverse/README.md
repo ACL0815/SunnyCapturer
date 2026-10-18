@@ -46,6 +46,8 @@ Methodennamen sind durch Qt-MOC-Indizes und dekompilierte Dispatcher verknüpft.
 
 ## Laufzeitgrenze dieser Untersuchung
 
+Die später vom Nutzer gelieferten 13 Bilder sind in [UI-BELEGE.md](UI-BELEGE.md) mit einem [Hashverzeichnis](ui-evidence.json) ausgewertet. Elf Einstellungsbilder ergänzen die sichtbare Konfiguration; zwei Linux-/macOS-Bilder dienen als Editorreferenz. Sie schließen die offene Windows-Bediensequenz nicht automatisch.
+
 Die vorhandene Sitzung war bereits vor der Untersuchung gestartet. [runtime-modules.json](runtime-modules.json) hält eine an EXE-Pfad und Dateihash gebundene Windows-Prozessstichprobe fest. Qt und FFmpeg sind darin geladen. `sunny_ocr.dll`, Paddle und cuDNN sind in dieser Stichprobe nicht geladen; sie können später dynamisch hinzukommen. Diese Aussage betrifft nur die Modulaufnahme, nicht alle bisherigen oder zukünftigen Programmzustände.
 
 Ein erneuter Start über das Windows-Werkzeug meldete `launched app did not expose a targetable window`. Der dokumentierte F1-Weg erzeugte danach ein sichtbares Auswahl-/Lupenbild; Windows lieferte für den Zielprozess HWND `665704`. Eine auf dieses HWND begrenzte Aufnahme zeigte das Overlay. Das Windows-Automationswerkzeug bot dieses randlose Fenster trotzdem nicht als auswählbares Fenster an. Ein über das zuvor gebundene Explorer-Fenster gesendetes Escape ist deshalb kein verifizierter Abbruch. Die gezielte Nutzerübergabe zum Schließen/Öffnen der Einstellungen wurde angefragt.

@@ -1,0 +1,130 @@
+{
+  "recorded_at": "2026-10-18",
+  "source": "User attachments in Weiter message",
+  "method": "PNG header and SHA256; visible UI transcribed by root",
+  "limitations": [
+    "No original pixels copied into Git",
+    "User-provided images are not bound to the installed executable hash",
+    "Linux/macOS reference images do not prove installed Windows runtime behavior",
+    "Selected settings are snapshots, not manufacturer defaults or a test of the corresponding feature"
+  ],
+  "images": [
+    {
+      "id": "settings-general",
+      "source_kind": "user-windows-settings",
+      "path": "C:\\Users\\Axel_desktop\\.t3\\userdata\\attachments\\97cc3309-5721-48c0-984b-21dc6de14109-750e17bc-1bb3-4d3b-926f-115b2a075f1d.png",
+      "bytes": 27293,
+      "sha256": "3650b7e1511731be961091c5c44b4e7aa5c97c2aa684d3cf707dda7fe4e9ea6c",
+      "width": 942,
+      "height": 494
+    },
+    {
+      "id": "settings-hotkeys",
+      "source_kind": "user-windows-settings",
+      "path": "C:\\Users\\Axel_desktop\\.t3\\userdata\\attachments\\97cc3309-5721-48c0-984b-21dc6de14109-7e8dd2f1-3778-436f-985d-673a0d756419.png",
+      "bytes": 34901,
+      "sha256": "7fe625c6ee98b18a39128d03a3ad19e9066c964b42123b6d84f222d277ce96ff",
+      "width": 942,
+      "height": 494
+    },
+    {
+      "id": "settings-screenshot-appearance",
+      "source_kind": "user-windows-settings",
+      "path": "C:\\Users\\Axel_desktop\\.t3\\userdata\\attachments\\97cc3309-5721-48c0-984b-21dc6de14109-24516f2c-fda2-40f5-a802-5dcd0b3c33b7.png",
+      "bytes": 33316,
+      "sha256": "ed60f3a3b17c1961b1c0dfe1851dc685583d5025a49fe6195e44b40287bc05d4",
+      "width": 942,
+      "height": 494
+    },
+    {
+      "id": "settings-screenshot-manual-quick-save",
+      "source_kind": "user-windows-settings",
+      "path": "C:\\Users\\Axel_desktop\\.t3\\userdata\\attachments\\97cc3309-5721-48c0-984b-21dc6de14109-e9c9d05b-dc33-4709-91c9-8f661b7d708a.png",
+      "bytes": 43798,
+      "sha256": "bf6a4707334666b00de8e40f0ad43e471d628681549b659c34810b75371cc8a5",
+      "width": 942,
+      "height": 494
+    },
+    {
+      "id": "settings-screenshot-quick-auto-save",
+      "source_kind": "user-windows-settings",
+      "path": "C:\\Users\\Axel_desktop\\.t3\\userdata\\attachments\\97cc3309-5721-48c0-984b-21dc6de14109-66b633db-d723-446e-a70e-e1fc3fc40439.png",
+      "bytes": 43736,
+      "sha256": "f4efc200960cccc97bc5271152724d9399d3a84390e26a77bd858f4a8037ab55",
+      "width": 942,
+      "height": 494
+    },
+    {
+      "id": "settings-video-appearance",
+      "source_kind": "user-windows-settings",
+      "path": "C:\\Users\\Axel_desktop\\.t3\\userdata\\attachments\\97cc3309-5721-48c0-984b-21dc6de14109-12a57352-1bef-4a4b-ab6f-00e6a6056ba9.png",
+      "bytes": 35690,
+      "sha256": "bf2a7c93c1d6c14f282be1077d6b0c80914da4b1e4dae5bcf8b0c75c2d197732",
+      "width": 942,
+      "height": 494
+    },
+    {
+      "id": "settings-video-default-capture",
+      "source_kind": "user-windows-settings",
+      "path": "C:\\Users\\Axel_desktop\\.t3\\userdata\\attachments\\97cc3309-5721-48c0-984b-21dc6de14109-20a877bc-f998-472e-840b-efa3e9e31afd.png",
+      "bytes": 34914,
+      "sha256": "5f71cf0941ebb72d57325f7e3717ef5593092b69621ba572ac4eb870e71acc75",
+      "width": 942,
+      "height": 494
+    },
+    {
+      "id": "settings-video-encoding",
+      "source_kind": "user-windows-settings",
+      "path": "C:\\Users\\Axel_desktop\\.t3\\userdata\\attachments\\97cc3309-5721-48c0-984b-21dc6de14109-5bbec613-4b89-4fe5-b65b-f24146933002.png",
+      "bytes": 37053,
+      "sha256": "5b3990660f7d5e4e899138c83466d0ccc9c0494166a0cc78fd07f64c45f62772",
+      "width": 942,
+      "height": 494
+    },
+    {
+      "id": "settings-devices",
+      "source_kind": "user-windows-settings",
+      "path": "C:\\Users\\Axel_desktop\\.t3\\userdata\\attachments\\97cc3309-5721-48c0-984b-21dc6de14109-7d3756cb-7136-4a9c-9cc2-92578c41b8be.png",
+      "bytes": 27070,
+      "sha256": "6b3057d9a249213d99aee44ac2501cf2ea396d67d493602f08c10b8b2228516f",
+      "width": 942,
+      "height": 494
+    },
+    {
+      "id": "settings-ocr",
+      "source_kind": "user-windows-settings",
+      "path": "C:\\Users\\Axel_desktop\\.t3\\userdata\\attachments\\97cc3309-5721-48c0-984b-21dc6de14109-a9d026ad-9050-40b9-a0d9-3b36855bfab5.png",
+      "bytes": 26650,
+      "sha256": "d84cfb92da790034cb3767d466719896d7ffdd5dedcd7bd9420a693ebd29868e",
+      "width": 942,
+      "height": 494
+    },
+    {
+      "id": "settings-translation",
+      "source_kind": "user-windows-settings",
+      "path": "C:\\Users\\Axel_desktop\\.t3\\userdata\\attachments\\97cc3309-5721-48c0-984b-21dc6de14109-813bf4e1-5153-4c7d-91da-c10dc03bf392.png",
+      "bytes": 33054,
+      "sha256": "38d7aa0415072d3d241b188167e000eb9a93883d5d49fda93758a65efb19615f",
+      "width": 942,
+      "height": 494
+    },
+    {
+      "id": "editor-deepin-reference",
+      "source_kind": "user-linux-reference",
+      "path": "C:\\Users\\Axel_desktop\\.t3\\userdata\\attachments\\97cc3309-5721-48c0-984b-21dc6de14109-7dbd9ed7-9b25-4d6b-ad4a-9c240a7ee81c.png",
+      "bytes": 2239815,
+      "sha256": "eb5959cd5f4d91b5f14df9f6fff4ab5c78f6166eca800c9af6808810ffc1228e",
+      "width": 2000,
+      "height": 1125
+    },
+    {
+      "id": "editor-macos-reference",
+      "source_kind": "user-macos-reference",
+      "path": "C:\\Users\\Axel_desktop\\.t3\\userdata\\attachments\\97cc3309-5721-48c0-984b-21dc6de14109-246dbf33-30d8-4d3a-8e81-e71ee1102ab8.png",
+      "bytes": 1449850,
+      "sha256": "a4ff657080b1a88121ee3e0105505ca1261a131ee6ae9d91992c84708315a1c1",
+      "width": 2000,
+      "height": 1250
+    }
+  ]
+}
