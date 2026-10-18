@@ -258,3 +258,11 @@ $RECYCLE.BIN/
 *.lnk
 
 # End of https://www.toptal.com/developers/gitignore/api/vue,hexo,linux,macos,vuejs,windows,visualstudiocode,node
+
+# Kairos Capture (.NET)
+**/bin/
+**/obj/
+artifacts/
+test-results/
+.tools/
+*.user
