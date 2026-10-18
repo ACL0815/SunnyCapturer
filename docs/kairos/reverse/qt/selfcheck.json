@@ -1,0 +1,39 @@
+{
+  "status": "passed",
+  "synthetic_valid_sha256": "d5109690309c7d03e09e6f5a5db8594f98b819ece67c16190c5a3ef18dee9669",
+  "positive": [
+    "UTF-8 source/context",
+    "UTF-16BE including surrogate pair",
+    "multiple translation forms",
+    "null distinct from empty",
+    "record/hash/field offsets and SHA-256",
+    "ELF lookup hashes"
+  ],
+  "rejected": [
+    {
+      "case": "bad_magic",
+      "input_sha256": "2a64609a6a110747d6fe702f71a9ba0485357348eff0eee1fb62bdb2dea978ce",
+      "error": "QM magic missing or truncated"
+    },
+    {
+      "case": "truncated_messages_block",
+      "input_sha256": "4a0e5d1af7e6736f4d99edb5f9434ad32b3ccfe356392f2e0ee1fc74eff28b4f",
+      "error": "block exceeds file at 0x2f"
+    },
+    {
+      "case": "oversized_translation",
+      "input_sha256": "9fa700b83dd083900b5009ef3073dbc7a007a827fe99b2f02b22cef1b29523f9",
+      "error": "field exceeds messages block at 0x34"
+    },
+    {
+      "case": "hash_points_into_record",
+      "input_sha256": "01032a0ed73f5e72996d7fa8eb743f591ea217786989b11a2bfc28267a1e0a38",
+      "error": "hash offset is not a message start at 0x27"
+    },
+    {
+      "case": "odd_utf16_length",
+      "input_sha256": "b062112fd7617557e7e4e330b576ca54019f1aa98b5c17052764986bbcc9e94e",
+      "error": "odd UTF-16 byte length at 0x34"
+    }
+  ]
+}
