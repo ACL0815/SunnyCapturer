@@ -2,33 +2,35 @@
 
 Stand 18.10.2026 · Lead-Architektur Claude Opus 5.5, Ponytail-Stufe *full* · Status: **Entscheidungsvorschlag, nicht implementiert**
 
+Root-Endabnahme: Importbefunde sind unten auf statische Hinweise begrenzt; weder ausgeführte DPI-/Capture-Aufrufe noch die Zulassung einer privaten OpenAI-App werden daraus abgeleitet. Eine feste Null-Pakete-Regel ist kein Grund, eine eigene OIDC-Validierung zu bauen.
+
 Im Checkout gibt es kein `src/`. `KAIROS.md` und `docs/kairos/ARCHITEKTUR.md` beschreiben ein geplantes WPF-Programm. Sie belegen weder einen Build noch eine Messung und wurden hier nicht geändert. Dieses Dokument trennt deshalb strikt zwischen **Beobachtung** (gelesene Bytes, Doku-Wortlaut, Befehlsausgabe), **Inferenz** und **offen**.
 
 ## 1. Ergebnis
 
-1. **Empfehlung: C# + WPF auf .NET 10 (LTS)**, ein Projekt, ein Prozess. Für das MVP genügen die Bibliotheken des Shared Framework, Drittpakete sind nicht vorgesehen. Den Ausschlag gibt nicht Geschwindigkeit, denn die ist für keine Option gemessen. Den Ausschlag geben die wenigsten beweglichen Teile: eine Sprache, keine IPC-Grenze, keine Lizenzpflichten. Capture, OAuth, Krypto, DPAPI und JSON sind im Framework enthalten.
+1. **Empfehlung: C# + WPF auf .NET 10 (LTS)**, ein Projekt, ein Prozess. Zusätzliche UI-Frameworks sind für das MVP nicht erforderlich. Den Ausschlag gibt nicht gemessene Geschwindigkeit, sondern die erwartete geringe Integrationsarbeit: C# mit XAML, keine eigene Web-/Native-IPC-Grenze, direkter Zugang zu Windows. .NET liefert HTTP-, Krypto-, DPAPI- und JSON-Bausteine; ein vollständiger, sicher validierter OAuth-/OIDC-Client ist damit noch nicht implementiert. Eine gepflegte Validierungsbibliothek ist zulässig, wenn sie eigenen Sicherheitscode reduziert. Die verwendeten Bibliotheken behalten ihre Lizenzbedingungen.
 2. **Ernsthafte Alternative: C++ + Qt 6.** SunnyCapturer selbst belegt statisch genau dieses Editor-Muster: Graphics-Items, `QUndoStack`, editierbare Textitems. Qt bringt für direktes Objekt-Editieren mehr fertige Bausteine mit als WPF. Bei den Kippkriterien in Abschnitt 4 wird gewechselt.
-3. **Tauri und Electron scheiden für dieses Ziel aus.** Beide brauchen eine Web-UI und schieben große Bitmaps über eine Prozess- oder IPC-Grenze. Electron bündelt zusätzlich Chromium und Node.js.
-4. **OCR läuft über OpenAI „Sign in with ChatGPT“ (Open-Source-Flow).** Das ist ein eigener, belegpflichtiger Vertrag (Abschnitt 6). Er ist dokumentiert, aber nur für Open-Source- bzw. lokal gehostete Apps vorgesehen. Private Codex-Tokens werden nie gelesen.
-5. Den Wert für die Kostenseite liefert ein Befund aus SunnyCapturer: **Paddle und cuDNN machen allein 86,25 % der 3,25 GiB Installation aus.** Cloud-OCR spart Kairos diesen Ballast vollständig.
+3. **Tauri und Electron werden für dieses erste Windows-Ziel zurückgestellt.** Beide bringen eine Web-Oberfläche und zusätzliche Prozess-/Integrationsgrenzen mit. Wie viele Bildkopien dabei tatsächlich anfallen, hängt vom gewählten Transferweg ab und ist nicht gemessen. Electron bündelt zusätzlich Chromium und Node.js.
+4. **OCR soll über OpenAI „Sign in with ChatGPT“ laufen.** Das ist ein eigener, belegpflichtiger Vertrag (Abschnitt 6). Die Dokumentation beschreibt den öffentlichen Weg für quelloffene und lokal gehostete Apps; die konkrete Zulassung einer privaten Kairos-App ist daraus nicht geklärt. Private Codex-Tokens werden nie gelesen.
+5. Einen Befund zur Dateimenge liefert SunnyCapturer: **Paddle und cuDNN machen allein 86,25 % der 3,25 GiB Installation aus.** Eine reine OpenAI-OCR benötigt diese lokalen Bibliotheken nicht. Kairos' gesamte Auslieferungsgröße muss trotzdem gemessen werden.
 
 ## 2. Belegbasis
 
 ### 2.1 SunnyCapturer, statisch (keine Laufzeitverbindungen behauptet)
 
 Artefakt: `SunnyCapturer.exe`, x64 PE32+, 3.507.712 Bytes, SHA-256 `e97cc2612b79ab154076844a13ec01cdeb70be0f14cf20675ce0e39dff81ecc8`.
-Quellen: eigene Prüfung (REA `inspect_pe_resources`, `pefile`-Importliste, String-Suche ASCII/UTF-16LE) und der Root-Bericht [`static/REPORT.de.md`](static/REPORT.de.md). Der Bericht liegt im Parent-Checkout und ist nicht Teil dieses Commits.
+Quellen: eigene Prüfung von Opus (REA `inspect_pe_resources`, `pefile`-Importliste, String-Suche ASCII/UTF-16LE), der integrierte Root-Bericht [`static/REPORT.de.md`](static/REPORT.de.md) und die von Root gegen Originalbytes geprüften [Zusatzbefunde](architecture-extra-evidence.json). Letztere enthalten Manifest, Linker-Version sowie die begrenzten Literal-Suchbereiche und Offsets. Keine davon beweist Laufzeitaufrufe.
 
 | Beobachtung | Bedeutung für Kairos |
 | --- | --- |
 | 107 Dateien, 3.489.366.381 Bytes. `paddle_inference.dll` 1.964.766.720 B + 8× `cudnn*` 1.044.825.472 B = 86,25 %. Qt6-DLLs im Wurzelordner 29.670.328 B. FFmpeg (5× `av*`) 157.078.528 B. PP-OCRv4-Modelle 15.876.085 B. | Lokale OCR ist der Größentreiber, nicht das UI-Framework. Video/GIF (FFmpeg, Media Foundation) gehört nicht ins MVP. |
 | `Qt6Core.dll` VERSIONINFO `6.8.3.0`, in der EXE außerdem `qt_version`/`6.8.3`. | Referenz-App ist Qt 6.8, C++, Linker-Version 14.44 laut PE-Header. |
-| Manifest: nur `asInvoker`, **kein** `dpiAware`-Eintrag. Imports `SetThreadDpiAwarenessContext`, `GetDpiForWindow`, `GetSystemMetricsForDpi`, `EnumDisplayMonitors`, `GetMonitorInfoW`. String `QT_ENABLE_HIGHDPI_SCALING`. | DPI-Modus wird zur Laufzeit gesetzt, laut Qt-Doku standardmäßig Per-Monitor V2. Der tatsächliche Modus ist offen. |
+| Manifest: nur `asInvoker`, **kein** DPI-Awareness-Eintrag. Imports `SetThreadDpiAwarenessContext`, `GetDpiForWindow`, `GetSystemMetricsForDpi`, `EnumDisplayMonitors`, `GetMonitorInfoW`. String `QT_ENABLE_HIGHDPI_SCALING`. | Ein im Manifest deklarierter DPI-Modus ist hier nicht belegt. Die Imports ermöglichen Laufzeitsteuerung, beweisen ihren Aufruf aber nicht. Qt dokumentiert standardmäßig Per-Monitor V2; der tatsächliche Modus dieser Sitzung ist offen. |
 | Imports `QScreen::grabWindow`, `d3d11!CreateDirect3D11DeviceFromDXGIDevice`, `RoGetActivationFactory`. Buildpfad `…cppwinrt\winrt/Windows.Graphics.Capture.h`, RTTI `WindowsGraphicsCapturer`. Quelldateinamen `screenshoter.cpp`, `screenrecorder.cpp`. | Zwei Capture-Wege sind kompiliert vorhanden. Welcher Weg Standbilder liefert, ist **offen**. Ein WGC-Pfad kann auch nur dem Recorder dienen. |
-| `SetWindowDisplayAffinity`, `RegisterHotKey`, `SetWindowsHookExW`, `DwmGetWindowAttribute`, `EnumChildWindows`. | Eigene Fenster werden aus dem Capture ausgeschlossen, dazu globale Hotkeys und Fenster-Snapping. Alles ist Win32 und von jedem Framework aus erreichbar. |
+| `SetWindowDisplayAffinity`, `RegisterHotKey`, `SetWindowsHookExW`, `DwmGetWindowAttribute`, `EnumChildWindows`. | Diese Win32-Imports passen zu Fensterausschluss, globalen Hotkeys und Fenstererkennung. Die konkrete Nutzung und ein funktionierender Ausschluss sind ohne Aufruf- oder Laufzeitevidenz offen. |
 | RTTI `canvas::Canvas`, `GraphicsItemWrapper`, `GraphicsTextItem`, `CreatedCommand`, `MoveCommand`, `ResizeCommand`, `RotateCommand`, `DeleteCommand`. Imports `QUndoStack::push/undo/redo`, `QGraphicsTextItem::setTextInteractionFlags`. 51 Qt-Metaobjekte (Root). | Starkes Indiz für objektbasierte, direkt editierbare Annotation mit Command-Undo. Der Ablauf selbst ist **nicht** bewiesen (keine Xrefs). |
 | Label `Blur/Mosaic (Ctrl+5)`. v1.x-Quelle (`capturehelper.cpp:490–505`): Blur über `QGraphicsBlurEffect`, doppelt gerendert. | Weichzeichnen ist keine sichere Schwärzung. Kairos schwärzt deckend (Abschnitt 5.4). |
-| `sunny_ocr.dll` fehlt in der Importliste, String `/sunny_ocr.dll` vorhanden, `QLibrary::load/resolve`. Exports `ImageOcrProcess`, `ImageOcrProcessWithArgs`, `FreeReturnPtr`, `add`. Cloud-OCR Baidu/Tencent/Youdao, **kein** OpenAI. | Die lokale OCR wird dynamisch nachgeladen. Root-Prozessstichprobe: `sunny_ocr`/Paddle/cuDNN *nicht* geladen. Das ist eine Stichprobe, kein Ablauf. |
+| `sunny_ocr.dll` fehlt in der Importliste, String `/sunny_ocr.dll` vorhanden, `QLibrary::load/resolve`. Exports `ImageOcrProcess`, `ImageOcrProcessWithArgs`, `FreeReturnPtr`, `add`. Cloud-OCR-Labels nennen Baidu/Tencent/Youdao. | Dynamisches Nachladen ist stark gestützt, aber hier noch kein nachgewiesener Codepfad. Eine vollständige Abwesenheit von OpenAI wird aus dieser begrenzten Suche nicht behauptet. Root-Prozessstichprobe: `sunny_ocr`/Paddle/cuDNN *nicht* geladen. |
 | Strings `https://8.137.12.26:5000/add_data`, `wmic baseboard get serialnumber`, `application/json`. | **Ob und wann** gesendet wird, ist nicht belegt. Für Kairos gilt als Regel: keine Telemetrie, keine Hardware-IDs. |
 | v1.x-Quelle: `std::vector<PaintNode> m_undo/m_redo` (`screenshot.h:145–146`), Capture `primaryScreen()->grabWindow(...)` mit *einer* globalen `devicePixelRatio` (`capturehelper.cpp:498–512`). v3/v5 im Checkout: nur README. | Die alte Generation zeigt die typische Mixed-DPI-Falle mit einem globalen Faktor. Die aktuelle Struktur ist eine andere, die alte Quelle ist kein Bauplan. |
 
@@ -72,18 +74,18 @@ Bewertet wird nach Belegen und Strukturmerkmalen. Laufzeit- und Speicherwerte si
 | --- | --- | --- | --- | --- |
 | **Codeumfang / bewegliche Teile** | Eine Sprache (C# + XAML), ein Prozess, MVP ohne Drittpakete möglich (2.2). | Eine Sprache (C++), CMake, `windeployqt`. Sunny liefert zusätzlich OpenSSL-DLLs (5,3 MB) mit. | Zwei Sprachen (Rust + TS/HTML), IPC-Schicht, npm- und cargo-Toolchain. | Eine Sprache (TS/JS), aber Main-/Renderer-Grenze. Capture und Hotkeys brauchen Electron-APIs oder ein natives Addon. |
 | **Direkt editierbares Objektmodell** | Hit-Testing (Geometrie), Adorner, `TextBox`, `RenderTargetBitmap` sind fertig. Auswahl-Handles und Undo sind eigener Code. | **Am meisten fertig:** `QGraphicsScene`/`Item` (Auswahl, Bewegen, Rubberband), `QGraphicsTextItem`, `QUndoStack`. Von Sunny statisch genutzt. | Canvas/SVG im Browser plus eigenes Modell in JS. Gut machbar, aber die Bitmap liegt jenseits der IPC-Grenze. | Wie Tauri, ohne Sprachwechsel. |
-| **Capture / DPI / Monitore** | Win32 per P/Invoke (BitBlt, `EnumDisplayMonitors`, `WDA_EXCLUDEFROMCAPTURE`). Per-Monitor ab 1607. **Risiko:** WPF-Fenster über Monitore mit gemischter DPI (Spike S1). | Native Win32 plus Qt; PMv2 Standard. **Risiko:** Qt-Doku nennt Geometrielücken unter Windows. Sunny zeigt, dass es lösbar ist. | Capture in Rust (Win32/WGC). 4K-BGRA sind 3840×2160×4 = 33.177.600 Bytes je Monitor, die per IPC in den Webview müssen. | `desktopCapturer` oder natives Addon. Pixelgenaue Vollauflösung ist erst nachzuweisen. |
+| **Capture / DPI / Monitore** | Win32 per P/Invoke (BitBlt, `EnumDisplayMonitors`, `WDA_EXCLUDEFROMCAPTURE`). Per-Monitor ab 1607. **Risiko:** WPF-Fenster über Monitore mit gemischter DPI (Spike S1). | Native Win32 plus Qt; PMv2 Standard. **Risiko:** Qt-Doku nennt Geometrielücken unter Windows. Sunny-Mixed-DPI ist hier ungetestet. | Capture in Rust (Win32/WGC). Unkomprimiertes 4K-BGRA hat 33.177.600 Bytes je Monitor. Format, Transferweg und Zahl der Kopien sind Implementierungsfragen. | `desktopCapturer` oder natives Addon. Pixelgenaue Vollauflösung ist erst nachzuweisen. |
 | **Warmstart (Hotkey → Overlay)** | Tray-resident. JIT bei erster Nutzung, durch ReadyToRun milderbar (Doku). | Nativ, kein JIT. Hypothetisch der kleinste Kaltstart. | Webview-Prozessgruppe vorgewärmt. Bildtransfer über IPC ist der kritische Pfad. | Chromium vorgewärmt. Gleicher IPC-Vorbehalt. |
 | **Speicher** | Ein Prozess plus CLR/WPF. Nicht gemessen. | Ein Prozess. Nicht gemessen. | Rust-Prozess plus WebView2-Prozessgruppe (Doku: mehrere Prozesse). | Main plus Renderer plus GPU usw. (Doku). |
 | **Deployment** | Frameworkabhängig: kleine Ausgabe, braucht die Desktop Runtime 10 (hier vorhanden). Self-contained ohne Trimming → groß (Größe messen). | `windeployqt`: Qt-DLLs + Plugins (Sunny: ≈ 29,7 MB DLLs + Plugins). LGPLv3-Pflichten oder kommerzielle Lizenz. | Kleinstes Paket (Herstellerangabe), WebView2 in Windows 11 enthalten. | Chromium gebündelt, laut Hersteller meist > 100 MB. |
 | **Stabilität** | Speichersicherer Code, ausgereiftes Framework, globale Exception-Hooks. | Speicherunsicheres C++; Sunny-Import `dbghelp` deutet auf Crashdump-Behandlung (Inferenz). | Rust speichersicher, Webview separat. Zwei Laufzeiten bedeuten zwei Fehlerklassen. | Ausgereift, aber die größte Angriffs- und Updatefläche. |
 | **„Cooles Design“** | XAML-Styles, Verläufe, `DropShadowEffect` als Glow, Templates. | QSS + `QPainter`; Glow ist Handarbeit. | CSS, stärkste Gestaltungsfreiheit. | CSS. |
 
-Dass die Tabelle für Qt mehr fertige Editor-Bausteine ausweist, ist bewusst so stehen gelassen. Für WPF spricht trotzdem die Summe aus einer Sprache, Speichersicherheit, keinen Lizenzpflichten und eingebauter Unterstützung für OAuth und Token-Schutz. Dazu kommt die vorhandene Runtime. Der fehlende Editor-Komfort lässt sich mit wenig Code ersetzen (Abschnitt 5), ein Speicherfehler in C++ dagegen nicht.
+Qt bietet mehr fertige Editor-Bausteine. Für WPF sprechen hier das erwartete einfache Windows-Deployment, C# als überwiegende Logiksprache und die vorhandene Runtime. Wie viel eigener Editorcode nötig wird, entscheidet der Prototyp; „wenig Code“ ist noch kein gemessenes Ergebnis. Native P/Invoke-Grenzen brauchen auch in C# sorgfältige Prüfung.
 
 ## 4. Entscheidung, Alternative, Kippkriterien
 
-**Entscheidung:** WPF/.NET 10, frameworkabhängig, `win-x64`, Per-Monitor V2 per Manifest. ReadyToRun wird nur eingeschaltet, wenn A2 (Abschnitt 8) ohne R2R verfehlt wird.
+**Entscheidungsvorschlag:** WPF/.NET 10, frameworkabhängig, `win-x64`, Per-Monitor V2 per Manifest. ReadyToRun wird nur geprüft, wenn A2 oder A4 (Abschnitt 9) verfehlt wird und Profiling JIT/ersten Codeaufruf als relevante Ursache zeigt.
 
 **Alternative:** Qt 6 (C++), Muster wie Sunny: `QGraphicsScene` + `QUndoStack` + `QGraphicsTextItem`.
 
@@ -95,14 +97,14 @@ Dass die Tabelle für Qt mehr fertige Editor-Bausteine ausweist, ist bewusst so 
 
 **Kippen unabhängig vom Framework:**
 
-- **K4 OAuth:** Kairos soll proprietär, bezahlt oder remote gehostet werden. Der Open-Source-Flow deckt das nicht ab, für diese Fälle verweist die Doku auf ein Interessenformular. Dann OCR über einen vom Nutzer eigenen API-Schlüssel oder offline (K5).
+- **K4 OAuth:** Der vorgesehene Veröffentlichungs-/Betriebsmodus oder das konkrete Konto erhält keine ChatGPT-Plan-Freigabe. Die Doku verweist bei bezahlten oder remote gehosteten Apps auf ein Interessenformular; die Berechtigung einer privaten lokalen App ist gesondert zu klären. Ein eigener API-Schlüssel oder Offline-OCR wäre eine bewusste alternative Produktentscheidung, kein stiller Ersatz.
 - **K5 Offline-OCR:** wird Pflicht. Zuerst Windows `OcrEngine` (Systembestandteil, kein Bundle). Paddle (Sunny-Weg, 86 % der Installation) nur, wenn dessen Qualität messbar nicht reicht.
 
 Tauri wird erst geprüft, wenn eine vorhandene Web-UI wiederverwendet werden muss. Electron wird nicht weiter verfolgt.
 
 ## 5. Minimale Architektur
 
-### 5.1 Module (ein Projekt, fünf Dateien Logik als Budget)
+### 5.1 Module (ein Projekt, fünf Verantwortungsbereiche)
 
 | Modul | Aufgabe | Plattformmittel |
 | --- | --- | --- |
@@ -112,7 +114,7 @@ Tauri wird erst geprüft, wenn eine vorhandene Web-UI wiederverwendet werden mus
 | `Ocr` | OAuth-Loopback mit PKCE, Token-Speicher, Modelliste, Responses-Stream | `HttpListener`, `SHA256`, `RSA`, `HttpClient`, `System.Text.Json`, `ProtectedData` (alles im Shared Framework) |
 | `App` | Tray, Fenster, Theme-Ressourcen | WPF + `NotifyIcon` aus WinForms (im WindowsDesktop-Framework) |
 
-Ausgelassen: Settings-Fenster, Plugin-System, DI-Container, MVVM-Framework und Logging-Framework. Diese Teile kommen erst, wenn der zweite echte Bedarf auftritt.
+Ausgelassen: separates Settings-Fenster, Plugin-System, DI-Container, MVVM-Framework und Logging-Framework. Notwendige Kontoauswahl, Abmelden, Fehleranzeige und sichere Tokenverwaltung gehören trotzdem zum OCR-Ablauf. Eine etablierte OIDC-/JWT-Validierungsbibliothek darf eigenen Sicherheitscode ersetzen; ein Null-Pakete-Ziel hat hier keine Vorrangstellung.
 
 ### 5.2 Datenfluss
 
@@ -145,37 +147,17 @@ Invariante: **Alles verlässt das Programm nur über `Flatten()`.** Daraus folgt
 4. Das PNG enthält nur die neuen Pixel. Es gibt keine Ebenen, keine Metadaten und keine Projektdatei mit dem Original. Die Zwischenablage erhält nur das geflachte Bild.
 5. Prüfung: Jedes Pixel in jedem Schwärzungsrechteck des exportierten PNG hat exakt die Füllfarbe. Der SHA-256 der OCR-Nutzlast ist gleich dem SHA-256 des exportierten PNG.
 
-## 6. OCR-Vertrag: OpenAI Sign in with ChatGPT (separat belegpflichtig)
+## 6. OCR-Vertrag: OpenAI Sign in with ChatGPT
 
-Quellen, alle am 18.10.2026 abgerufen:
-<https://developers.openai.com/siwc/quickstart>,
-<https://developers.openai.com/siwc/token-sharing-open-source>,
-<https://developers.openai.com/siwc/token-sharing-open-source/sign-in>,
-<https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions>,
-<https://developers.openai.com/siwc/token-sharing-open-source/token-reference>,
-<https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference>,
-<https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations>,
-<https://developers.openai.com/siwc/ui-ux-guidelines>,
-<https://developers.openai.com/api/docs/guides/images-vision>.
+Die vollständigen Implementierungsanforderungen und ihre einzelnen Quellen stehen im separat geprüften [OPENAI-OAUTH-VERTRAG.md](OPENAI-OAUTH-VERTRAG.md). Dieser Architekturvorschlag übernimmt dessen Grenzen; ein eigener Login wurde nicht ausgeführt.
 
-**Berechtigung (Doku):** „ChatGPT plan usage is available to all open-source partners and selected private clients.“ und „These docs explain ChatGPT plan usage for open-source and locally hosted apps. If you're interested in offering it in a paid or remotely hosted app, complete the interest form.“ → Kairos muss **quelloffen und lokal** sein, sonst greift K4.
+Der offizielle Ablauf umfasst Systembrowser, Loopback-Callback, PKCE und eine bei der ersten Anmeldung ausgestellte Client-ID. Kairos braucht eigene geschützte Sitzungen und eine validierte Identität. Kontofreigabe und tatsächlich gewährter Direct-Scope sind vor Inferenz zu prüfen. Quelle: [Registrierung und Anmeldung](https://developers.openai.com/siwc/token-sharing-open-source/sign-in), geprüft 18.10.2026.
 
-**Ablauf laut Doku:**
+Die öffentliche Dokumentation richtet sich an quelloffene und lokal gehostete Apps und verweist für bezahlte oder remote gehostete Apps auf einen gesonderten Kontaktweg. Daraus folgt weder eine automatische Freigabe jeder privaten lokalen App noch die Pflicht, dieses Repository jetzt zu veröffentlichen. Kairos-Lizenz und zulässiger Betriebsmodus bleiben offen. Quelle: [Übersicht](https://developers.openai.com/siwc/token-sharing-open-source), geprüft 18.10.2026.
 
-1. Pro Installation einmal `ext_agent_host_id = urn:uuid:<UUIDv4>` erzeugen und speichern. Der Wert ist opak, also keine E-Mail und keine Hardware-ID.
-2. Den Loopback-Listener **vor** dem Browser starten. `redirect_uri = http://127.0.0.1:<port>/auth/callback` (kein `localhost`, nur der Port variiert). Pro Versuch frische Werte für `state`, `nonce` und den PKCE-Verifier, `code_challenge_method=S256`.
-3. Den Systembrowser öffnen: `https://auth.openai.com/api/accounts/authorize` mit `client_id=dynamic_agent_client` (nur bei Erstregistrierung), `agent_name_hint=Kairos Capture`, `response_type=code`, `scope=openid profile email offline_access resource.invoke chatgpt.tokens.use.direct`, `resource=https://api.openai.com/v1`.
-4. Im Callback `state` prüfen und `error=access_denied` behandeln. Die ausgegebene `client_id` (`oaiapp_…`) speichern, niemals `dynamic_agent_client`.
-5. Token-Tausch per Form-POST an `https://auth.openai.com/api/accounts/oauth/token`, mit derselben `redirect_uri` und `resource`, **ohne Client-Secret**.
-6. Das ID-Token gegen das JWKS prüfen: `iss`, `aud` = ausgegebene `client_id`, `exp`, `nonce`. Inferenz nur, wenn `chatgpt.tokens.use.direct` gewährt wurde.
-7. Speichern: Datensatz pro `client_id`, verschlüsselt mit DPAPI (`CurrentUser`), atomar geschrieben, nie geloggt und nie in URLs. Access-Token 1 h, Refresh-Token 30 Tage und rotierend. Refreshes werden serialisiert.
-8. Modelle über `GET https://api.openai.com/v1/models` mit Bearer-Token abfragen, nur `visibility == "list"` anzeigen. Bilder nur mit Modellen senden, die sie akzeptieren. Laut Doku gilt: „when the selected model accepts them“.
-9. `POST https://api.openai.com/v1/responses` mit `store:false`, `stream:true`, `input` als Array und `instructions` statt einer System-Message. Das Bild geht als `input_image` mit `data:image/png;base64,…` aus `Flatten()` hinaus. Nicht unterstützte Felder (u. a. `temperature`, `max_output_tokens`, `metadata`) entfallen. Erfolg zählt nur bei `response.completed`; `subscription_sharing_usage_limit_exceeded` und `subscription_sharing_usage_unavailable` werden behandelt.
-10. Die Schaltfläche heißt **„Continue with ChatGPT“** und folgt dem freigegebenen Branding.
+OCR soll das bereits endgültig gerenderte Bild an die öffentliche Responses API senden. Bilder benötigen ein passendes kontospezifisches Modell; Streaming, Fehler und Abschluss müssen gemäß dem dokumentierten Vertrag behandelt werden. Die Anmeldung darf nur den freigegebenen OpenAI-Branding-Regeln folgen. Quellen: [Modelle und Inferenz](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference), [Preview-Grenzen](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations), [UI/UX](https://developers.openai.com/siwc/ui-ux-guidelines), geprüft 18.10.2026.
 
-**Verboten:** Codex- oder andere fremde Token-Dateien lesen, ChatGPT-`backend-api` ansprechen und Tokens im Klartext ablegen.
-
-**Nicht belegt:** echte Registrierung mit dem Nutzerkonto, welche Modelle im Kontokatalog Bilder annehmen, Nutzungsgrenzen und die OCR-Qualität. Prüfbar ist das nur manuell mit dem eigenen Konto (A9). Diese Preview-Seiten können sich ändern, deshalb werden sie vor der Implementierung erneut abgerufen.
+Keine fremden Codex-Token übernehmen. Nicht geprüft sind Kontozulassung, echte Registrierung, Refresh/Widerruf, bildfähige Modelle und OCR-Qualität. Diese Abnahme folgt erst in der späteren Anwendung.
 
 ## 7. Design-Tokens (aus der Vorlage gesampelt)
 
@@ -201,7 +183,7 @@ Regeln: Das Screenshot-Bild bleibt die hellste Fläche. Violett markiert aktive 
 
 **Ausgelassen, nachrüsten wenn verlangt:** Fenster-Snapping (`DwmGetWindowAttribute`), Pin-to-Screen, Scroll-Capture, Video/GIF (der FFmpeg-Weg bei Sunny umfasst ≈ 157 MB), Blur/Mosaik, Übersetzung, Settings-UI (Hotkey zunächst fest, Konflikt wird gemeldet), Offline-OCR (K5).
 
-**Budget als Vorgabe, keine Schätzung:** ein `.csproj`, 0 `PackageReference`, Logik in fünf Dateien. Wächst eine Datei über 600 Zeilen, wird der Schnitt überprüft, nicht das Budget.
+**Ausgangspunkt, keine Abnahmegrenze:** ein `.csproj`, kein zusätzliches UI-Framework, wenige verständliche Module. Abhängigkeiten werden nach tatsächlichem Code- und Prüfaufwand gewählt. Insbesondere wird sichere OAuth-/OIDC-Validierung nicht für ein Paket- oder Zeilenbudget selbst nachgebaut.
 
 ## 9. Mess- und Abnahmekriterien
 

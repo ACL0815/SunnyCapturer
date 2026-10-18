@@ -46,7 +46,9 @@ REA 6.4.0 öffnete das Originalartefakt und lieferte die vollständige portable 
 
 Die [Qt-Kataloganalyse](qt/BERICHT.md) ist integriert und von Root erneut ausgeführt. Ihre Lookup-Hashes und 23.178 exportierten Bytebereiche stimmen mit den Originaldateien überein. Sie rekonstruiert keine kompilierten QRC-Baum-/Namens-/Datentabellen. Die begrenzte Suche fand keine separaten QRC/RCC-Dateien und keinen eigenständigen `qres`-Header in der EXE; eingebettete kompilierte Tabellen sind damit nicht ausgeschlossen.
 
-Die portable native Codeanalyse und die Opus-Architekturabwägung werden in getrennten Unterberichten integriert. Ihre Abdeckung und offenen Punkte müssen jeweils am tatsächlichen Ergebnis gelesen werden; ein Download oder ein gestarteter Agent ist kein Analyseerfolg. Die fehlende vollständige Windows-Editor-Bediensequenz ist im REA-Paket als offene Frage `unk_02c4fb520ff025f3c829f771142bb868bcd11b8b0e6a23f8cacf1ad70f8555f9` registriert.
+Die [Architekturabwägung von Opus 5.5 mit Ponytail](ARCHITEKTUR-ABWAEGUNG.md) ist integriert und von Root fachlich nachgeprüft. Sie empfiehlt WPF/.NET 10 für den ersten Windows-Bau; Qt bleibt die Alternative, falls Pixel-/Mixed-DPI- oder gemessene Latenzkriterien nicht erfüllt werden oder weitere Desktop-Plattformen hinzukommen. Es gibt noch keine Messung, die WPF als schneller ausweist. Root hat zu starke Import-/DPI-/OAuth-Zulassungsbehauptungen auf ihre tatsächliche Beleggrenze korrigiert. Die Zusatzbefunde stehen in [architecture-extra-evidence.json](architecture-extra-evidence.json).
+
+Die portable native Codeanalyse läuft noch. Ihre Abdeckung und offenen Punkte müssen am tatsächlichen Ergebnis gelesen werden; ein Download oder ein gestarteter Agent ist kein Analyseerfolg. Die fehlende vollständige Windows-Editor-Bediensequenz ist im REA-Paket als offene Frage `unk_02c4fb520ff025f3c829f771142bb868bcd11b8b0e6a23f8cacf1ad70f8555f9` registriert.
 
 ## Konsequenzen für den späteren Bau
 

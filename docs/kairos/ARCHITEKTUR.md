@@ -1,5 +1,7 @@
 # Kairos Capture
 
+> Status: frühere Entwurfsbeschreibung, nicht implementiert. Für die nach Untersuchung der installierten SunnyCapturer-Version erneut geprüfte Abwägung siehe [ARCHITEKTUR-ABWAEGUNG.md](reverse/ARCHITEKTUR-ABWAEGUNG.md) und [Untersuchungsbericht](reverse/README.md).
+
 Entscheidung vom 18.10.2026, Architekturprüfung durch Claude Opus 5.5 mit Ponytail.
 
 Kairos Capture ist eine eigene Windows-Anwendung. Die öffentlich vorliegenden SunnyCapturer-Quellen sind ältere Generationen; die aktuelle Version liegt hier nicht vollständig vor. Aus SunnyCapturer wird kein Programmcode übernommen.

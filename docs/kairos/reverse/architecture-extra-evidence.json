@@ -1,0 +1,57 @@
+{
+  "target_sha256": "e97cc2612b79ab154076844a13ec01cdeb70be0f14cf20675ce0e39dff81ecc8",
+  "authority": "local static byte read; not a REA Evidence record",
+  "linker_version": [
+    14,
+    44
+  ],
+  "search_bound": [
+    0,
+    3507712
+  ],
+  "matching": "exact ASCII/UTF-16LE literals, case-sensitive, all hits",
+  "strings": [
+    {
+      "literal": "https://8.137.12.26:5000/add_data",
+      "hits": [
+        {
+          "encoding": "ascii",
+          "offset": 1736176,
+          "length": 33
+        }
+      ]
+    },
+    {
+      "literal": "wmic baseboard get serialnumber",
+      "hits": [
+        {
+          "encoding": "ascii",
+          "offset": 1736784,
+          "length": 31
+        }
+      ]
+    },
+    {
+      "literal": "QT_ENABLE_HIGHDPI_SCALING",
+      "hits": [
+        {
+          "encoding": "ascii",
+          "offset": 1715768,
+          "length": 25
+        }
+      ]
+    }
+  ],
+  "manifest": {
+    "location": {
+      "bytes": 381,
+      "offset": 3491232
+    },
+    "sha256": "4bb79dcea0a901f7d9eac5aa05728ae92acb42e0cb22e5dd14134f4421a3d8df",
+    "text": "<?xml version='1.0' encoding='UTF-8' standalone='yes'?>\r\n<assembly xmlns='urn:schemas-microsoft-com:asm.v1' manifestVersion='1.0'>\r\n  <trustInfo xmlns=\"urn:schemas-microsoft-com:asm.v3\">\r\n    <security>\r\n      <requestedPrivileges>\r\n        <requestedExecutionLevel level='asInvoker' uiAccess='false' />\r\n      </requestedPrivileges>\r\n    </security>\r\n  </trustInfo>\r\n</assembly>\r\n"
+  },
+  "limits": [
+    "Strings and imported APIs do not prove invocation, transmission or absence of other behavior.",
+    "No recorded endpoint was contacted; no device ID, user log, credentials or process memory read."
+  ]
+}
