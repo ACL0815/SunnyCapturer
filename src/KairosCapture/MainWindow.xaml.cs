@@ -67,6 +67,12 @@ public partial class MainWindow : Window
         SourceInitialized += OnSourceInitialized;
     }
 
+    protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
+    {
+        base.OnDpiChanged(oldDpi, newDpi);
+        Dispatcher.BeginInvoke(new Action(() => { if (!_disposed) ApplyZoom(); }));
+    }
+
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
         int dark = 1;
@@ -157,6 +163,7 @@ public partial class MainWindow : Window
         App.LogException(action, exception);
         // Provider messages can contain request URLs or account data; keep them out of the UI.
         string reason = exception is OpenAiRequestException request ? request.Message :
+            exception is OpenAiUserException userError ? userError.Message :
             exception is TimeoutException ? "Das Zeitlimit wurde erreicht. Versuche es später erneut." :
             exception is ArgumentException && action == "Texterkennung" ? "Das Bild ist für OCR zu groß oder ungültig. Versuche einen kleineren Ausschnitt." :
             exception is HttpRequestException ? "Prüfe deine Internetverbindung und versuche es erneut." :
@@ -328,13 +335,14 @@ public partial class MainWindow : Window
     private void Redo_Click(object sender, RoutedEventArgs e) { _editor?.CommitText(); _editor?.Redo(); }
 
     private void Fit_Click(object sender, RoutedEventArgs e) { _fit = true; ApplyZoom(); }
-    private void ActualSize_Click(object sender, RoutedEventArgs e) { _fit = false; SetZoom(1); }
+    private double NativePixelScale => 1 / VisualTreeHelper.GetDpi(ImageViewbox).DpiScaleX;
+    private void ActualSize_Click(object sender, RoutedEventArgs e) { _fit = false; SetZoom(NativePixelScale); }
     private void Stage_SizeChanged(object sender, SizeChangedEventArgs e) { if (_fit) ApplyZoom(); }
-    private void Zoom_Changed(object sender, RoutedPropertyChangedEventArgs<double> e) { if (_settingZoom || _editor == null) return; _fit = false; SetZoom(e.NewValue / 100); }
+    private void Zoom_Changed(object sender, RoutedPropertyChangedEventArgs<double> e) { if (_settingZoom || _editor == null) return; _fit = false; SetZoom(e.NewValue / 100 * NativePixelScale); }
     private void ApplyZoom()
     {
         if (_editor == null) return;
-        double scale = _fit ? Math.Min(1, Math.Min(Math.Max(1, ImageScroll.ViewportWidth - 56) / _editor.Width, Math.Max(1, ImageScroll.ViewportHeight - 56) / _editor.Height)) : ZoomSlider.Value / 100;
+        double scale = _fit ? Math.Min(NativePixelScale, Math.Min(Math.Max(1, ImageScroll.ViewportWidth - 56) / _editor.Width, Math.Max(1, ImageScroll.ViewportHeight - 56) / _editor.Height)) : ZoomSlider.Value / 100 * NativePixelScale;
         SetZoom(scale);
     }
     private void SetZoom(double scale)
@@ -343,15 +351,15 @@ public partial class MainWindow : Window
         ImageViewbox.Width = _editor.Width * scale;
         ImageViewbox.Height = _editor.Height * scale;
         _settingZoom = true;
-        ZoomSlider.Value = Math.Clamp(scale * 100, ZoomSlider.Minimum, ZoomSlider.Maximum);
+        ZoomSlider.Value = Math.Clamp(scale / NativePixelScale * 100, ZoomSlider.Minimum, ZoomSlider.Maximum);
         _settingZoom = false;
-        ZoomText.Text = scale.ToString("0 %", CultureInfo.CurrentCulture);
+        ZoomText.Text = (scale / NativePixelScale).ToString("0 %", CultureInfo.CurrentCulture);
     }
     private void ImageScroll_MouseWheel(object sender, MouseWheelEventArgs e)
     {
         if ((Keyboard.Modifiers & ModifierKeys.Control) == 0 || _editor == null) return;
         _fit = false;
-        SetZoom(Math.Clamp(ImageViewbox.Width / _editor.Width * (e.Delta > 0 ? 1.15 : 1 / 1.15), 0.1, 3));
+        SetZoom(Math.Clamp(ImageViewbox.Width / _editor.Width * (e.Delta > 0 ? 1.15 : 1 / 1.15), 0.1 * NativePixelScale, 3 * NativePixelScale));
         e.Handled = true;
     }
 
@@ -372,7 +380,7 @@ public partial class MainWindow : Window
                 case Key.Z: e.Handled = true; _editor?.CommitText(); if ((modifiers & ModifierKeys.Shift) != 0) _editor?.Redo(); else _editor?.Undo(); return;
                 case Key.Y: e.Handled = true; _editor?.CommitText(); _editor?.Redo(); return;
                 case Key.D0: case Key.NumPad0: e.Handled = true; _fit = true; ApplyZoom(); return;
-                case Key.D1: case Key.NumPad1: e.Handled = true; _fit = false; SetZoom(1); return;
+                case Key.D1: case Key.NumPad1: e.Handled = true; _fit = false; SetZoom(NativePixelScale); return;
             }
             return;
         }

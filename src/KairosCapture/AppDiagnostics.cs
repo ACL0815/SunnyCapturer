@@ -10,6 +10,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using KairosCapture.Capture;
@@ -92,11 +93,34 @@ internal static class AppDiagnostics
             window.LoadImage(CreateDemoBitmap(), "Beispiel.png");
             FrameworkElement content = LayoutPreview(window, 1440, 820);
             if (content.ActualWidth != 1440 || content.ActualHeight != 820) return new[] { "The WPF shell did not arrange at the preview dimensions." };
+            var errors = new List<string>();
+            Color light = ((SolidColorBrush)window.FindResource("TextBrush")).Color;
+            foreach (string name in new[] { "FileNameText", "AccountStatus" })
+                if (window.FindName(name) is not TextBlock { Foreground: SolidColorBrush brush } || brush.Color != light)
+                    errors.Add(name + " must inherit the light content foreground.");
+            var login = (Button)window.FindName("LoginButton");
+            TextBlock? loginText = Descendants<TextBlock>(login).FirstOrDefault(t => t.Text == "Weiter mit ChatGPT");
+            if (loginText?.Foreground is not SolidColorBrush loginBrush || loginBrush.Color != Color.FromRgb(16, 16, 16))
+                errors.Add("ChatGPT button content must inherit its own dark foreground.");
+            var thickness = (ComboBox)window.FindName("ThicknessPicker");
+            TextBlock? arrow = Descendants<TextBlock>(thickness).FirstOrDefault(t => t.Text == "\uE70D");
+            if (arrow?.Foreground is not SolidColorBrush arrowBrush || arrowBrush.Color != light)
+                errors.Add("ComboBox arrow must inherit the ComboBox foreground.");
             // Check narrow desktop layout as well; this never creates a visible window or synthesizes input.
             LayoutPreview(window, 1000, 610);
-            return Array.Empty<string>();
+            return errors;
         }
         finally { window.Close(); }
+    }
+
+    private static IEnumerable<T> Descendants<T>(DependencyObject parent) where T : DependencyObject
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            DependencyObject child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T match) yield return match;
+            foreach (T descendant in Descendants<T>(child)) yield return descendant;
+        }
     }
 
     internal static void RenderPreview(string path)

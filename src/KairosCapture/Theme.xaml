@@ -76,7 +76,7 @@
     <Setter Property="Padding" Value="10,7" /><Setter Property="MinHeight" Value="32" /><Setter Property="MaxDropDownHeight" Value="300" /><Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocus}" />
     <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ComboBox">
       <Grid>
-        <ToggleButton Focusable="False" IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}" ClickMode="Press">
+        <ToggleButton Focusable="False" Foreground="{TemplateBinding Foreground}" IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}" ClickMode="Press">
           <ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border x:Name="ComboFrame" CornerRadius="6" Background="{Binding Background, RelativeSource={RelativeSource AncestorType=ComboBox}}" BorderBrush="{Binding BorderBrush, RelativeSource={RelativeSource AncestorType=ComboBox}}" BorderThickness="1"><TextBlock Text="&#xE70D;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="10" Margin="0,0,10,0" HorizontalAlignment="Right" VerticalAlignment="Center" /></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ComboFrame" Property="BorderBrush" Value="#8C78B0" /></Trigger></ControlTemplate.Triggers></ControlTemplate></ToggleButton.Template>
         </ToggleButton>
         <ContentPresenter Margin="10,6,28,6" Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" IsHitTestVisible="False" VerticalAlignment="Center" />

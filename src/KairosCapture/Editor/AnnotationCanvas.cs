@@ -202,8 +202,12 @@ public sealed class AnnotationCanvas : Canvas
         drawing.PushClip(new RectangleGeometry(new Rect(0, 0, Width, Height)));
         drawing.DrawImage(_image, new Rect(0, 0, Width, Height));
         foreach (Annotation item in _items)
-            if (item != _textItem) DrawAnnotation(drawing, item);
-        if (_draft != null) DrawAnnotation(drawing, _draft);
+            if (item != _textItem && item.Tool != EditorTool.Redact) DrawAnnotation(drawing, item);
+        if (_draft != null && _draft.Tool != EditorTool.Redact) DrawAnnotation(drawing, _draft);
+        // Redactions always cover later annotations too, for both display and export.
+        foreach (Annotation item in _items)
+            if (item.Tool == EditorTool.Redact) DrawAnnotation(drawing, item);
+        if (_draft?.Tool == EditorTool.Redact) DrawAnnotation(drawing, _draft);
         drawing.Pop();
     }
 
@@ -451,9 +455,11 @@ public sealed class AnnotationCanvas : Canvas
 
     private Annotation? Hit(Point point)
     {
+        for (int layer = 0; layer < 2; layer++)
         for (int i = _items.Count - 1; i >= 0; i--)
         {
             Annotation item = _items[i];
+            if ((item.Tool == EditorTool.Redact) != (layer == 0)) continue;
             Point local = new((point.X - item.Offset.X) / item.ScaleX, (point.Y - item.Offset.Y) / item.ScaleY);
             Rect bounds = item.Bounds;
             double tolerance = 5 * DisplayUnit() / Math.Min(item.ScaleX, item.ScaleY);

@@ -39,6 +39,20 @@ public static class EditorSelfChecks
         Require(!IsBlack(redacted, 5, 5) && canvas.CanUndo && canvas.HasChanges,
             "Redaction must be local and flatten must preserve undo history.");
 
+        AnnotationCanvas layered = new(source) { Stroke = Brushes.Red };
+        Draw(layered, EditorTool.Redact, new Point(10, 10), new Point(60, 60));
+        Draw(layered, EditorTool.Highlight, new Point(0, 0), new Point(80, 80));
+        Draw(layered, EditorTool.Pen, new Point(0, 30), new Point(80, 30));
+        RequireBlackArea(layered.Flatten(), new Int32Rect(10, 10, 50, 50));
+        layered.Undo();
+        layered.Redo();
+        RequireBlackArea(layered.Flatten(), new Int32Rect(10, 10, 50, 50));
+        layered.Tool = EditorTool.Select;
+        layered.BeginGesture(new Point(40, 40));
+        layered.EndGesture();
+        Require(layered.SelectionBounds == new Rect(10, 10, 50, 50),
+            "Hit testing must select the visible topmost redaction rather than hidden later annotations.");
+
         // Selection, real object move and move history, with clamping at the image edge.
         canvas.Tool = EditorTool.Select;
         canvas.BeginGesture(new Point(20, 20));
