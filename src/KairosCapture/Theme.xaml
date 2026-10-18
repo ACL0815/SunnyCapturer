@@ -1,24 +1,23 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-  <SolidColorBrush x:Key="BackgroundBrush" Color="#0B1015" />
-  <SolidColorBrush x:Key="PanelBrush" Color="#171B24" />
-  <SolidColorBrush x:Key="RaisedBrush" Color="#20242F" />
-  <SolidColorBrush x:Key="BorderBrush" Color="#2B2B3B" />
-  <SolidColorBrush x:Key="TextBrush" Color="#F4F1FF" />
-  <SolidColorBrush x:Key="MutedBrush" Color="#9693A9" />
-  <SolidColorBrush x:Key="LavenderBrush" Color="#C4B5FD" />
-  <SolidColorBrush x:Key="PurpleBrush" Color="#8B5CF6" />
-  <SolidColorBrush x:Key="GoldBrush" Color="#E2B866" />
+  <SolidColorBrush x:Key="BackgroundBrush" Color="#090E13" />
+  <SolidColorBrush x:Key="PanelBrush" Color="#12171C" />
+  <SolidColorBrush x:Key="RaisedBrush" Color="#1B2029" />
+  <SolidColorBrush x:Key="BorderBrush" Color="#2B2B3A" />
+  <SolidColorBrush x:Key="TextBrush" Color="#F4F2FA" />
+  <SolidColorBrush x:Key="MutedBrush" Color="#A4A0B2" />
+  <SolidColorBrush x:Key="LavenderBrush" Color="#B097E9" />
+  <SolidColorBrush x:Key="PurpleBrush" Color="#7D4BE3" />
+  <SolidColorBrush x:Key="GoldBrush" Color="#D3B576" />
   <LinearGradientBrush x:Key="DockOutline" StartPoint="0,0" EndPoint="1,1">
-    <GradientStop Color="#8B5CF6" Offset="0" /><GradientStop Color="#493A68" Offset="0.55" /><GradientStop Color="#E2B866" Offset="1" />
+    <GradientStop Color="#7D4BE3" Offset="0" /><GradientStop Color="#493A68" Offset="0.55" /><GradientStop Color="#D3B576" Offset="1" />
   </LinearGradientBrush>
   <Style x:Key="KeyboardFocus" TargetType="Control">
-    <Setter Property="Template"><Setter.Value><ControlTemplate><Rectangle Margin="-3" Stroke="#C4B5FD" StrokeThickness="2" StrokeDashArray="2 2" RadiusX="5" RadiusY="5" /></ControlTemplate></Setter.Value></Setter>
+    <Setter Property="Template"><Setter.Value><ControlTemplate><Rectangle Margin="-3" Stroke="#B097E9" StrokeThickness="2" StrokeDashArray="2 2" RadiusX="5" RadiusY="5" /></ControlTemplate></Setter.Value></Setter>
   </Style>
   <Style TargetType="Window">
     <Setter Property="FontFamily" Value="Segoe UI Variable, Segoe UI" /><Setter Property="FontSize" Value="13" />
     <Setter Property="Foreground" Value="{StaticResource TextBrush}" /><Setter Property="Background" Value="{StaticResource BackgroundBrush}" />
   </Style>
-  <Style TargetType="TextBlock"><Setter Property="Foreground" Value="{StaticResource TextBrush}" /></Style>
   <Style x:Key="MutedText" TargetType="TextBlock"><Setter Property="Foreground" Value="{StaticResource MutedBrush}" /><Setter Property="FontSize" Value="12" /></Style>
   <Style x:Key="Glyph" TargetType="TextBlock"><Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets" /><Setter Property="FontSize" Value="16" /><Setter Property="VerticalAlignment" Value="Center" /><Setter Property="HorizontalAlignment" Value="Center" /></Style>
   <Style TargetType="ToolTip">
@@ -41,8 +40,8 @@
     </ControlTemplate></Setter.Value></Setter>
   </Style>
   <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-    <Setter Property="Background"><Setter.Value><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#8B5CF6" Offset="0" /><GradientStop Color="#6D28D9" Offset="1" /></LinearGradientBrush></Setter.Value></Setter>
-    <Setter Property="BorderBrush" Value="#A78BFA" /><Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Background"><Setter.Value><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#7D4BE3" Offset="0" /><GradientStop Color="#431B96" Offset="1" /></LinearGradientBrush></Setter.Value></Setter>
+    <Setter Property="BorderBrush" Value="#B097E9" /><Setter Property="FontWeight" Value="SemiBold" />
   </Style>
   <Style x:Key="SmallButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Padding" Value="9,6" /><Setter Property="MinHeight" Value="28" /><Setter Property="FontSize" Value="12" /></Style>
   <Style x:Key="IconButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Padding" Value="9" /><Setter Property="Width" Value="34" /><Setter Property="Height" Value="34" /><Setter Property="Background" Value="Transparent" /><Setter Property="BorderThickness" Value="0" /></Style>
@@ -68,9 +67,9 @@
   </Style>
   <Style TargetType="TextBox">
     <Setter Property="Background" Value="#10141C" /><Setter Property="Foreground" Value="{StaticResource TextBrush}" /><Setter Property="CaretBrush" Value="{StaticResource LavenderBrush}" />
-    <Setter Property="SelectionBrush" Value="#6D28D9" /><Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" /><Setter Property="BorderThickness" Value="1" /><Setter Property="Padding" Value="12" />
+    <Setter Property="SelectionBrush" Value="#431B96" /><Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" /><Setter Property="BorderThickness" Value="1" /><Setter Property="Padding" Value="12" />
     <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocus}" />
-    <Style.Triggers><Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter Property="BorderBrush" Value="#8B5CF6" /></Trigger></Style.Triggers>
+    <Style.Triggers><Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter Property="BorderBrush" Value="#7D4BE3" /></Trigger></Style.Triggers>
   </Style>
   <Style TargetType="ComboBox">
     <Setter Property="Foreground" Value="{StaticResource TextBrush}" /><Setter Property="Background" Value="{StaticResource RaisedBrush}" /><Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
@@ -82,12 +81,12 @@
         </ToggleButton>
         <ContentPresenter Margin="10,6,28,6" Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" IsHitTestVisible="False" VerticalAlignment="Center" />
         <Popup x:Name="PART_Popup" IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom" AllowsTransparency="True" Focusable="False">
-          <Border Background="#20242F" BorderBrush="#554767" BorderThickness="1" CornerRadius="6" MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}" MaxHeight="{TemplateBinding MaxDropDownHeight}" Padding="3"><ScrollViewer><ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained" /></ScrollViewer></Border>
+          <Border Background="#1B2029" BorderBrush="#554767" BorderThickness="1" CornerRadius="6" MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}" MaxHeight="{TemplateBinding MaxDropDownHeight}" Padding="3"><ScrollViewer><ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained" /></ScrollViewer></Border>
         </Popup>
       </Grid>
       <ControlTemplate.Triggers><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45" /></Trigger></ControlTemplate.Triggers>
     </ControlTemplate></Setter.Value></Setter>
   </Style>
   <Style TargetType="ComboBoxItem"><Setter Property="Foreground" Value="{StaticResource TextBrush}" /><Setter Property="Padding" Value="8,7" /><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ComboBoxItem"><Border x:Name="ItemFrame" Padding="{TemplateBinding Padding}" CornerRadius="4" Background="Transparent"><ContentPresenter /></Border><ControlTemplate.Triggers><Trigger Property="IsHighlighted" Value="True"><Setter TargetName="ItemFrame" Property="Background" Value="#3A2B50" /></Trigger><Trigger Property="IsSelected" Value="True"><Setter TargetName="ItemFrame" Property="Background" Value="#34234F" /></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style>
-  <Style TargetType="ScrollBar"><Setter Property="Width" Value="10" /><Setter Property="Background" Value="#171B24" /></Style>
+  <Style TargetType="ScrollBar"><Setter Property="Width" Value="10" /><Setter Property="Background" Value="#12171C" /></Style>
 </ResourceDictionary>

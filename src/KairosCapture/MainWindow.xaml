@@ -3,7 +3,8 @@
         Title="Kairos Capture" Width="1440" Height="900" MinWidth="1000" MinHeight="640" WindowStartupLocation="CenterScreen"
         AllowDrop="True" PreviewDragOver="Window_DragOver" Drop="Window_Drop" PreviewKeyDown="Window_KeyDown"
         UseLayoutRounding="True" SnapsToDevicePixels="True">
-  <Grid>
+  <Grid Background="{StaticResource BackgroundBrush}" TextElement.Foreground="{StaticResource TextBrush}"
+        TextElement.FontFamily="Segoe UI Variable, Segoe UI" TextElement.FontSize="13">
     <Grid.RowDefinitions><RowDefinition Height="76" /><RowDefinition Height="*" /><RowDefinition Height="32" /></Grid.RowDefinitions>
     <Border BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="22,0">
       <Grid>
@@ -17,6 +18,7 @@
         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
           <Button x:Name="CaptureButton" Style="{StaticResource PrimaryButton}" Click="Capture_Click" ToolTip="Bereich aufnehmen (Strg+Alt+A)" Margin="0,0,8,0"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE7C5;" Style="{StaticResource Glyph}" Margin="0,0,8,0" /><TextBlock Text="Bereich aufnehmen" /></StackPanel></Button>
           <Button x:Name="OpenButton" Click="Open_Click" ToolTip="Bild öffnen (Strg+O)" Margin="0,0,8,0"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8E5;" Style="{StaticResource Glyph}" Margin="0,0,8,0" /><TextBlock Text="Bild öffnen" /></StackPanel></Button>
+          <Button x:Name="PasteButton" Click="Paste_Click" ToolTip="Bild einfügen (Strg+V)" AutomationProperties.Name="Bild einfügen" Margin="0,0,8,0" Padding="11,9"><TextBlock Text="&#xE77F;" Style="{StaticResource Glyph}" /></Button>
           <Button x:Name="CopyButton" Click="Copy_Click" ToolTip="Bild kopieren (Strg+C)" Margin="0,0,8,0"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8C8;" Style="{StaticResource Glyph}" Margin="0,0,8,0" /><TextBlock Text="Kopieren" /></StackPanel></Button>
           <Button x:Name="SaveButton" Click="Save_Click" ToolTip="Bild speichern (Strg+S)"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE74E;" Style="{StaticResource Glyph}" Margin="0,0,8,0" /><TextBlock Text="Speichern" /></StackPanel></Button>
         </StackPanel>
@@ -26,7 +28,6 @@
       <Grid.ColumnDefinitions><ColumnDefinition Width="60" /><ColumnDefinition Width="14" /><ColumnDefinition Width="*" /><ColumnDefinition Width="16" /><ColumnDefinition Width="296" /></Grid.ColumnDefinitions>
       <StackPanel>
         <Border CornerRadius="13" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource DockOutline}" BorderThickness="1" Padding="7,8">
-          <Border.Effect><DropShadowEffect Color="#8B5CF6" Opacity="0.13" BlurRadius="14" ShadowDepth="0" /></Border.Effect>
           <StackPanel x:Name="ToolDock" AutomationProperties.Name="Zeichenwerkzeuge">
             <RadioButton Style="{StaticResource ToolButton}" GroupName="Tools" Tag="Select" IsChecked="True" Checked="Tool_Checked" ToolTip="Auswählen / Verschieben (V)" AutomationProperties.Name="Auswählen"><TextBlock Text="&#xE8B0;" Style="{StaticResource Glyph}" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" /></RadioButton>
             <Border Height="1" Background="{StaticResource BorderBrush}" Margin="5,7" />
@@ -48,11 +49,11 @@
             <Grid VerticalAlignment="Center">
               <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
               <StackPanel x:Name="DrawingSettings" Orientation="Horizontal" VerticalAlignment="Center">
-                <RadioButton Style="{StaticResource Swatch}" Background="#8B5CF6" Tag="#8B5CF6" IsChecked="True" Checked="Color_Checked" ToolTip="Violett" GroupName="Colors" AutomationProperties.Name="Violett" />
+                <RadioButton Style="{StaticResource Swatch}" Background="#7D4BE3" Tag="#7D4BE3" IsChecked="True" Checked="Color_Checked" ToolTip="Violett" GroupName="Colors" AutomationProperties.Name="Violett" />
                 <RadioButton Style="{StaticResource Swatch}" Background="#EF6475" Tag="#EF6475" Checked="Color_Checked" ToolTip="Koralle" GroupName="Colors" AutomationProperties.Name="Koralle" />
-                <RadioButton Style="{StaticResource Swatch}" Background="#E2B866" Tag="#E2B866" Checked="Color_Checked" ToolTip="Gold" GroupName="Colors" AutomationProperties.Name="Gold" />
+                <RadioButton Style="{StaticResource Swatch}" Background="#D3B576" Tag="#D3B576" Checked="Color_Checked" ToolTip="Gold" GroupName="Colors" AutomationProperties.Name="Gold" />
                 <RadioButton Style="{StaticResource Swatch}" Background="#5FD5BA" Tag="#5FD5BA" Checked="Color_Checked" ToolTip="Mint" GroupName="Colors" AutomationProperties.Name="Mint" />
-                <RadioButton Style="{StaticResource Swatch}" Background="#F4F1FF" Tag="#F4F1FF" Checked="Color_Checked" ToolTip="Weiß" GroupName="Colors" AutomationProperties.Name="Weiß" />
+                <RadioButton Style="{StaticResource Swatch}" Background="#F4F2FA" Tag="#F4F2FA" Checked="Color_Checked" ToolTip="Weiß" GroupName="Colors" AutomationProperties.Name="Weiß" />
                 <RadioButton Style="{StaticResource Swatch}" Background="#151720" Tag="#151720" Checked="Color_Checked" ToolTip="Schwarz" GroupName="Colors" AutomationProperties.Name="Schwarz" />
                 <Border Width="1" Height="20" Background="{StaticResource BorderBrush}" Margin="10,0" />
                 <ComboBox x:Name="ThicknessPicker" Width="76" SelectedIndex="1" SelectionChanged="Thickness_Changed" ToolTip="Strichstärke in Bildpixeln" AutomationProperties.Name="Strichstärke"><ComboBoxItem Content="2 px" Tag="2" /><ComboBoxItem Content="4 px" Tag="4" /><ComboBoxItem Content="8 px" Tag="8" /><ComboBoxItem Content="12 px" Tag="12" /></ComboBox>
@@ -66,11 +67,11 @@
           <Grid Grid.Row="1" x:Name="Stage" ClipToBounds="True">
             <Grid.Background><DrawingBrush TileMode="Tile" Viewport="0,0,24,24" ViewportUnits="Absolute"><DrawingBrush.Drawing><DrawingGroup><GeometryDrawing Brush="#0E131A" Geometry="M0,0 H24 V24 H0 Z" /><GeometryDrawing Brush="#141923" Geometry="M0,0 H12 V12 H0 Z M12,12 H24 V24 H12 Z" /></DrawingGroup></DrawingBrush.Drawing></DrawingBrush></Grid.Background>
             <ScrollViewer x:Name="ImageScroll" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" SizeChanged="Stage_SizeChanged" PreviewMouseWheel="ImageScroll_MouseWheel" Visibility="Collapsed" Focusable="False">
-              <Grid Margin="28" HorizontalAlignment="Center" VerticalAlignment="Center"><Border Background="White"><Viewbox x:Name="ImageViewbox" Stretch="Fill" /></Border></Grid>
+              <Grid Margin="28" HorizontalAlignment="Center" VerticalAlignment="Center"><Viewbox x:Name="ImageViewbox" Stretch="Fill" /></Grid>
             </ScrollViewer>
             <Grid x:Name="EmptyState" Margin="26">
               <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="400">
-                <Border Width="76" Height="76" CornerRadius="22" BorderBrush="{StaticResource DockOutline}" BorderThickness="1" Background="#1C172A" Margin="0,0,0,24"><Grid Margin="22"><Path Stroke="#C4B5FD" StrokeThickness="1.6" Data="M0,10 L0,0 10,0 M22,0 L32,0 32,10 M32,22 L32,32 22,32 M10,32 L0,32 0,22" /><Ellipse Width="7" Height="7" Fill="#E2B866" /></Grid></Border>
+                <Border Width="76" Height="76" CornerRadius="22" BorderBrush="{StaticResource DockOutline}" BorderThickness="1" Background="#1C172A" Margin="0,0,0,24"><Grid Margin="22"><Path Stroke="#B097E9" StrokeThickness="1.6" Data="M0,10 L0,0 10,0 M22,0 L32,0 32,10 M32,22 L32,32 22,32 M10,32 L0,32 0,22" /><Ellipse Width="7" Height="7" Fill="#D3B576" /></Grid></Border>
                 <TextBlock Text="Ein Ausschnitt. Alles im Blick." FontSize="24" FontWeight="SemiBold" TextAlignment="Center" TextWrapping="Wrap" />
                 <TextBlock Text="Nimm einen Bereich auf und markiere,&#x0a;was zählt. Oder beginne mit einem Bild." Foreground="{StaticResource MutedBrush}" FontSize="13" LineHeight="22" TextAlignment="Center" Margin="0,12,0,23" />
                 <Button x:Name="EmptyCaptureButton" Content="Bereich aufnehmen" Style="{StaticResource PrimaryButton}" Click="Capture_Click" HorizontalAlignment="Center" Padding="24,12" ToolTip="Strg+Alt+A" />

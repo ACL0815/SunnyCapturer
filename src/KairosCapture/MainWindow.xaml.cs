@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using System.Net.Http;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -24,12 +25,13 @@ namespace KairosCapture;
 
 public partial class MainWindow : Window
 {
-    private readonly OpenAiService _openAi = new OpenAiService();
+    private readonly OpenAiService _openAi;
     private readonly bool _diagnosticsMode;
+    private readonly bool _ocrUnavailable;
     private AnnotationCanvas? _editor;
     private GlobalHotkey? _hotkey;
     private EditorTool _tool = EditorTool.Select;
-    private Brush _stroke = new SolidColorBrush(Color.FromRgb(139, 92, 246));
+    private Brush _stroke = new SolidColorBrush(Color.FromRgb(125, 75, 227));
     private double _thickness = 4;
     private bool _fit = true;
     private bool _settingZoom;
@@ -49,9 +51,20 @@ public partial class MainWindow : Window
     public MainWindow(bool diagnosticsMode = false)
     {
         _diagnosticsMode = diagnosticsMode;
+        _ocrUnavailable = false;
+        try { _openAi = diagnosticsMode ? AppDiagnostics.CreateIsolatedService() : new OpenAiService(); }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException or CryptographicException)
+        {
+            // A damaged account store must not prevent local capture/edit/export, or overwrite that store.
+            _openAi = AppDiagnostics.CreateIsolatedService();
+            _ocrUnavailable = true;
+            App.LogException("OpenAI initialization", ex);
+        }
         InitializeComponent();
         RefreshAccounts();
         UpdateControls();
+        if (_ocrUnavailable && !diagnosticsMode)
+            SetStatus("Die gespeicherten OpenAI-Kontodaten sind nicht lesbar. Bildbearbeitung bleibt verfügbar; die Kontodatei wurde nicht verändert.", true);
         SourceInitialized += OnSourceInitialized;
     }
 
@@ -61,15 +74,20 @@ public partial class MainWindow : Window
         DwmSetWindowAttribute(new WindowInteropHelper(this).Handle, 20, ref dark, sizeof(int));
         if (_diagnosticsMode) return;
         _hotkey = new GlobalHotkey(this, () => _ = CaptureAsync());
+        // The capture writer adds this event without changing the existing Register API.
+        typeof(GlobalHotkey).GetEvent("RegistrationFailed")?.AddEventHandler(_hotkey, (Action<string>)OnHotkeyRegistrationFailed);
         if (!_hotkey.Register(out string? error))
-        {
-            HotkeyText.Text = "Hotkey belegt · Aufnahme per Button";
-            HotkeyText.ToolTip = "Strg+Alt+A ist nicht verfügbar. Beende die andere Screenshot-App, um den Hotkey freizugeben.";
-            SetStatus("Strg+Alt+A konnte nicht registriert werden. Die Aufnahme per Button funktioniert weiterhin.");
-        }
+            OnHotkeyRegistrationFailed(error ?? "Strg+Alt+A ist nicht verfügbar.");
     }
 
-    public void LoadImage(BitmapSource image, string name)
+    private void OnHotkeyRegistrationFailed(string error)
+    {
+        HotkeyText.Text = "Hotkey nicht verfügbar · Aufnahme per Button";
+        HotkeyText.ToolTip = error;
+        SetStatus("Strg+Alt+A konnte nicht registriert werden. Die Aufnahme per Button funktioniert weiterhin.", true);
+    }
+
+    public void LoadImage(BitmapSource image, string name, bool unsaved = false)
     {
         ArgumentNullException.ThrowIfNull(image);
         Dispatcher.VerifyAccess();
@@ -80,8 +98,9 @@ public partial class MainWindow : Window
         _editor.Changed += Editor_Changed;
         ImageViewbox.Child = _editor;
         _imageName = name;
-        _revision = _savedRevision = 0;
-        _savedHash = SHA256.HashData(ImageOutput.EncodePng(_editor.Flatten()));
+        _savedRevision = 0;
+        _revision = unsaved ? 1 : 0;
+        _savedHash = unsaved ? null : SHA256.HashData(ImageOutput.EncodePng(_editor.Flatten()));
         EmptyState.Visibility = Visibility.Collapsed;
         ImageScroll.Visibility = Visibility.Visible;
         DimensionsText.Text = string.Format(CultureInfo.CurrentCulture, "{0:N0} × {1:N0} px", image.PixelWidth, image.PixelHeight);
@@ -101,7 +120,7 @@ public partial class MainWindow : Window
         bool accountBusy = _accountCts != null;
         bool ocrBusy = _ocrCts != null;
         bool signedIn = _openAi.ActiveAccount?.IsSignedIn == true;
-        CaptureButton.IsEnabled = OpenButton.IsEnabled = EmptyCaptureButton.IsEnabled = !_replacing && !_closing;
+        CaptureButton.IsEnabled = OpenButton.IsEnabled = PasteButton.IsEnabled = EmptyCaptureButton.IsEnabled = !_replacing && !_closing;
         CopyButton.IsEnabled = SaveButton.IsEnabled = image && !_replacing;
         ToolDock.IsEnabled = DrawingSettings.IsEnabled = ZoomControls.IsEnabled = image;
         UndoButton.IsEnabled = _editor?.CanUndo == true;
@@ -113,13 +132,14 @@ public partial class MainWindow : Window
         OcrButton.Content = ocrBusy ? "Abbrechen" : "Text erkennen";
         OcrText.IsReadOnly = ocrBusy;
         CopyTextButton.IsEnabled = SaveTextButton.IsEnabled = OcrText.Text.Length > 0 && !ocrBusy;
-        AccountPicker.IsEnabled = AddAccountButton.IsEnabled = !accountBusy;
+        AccountPicker.IsEnabled = AddAccountButton.IsEnabled = !accountBusy && !_ocrUnavailable;
+        LoginButton.IsEnabled = !_ocrUnavailable;
         LoginButton.Content = accountBusy ? "Abbrechen" : "Weiter mit ChatGPT";
         LoginButton.Visibility = !signedIn || accountBusy ? Visibility.Visible : Visibility.Collapsed;
         SignOutButton.Visibility = signedIn ? Visibility.Visible : Visibility.Collapsed;
         SignOutButton.IsEnabled = !accountBusy;
         SavedAccountsRow.Visibility = _openAi.Accounts.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        AccountStatus.Text = signedIn ? "Mit ChatGPT verbunden" : "Konto verbinden";
+        AccountStatus.Text = _ocrUnavailable && !_diagnosticsMode ? "Konto nicht verfügbar" : signedIn ? "Mit ChatGPT verbunden" : "Konto verbinden";
         AccountDetail.Text = signedIn ? (string.IsNullOrWhiteSpace(_openAi.ActiveAccount?.Email) ? _openAi.ActiveAccount?.Label : _openAi.ActiveAccount.Email) : "Direkt bei OpenAI anmelden";
         AccountDetail.ToolTip = AccountDetail.Text;
         FileNameText.Text = _imageName + (_revision != _savedRevision ? " •" : "");
@@ -136,8 +156,12 @@ public partial class MainWindow : Window
 
     private void ReportError(string action, Exception exception)
     {
+        App.LogException(action, exception);
         // Provider messages can contain request URLs or account data; keep them out of the UI.
-        string reason = exception is HttpRequestException ? "Prüfe deine Internetverbindung und versuche es erneut." :
+        string reason = exception is OpenAiRequestException request ? request.Message :
+            exception is TimeoutException ? "Das Zeitlimit wurde erreicht. Versuche es später erneut." :
+            exception is ArgumentException && action == "Texterkennung" ? "Das Bild ist für OCR zu groß oder ungültig. Versuche einen kleineren Ausschnitt." :
+            exception is HttpRequestException ? "Prüfe deine Internetverbindung und versuche es erneut." :
             exception is UnauthorizedAccessException ? "Der Zugriff wurde verweigert. Wähle einen anderen Speicherort." :
             exception is IOException ? "Die Datei oder Zwischenablage ist gerade nicht verfügbar." : "Versuche es erneut.";
         SetStatus(action + " fehlgeschlagen. " + reason, true);
@@ -154,7 +178,8 @@ public partial class MainWindow : Window
             SetStatus("Bereich wählen · Esc bricht die Aufnahme ab.");
             BitmapSource? image = entireScreen ? await CaptureService.CaptureScreenAsync(this) : await CaptureService.CaptureRegionAsync(this);
             if (image == null) { SetStatus("Aufnahme abgebrochen."); return; }
-            LoadImage(image, "Aufnahme " + DateTime.Now.ToString("yyyy-MM-dd HH-mm-ss", CultureInfo.InvariantCulture) + ".png");
+            LoadImage(image, "Aufnahme " + DateTime.Now.ToString("yyyy-MM-dd HH-mm-ss", CultureInfo.InvariantCulture) + ".png", unsaved: true);
+            ShowFromTray();
             SetStatus("Aufnahme bereit. Wähle links ein Werkzeug zum Markieren.");
         }
         catch (OperationCanceledException) { SetStatus("Aufnahme abgebrochen."); }
@@ -165,6 +190,7 @@ public partial class MainWindow : Window
     private async void Capture_Click(object sender, RoutedEventArgs e) => await CaptureAsync();
 
     private async void Open_Click(object sender, RoutedEventArgs e) => await OpenAsync();
+    private async void Paste_Click(object sender, RoutedEventArgs e) => await PasteAsync();
 
     private async Task OpenAsync(string? path = null)
     {
@@ -200,7 +226,7 @@ public partial class MainWindow : Window
             BitmapSource? image = Clipboard.ContainsImage() ? Clipboard.GetImage() : null;
             if (image == null) { SetStatus("Die Zwischenablage enthält kein Bild."); return; }
             if (!await PrepareReplacementAsync()) return;
-            LoadImage(image, "Zwischenablage.png");
+            LoadImage(image, "Zwischenablage.png", unsaved: true);
             SetStatus("Bild aus der Zwischenablage eingefügt.");
         }
         catch (Exception ex) { ReportError("Einfügen", ex); }
@@ -221,6 +247,7 @@ public partial class MainWindow : Window
 
     private MessageBoxResult ShowSavePrompt()
     {
+        if (!IsVisible) ShowFromTray();
         var dialog = new Window { Owner = this, Title = "Änderungen speichern?", Width = 460, SizeToContent = SizeToContent.Height, ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.CenterOwner, ShowInTaskbar = false };
         var panel = new StackPanel { Margin = new Thickness(24) };
         panel.Children.Add(new TextBlock { Text = "Änderungen speichern?", FontSize = 20, FontWeight = FontWeights.SemiBold });
@@ -353,7 +380,17 @@ public partial class MainWindow : Window
         }
         if (modifiers != ModifierKeys.None) return;
         if (e.Key == Key.Delete && _editor != null) { _editor.DeleteSelected(); e.Handled = true; return; }
-        if (e.Key == Key.Escape) { _editor?.CommitText(); SelectTool(EditorTool.Select); return; }
+        if (e.Key == Key.Escape)
+        {
+            // Both the imported canvas and the writer's additive HandleKey API cancel before Tool commits.
+            MethodInfo? handler = typeof(AnnotationCanvas).GetMethod("HandleKey", BindingFlags.Instance | BindingFlags.NonPublic,
+                new[] { typeof(Key), typeof(ModifierKeys) });
+            if (_editor != null && handler != null) handler.Invoke(_editor, new object[] { Key.Escape, ModifierKeys.None });
+            else _editor?.EndGesture(cancel: true);
+            SelectTool(EditorTool.Select);
+            e.Handled = true;
+            return;
+        }
         EditorTool? tool = e.Key switch { Key.V => EditorTool.Select, Key.A => EditorTool.Arrow, Key.R => EditorTool.Rectangle, Key.E => EditorTool.Ellipse, Key.P => EditorTool.Pen, Key.T => EditorTool.Text, Key.H => EditorTool.Highlight, Key.B => EditorTool.Redact, _ => null };
         if (tool.HasValue && _editor != null) { SelectTool(tool.Value); e.Handled = true; }
     }
@@ -381,12 +418,12 @@ public partial class MainWindow : Window
             _openAi.SelectAccount(account.Key);
             ModelPicker.ItemsSource = null;
             SetStatus(account.IsSignedIn ? "Konto gewechselt. Lade die aktuellen Modelle." : "Gespeichertes Konto gewählt. Melde dich erneut an.");
-            await Task.CompletedTask;
+            if (account.IsSignedIn) await LoadModelsAsync(ct);
         });
     }
     private async Task RunAccountActionAsync(Func<CancellationToken, Task> action)
     {
-        if (_accountCts != null) return;
+        if (_accountCts != null || _ocrUnavailable || _diagnosticsMode || _disposed) return;
         using var cts = new CancellationTokenSource();
         _accountCts = cts;
         UpdateControls();
@@ -512,6 +549,8 @@ public partial class MainWindow : Window
         if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
         Activate();
     }
+    internal void FitDocumentForDiagnostics() { _fit = true; ApplyZoom(); }
+    internal void ShowUnexpectedError() => SetStatus("Die Aktion konnte nicht abgeschlossen werden. Speichere dein Bild und starte Kairos bei Bedarf neu.", true);
     public async Task RequestExitAsync()
     {
         if (_closing || _replacing) return;

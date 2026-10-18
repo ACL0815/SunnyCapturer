@@ -9,5 +9,15 @@
     <RootNamespace>KairosCapture</RootNamespace>
     <AssemblyName>KairosCapture</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>KairosCapture.ico</ApplicationIcon>
+    <Version>0.1.0</Version>
+    <Company>Kairos Capture</Company>
+    <Description>Screenshot-Werkbank für Windows</Description>
+    <Deterministic>true</Deterministic>
+    <!-- WPF owns PerMonitorV2 in the manifest; WinForms is used only for tray and clipboard. -->
+    <NoWarn>$(NoWarn);WFO0003</NoWarn>
   </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.23.0" />
+  </ItemGroup>
 </Project>
