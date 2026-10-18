@@ -16,12 +16,14 @@ Capture-/Editor-Writer besitzt ausschließlich `src/KairosCapture/Capture/**` un
 
 ```csharp
 public enum CaptureCompletion { Cancelled, Copied, Saved, Workbench, Ocr }
-public sealed record CaptureSessionResult(CaptureCompletion Completion, BitmapSource? Image);
+public sealed record CaptureSessionResult(CaptureCompletion Completion, AnnotationCanvas? Editor = null, Int32Rect Region = default);
 public static Task<CaptureSessionResult> CaptureService.CaptureEditedRegionAsync(Window owner, CancellationToken cancellationToken = default);
 public BitmapSource AnnotationCanvas.Flatten(Int32Rect crop);
 ```
 
-Bestehende rohe Capture-APIs bleiben kompatibel für Checks und vorhandene Aufrufer. Die neue Sitzung hält das Overlay offen; Copy/Save verwenden den Editor-Export und beenden die Sitzung. Abbruch stellt die vorherige Owner-Sichtbarkeit her; Copy/Save lassen das Hauptfenster im Tray. Workbench/Ocr liefern das fertige Bitmap zur ausdrücklichen Übergabe. Kein automatisches Öffnen der Werkbank nach Loslassen der Maus.
+Bestehende rohe Capture-APIs bleiben kompatibel für Checks und vorhandene Aufrufer. Die neue Sitzung hält das Overlay offen; Copy/Save verwenden den Editor-Export und beenden die Sitzung. Abbruch stellt die vorherige Owner-Sichtbarkeit her; Copy/Save lassen das Hauptfenster im Tray. Workbench/Ocr übergeben denselben lebenden Editor samt Ausschnitt (vom bisherigen Visualparent gelöst), damit Objekte und History erhalten bleiben. Die Werkbank hostet ihn in einem beschnittenen Canvas mit Offset −Region.X/−Region.Y; alle Ausgaben verwenden `Flatten(Region)`. Kein automatisches Öffnen der Werkbank nach Loslassen der Maus.
+
+Neue Diagnose-API im Capture-Bereich: `public static OverlaySelfChecks.Run(): void` sowie `RenderPreview(BitmapSource background): BitmapSource`. Beides ohne echtes Fensterzeigen, Desktopaufnahme, Zwischenablage oder Kontozugriff. Shell integriert die Suite und `--render-overlay-preview <PNG>` unter Verwendung des vorhandenen Demo-Bildes.
 
 Shell-Writer besitzt ausschließlich `MainWindow.xaml*`, `App.xaml.cs`, `AppDiagnostics.cs`. Er verdrahtet die neue Sitzung und deren Status; kein eigener Editor/keine parallele Overlaylogik. Root besitzt Projekt-/Build-/Startdateien, Dokumentation und Integration. Jeder Writer arbeitet im eigenen Worktree. Services bleiben unverändert.
 
