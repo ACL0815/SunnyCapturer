@@ -1,6 +1,6 @@
 # Kairos Capture
 
-> Status: frühere Entwurfsbeschreibung, nicht implementiert. Für die nach Untersuchung der installierten SunnyCapturer-Version erneut geprüfte Abwägung siehe [ARCHITEKTUR-ABWAEGUNG.md](reverse/ARCHITEKTUR-ABWAEGUNG.md) und [Untersuchungsbericht](reverse/README.md).
+> Stand 18.10.2026: C#/WPF ist implementiert. Die ursprüngliche Beschränkung auf Bearbeitung im Hauptfenster wurde durch den verbindlichen [Overlay-Ablauf](../plans/2026-10-18-live-overlay-correction.md) ersetzt. Für die nach Untersuchung der installierten SunnyCapturer-Version geprüfte Technologieabwägung siehe [ARCHITEKTUR-ABWAEGUNG.md](reverse/ARCHITEKTUR-ABWAEGUNG.md) und [Untersuchungsbericht](reverse/README.md). Praktische Windows-/Mixed-DPI-Abnahme bleibt offen.
 
 Entscheidung vom 18.10.2026, Architekturprüfung durch Claude Opus 5.5 mit Ponytail.
 
@@ -17,10 +17,10 @@ Die Wahl ist auf Windows optimiert. Sie ist keine Zusage für macOS/Linux und ke
 
 ## Aufbau
 
-- `Capture`: native Bereichsaufnahme, virtueller Desktop, Hotkey und Bildausgabe.
-- `Editor`: eigenständige Zeichenobjekte mit Auswahl, direkter Texteingabe und Rückgängig/Wiederholen; Export in Originalpixeln.
+- `Capture`: vollständigen virtuellen Desktop einfrieren, Auswahlrahmen im offenen Overlay verschieben/verändern, Werkzeuge und Bildausgabe direkt dort verwenden; Hotkey und native Bildaufnahme.
+- `Editor`: ein gemeinsamer Canvas für das volle Pixelraster mit eigenständigen Zeichenobjekten, Auswahl, Move/Resize, Stiländerung, direkter Texteingabe und Rückgängig/Wiederholen. Der veränderbare Rahmen ist ein Crop; Export rendert direkt dessen aktuelle Originalpixel.
 - `Services`: direkter OpenAI-OAuth-Login, geschützte lokale Sitzung und OCR über die Responses API.
-- `MainWindow`: Arbeitsfläche, Werkzeuge und bearbeitbarer OCR-Text; kleine WPF-Codebehind ohne zusätzliches UI-Framework.
+- `MainWindow`: ausdrücklich gewählte Werkbank mit demselben lebenden Editor und bearbeitbarem OCR-Text; kleine WPF-Codebehind ohne zusätzliches UI-Framework. Kein automatischer Wechsel nach dem Aufziehen eines Ausschnitts.
 
 Die Farben folgen der Nutzervorlage: fast schwarzer Grund, violette und lavendelfarbene Akzente, sparsame goldene Konturen. Das Screenshot-Bild bleibt der Mittelpunkt der Oberfläche.
 

@@ -21,6 +21,8 @@ Diese Abnahme ersetzt die unzureichende Prüfung des ersten separaten Werkbank-A
 
 ## Belegarten
 
-Die neuen `OverlaySelfChecks` prüfen die Zustands- und Pixelverträge ohne echte Aufnahme, Clipboard-Änderung, sichtbare Fenster oder Kontozugriff. `--render-overlay-preview` rendert die echte WPF-Oberfläche mit einem lokalen synthetischen Testbild. Beides wird nach Integration von Root ausgeführt und visuell geprüft.
+Root hat den integrierten Stand am 18.10.2026 mit SDK 10.0.401 gebaut: **0 Warnungen, 0 Fehler; sechs Suiten bestanden**, einschließlich `OverlaySelfChecks` und der Shell-Handoff-Prüfungen. Die Pixelgegenproben vergleichen den direkt gerenderten Crop mit den entsprechenden Pixeln des vollständigen Editors. Sie prüfen alle acht Rahmengriffe, Vergrößerung über den ersten Ausschnitt hinaus, Objektidentität trotz zeitweiliger Ausblendung, Move/Resize, Text-Reedition, Stiländerungen und Undo/Redo. Handoff-Prüfungen bestätigen dieselbe Editorinstanz und denselben Crop sowie den Erhalt des bisherigen Dokuments bei Copy/Save/Cancel.
+
+`--render-overlay-preview` rendert die echte WPF-Oberfläche mit einem lokalen synthetischen Testbild. Root hat `test-results/overlay.png` (1280 × 800) selbst visuell geprüft: Maskierung, acht goldene Rahmengriffe, gesonderte Objektgriffe und lesbare dunkle Werkzeugleiste. Die Werkbank-Vorschau (`main-window.png`, 1440 × 840) wurde ebenfalls geprüft. Das ist ein echtes Offscreen-WPF-Rendering; es ist kein Nachweis physischer Mausbedienung.
 
 Die physische Computer-Use-Steuerung wurde durch Esc beendet und wird in diesem laufenden Turn nicht erneut benutzt. Die obige vollständige reale Maus-/Tastaturfolge gilt deshalb bis zu einer tatsächlichen Ausführung als **offen**, auch wenn Offline-Prüfungen und Vorschau grün sind. Mixed-DPI und echte OpenAI-OCR bleiben separate Laufzeitprüfungen.
