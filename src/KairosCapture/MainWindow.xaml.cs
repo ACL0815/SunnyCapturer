@@ -3,7 +3,6 @@ using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using System.Net.Http;
-using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -74,8 +73,7 @@ public partial class MainWindow : Window
         DwmSetWindowAttribute(new WindowInteropHelper(this).Handle, 20, ref dark, sizeof(int));
         if (_diagnosticsMode) return;
         _hotkey = new GlobalHotkey(this, () => _ = CaptureAsync());
-        // The capture writer adds this event without changing the existing Register API.
-        typeof(GlobalHotkey).GetEvent("RegistrationFailed")?.AddEventHandler(_hotkey, (Action<string>)OnHotkeyRegistrationFailed);
+        _hotkey.RegistrationFailed += OnHotkeyRegistrationFailed;
         if (!_hotkey.Register(out string? error))
             OnHotkeyRegistrationFailed(error ?? "Strg+Alt+A ist nicht verfügbar.");
     }
@@ -382,11 +380,7 @@ public partial class MainWindow : Window
         if (e.Key == Key.Delete && _editor != null) { _editor.DeleteSelected(); e.Handled = true; return; }
         if (e.Key == Key.Escape)
         {
-            // Both the imported canvas and the writer's additive HandleKey API cancel before Tool commits.
-            MethodInfo? handler = typeof(AnnotationCanvas).GetMethod("HandleKey", BindingFlags.Instance | BindingFlags.NonPublic,
-                new[] { typeof(Key), typeof(ModifierKeys) });
-            if (_editor != null && handler != null) handler.Invoke(_editor, new object[] { Key.Escape, ModifierKeys.None });
-            else _editor?.EndGesture(cancel: true);
+            _editor?.HandleKey(Key.Escape);
             SelectTool(EditorTool.Select);
             e.Handled = true;
             return;
