@@ -25,10 +25,14 @@ public static class ImageOutput
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-        BitmapDecoder decoder = BitmapDecoder.Create(stream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+        // Read dimensions before materializing the pixel buffer. OnLoad would decode
+        // an oversized image before the shared raster limit could reject it.
+        BitmapDecoder decoder = BitmapDecoder.Create(stream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.None);
         if (decoder is not PngBitmapDecoder && decoder is not JpegBitmapDecoder && decoder is not BmpBitmapDecoder)
             throw new NotSupportedException("Unterstützt werden PNG-, JPEG- und BMP-Bilder.");
-        BitmapSource image = AtNativeDpi(decoder.Frames[0]);
+        // Copy while the stream is open, including already-96-DPI frames, so the
+        // returned frozen bitmap never retains a lazy decoder or file dependency.
+        BitmapSource image = AtNativeDpi(decoder.Frames[0], detach: true);
         image.Freeze();
         return image;
     }
@@ -96,10 +100,10 @@ public static class ImageOutput
         }
     }
 
-    private static BitmapSource AtNativeDpi(BitmapSource image)
+    private static BitmapSource AtNativeDpi(BitmapSource image, bool detach = false)
     {
         CaptureGeometry.ValidateSize(image.PixelWidth, image.PixelHeight);
-        if (image.DpiX == 96 && image.DpiY == 96)
+        if (!detach && image.DpiX == 96 && image.DpiY == 96)
             return image;
 
         int stride = checked((image.PixelWidth * image.Format.BitsPerPixel + 7) / 8);

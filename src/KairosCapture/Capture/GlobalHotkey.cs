@@ -17,7 +17,14 @@ public sealed class GlobalHotkey : IDisposable
     private HwndSource? _source;
     private IntPtr _handle;
     private bool _registered;
+    private bool _requested;
+    private bool _nativeEnabled = true;
     private bool _disposed;
+
+    public string? LastError { get; private set; }
+
+    /// <summary>Raised on the owner's Dispatcher when a suspended hotkey cannot be restored.</summary>
+    public event Action<string>? RegistrationFailed;
 
     public GlobalHotkey(Window owner, Action onPressed)
     {
@@ -30,15 +37,17 @@ public sealed class GlobalHotkey : IDisposable
         if (_id > 0xBFFF)
             throw new InvalidOperationException("Zu viele Hotkey-Instanzen wurden erzeugt.");
         _owner.Closed += OnOwnerClosed;
+        _owner.IsEnabledChanged += OnOwnerIsEnabledChanged;
+        CaptureService.CaptureStateChanged += OnCaptureStateChanged;
     }
 
     public bool Register(out string? error)
     {
         _owner.Dispatcher.VerifyAccess();
-        error = null;
+        error = LastError = null;
         if (_disposed)
         {
-            error = "Das Hotkey-Objekt oder sein Fenster wurde bereits geschlossen.";
+            error = LastError = "Das Hotkey-Objekt oder sein Fenster wurde bereits geschlossen.";
             return false;
         }
         if (_registered)
@@ -46,39 +55,94 @@ public sealed class GlobalHotkey : IDisposable
 
         try
         {
-            // EnsureHandle also supports registration before the window's first Show().
-            _handle = new WindowInteropHelper(_owner).EnsureHandle();
-            _source = HwndSource.FromHwnd(_handle)
-                ?? throw new InvalidOperationException("Das Fenster besitzt keine Windows-Nachrichtenquelle.");
-            if (!RegisterHotKey(_handle, _id, 0x4003, 0x41)) // MOD_NOREPEAT | MOD_CONTROL | MOD_ALT, A
+            if (_source is null)
             {
-                int code = Marshal.GetLastWin32Error();
-                error = $"Ctrl+Alt+A konnte nicht registriert werden; die Kombination ist möglicherweise bereits belegt. " +
-                    $"Windows-Fehler {code}: {new Win32Exception(code).Message}";
-                _source = null;
-                return false;
+                // EnsureHandle also supports registration before the window's first Show().
+                _handle = new WindowInteropHelper(_owner).EnsureHandle();
+                _source = HwndSource.FromHwnd(_handle)
+                    ?? throw new InvalidOperationException("Das Fenster besitzt keine Windows-Nachrichtenquelle.");
+                _nativeEnabled = IsWindowEnabled(_handle);
+                _source.AddHook(OnWindowMessage);
             }
-            _source.AddHook(OnWindowMessage);
-            _registered = true;
-            return true;
+            _requested = true;
+            return UpdateRegistration(out error);
         }
         catch (Exception exception) when (exception is InvalidOperationException || exception is Win32Exception)
         {
-            UnregisterHotKey(_handle, _id);
+            ReleaseRegistration();
+            if (_source is not null && !_source.IsDisposed)
+                _source.RemoveHook(OnWindowMessage);
             _source = null;
-            error = $"Ctrl+Alt+A konnte nicht registriert werden: {exception.Message}";
+            _requested = false;
+            error = LastError = $"Ctrl+Alt+A konnte nicht registriert werden: {exception.Message}";
             return false;
         }
     }
 
     private IntPtr OnWindowMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
-        if (message == 0x0312 && wParam.ToInt64() == _id && _registered && !_disposed) // WM_HOTKEY
+        if (message == 0x000A && !_disposed) // WM_ENABLE: modal dialogs use native EnableWindow, not WPF IsEnabled.
+        {
+            _nativeEnabled = wParam != IntPtr.Zero;
+            RefreshRegistration();
+        }
+        if (message == 0x0312 && wParam.ToInt64() == _id && _registered && !_disposed &&
+            _owner.IsEnabled && _nativeEnabled && !CaptureService.IsCapturing &&
+            (_handle == IntPtr.Zero || IsWindowEnabled(_handle))) // WM_HOTKEY
         {
             handled = true;
             _onPressed();
         }
         return IntPtr.Zero;
+    }
+
+    private bool UpdateRegistration(out string? error)
+    {
+        error = null;
+        if (_disposed || !_requested)
+            return true;
+        if (!_owner.IsEnabled || !_nativeEnabled || CaptureService.IsCapturing)
+        {
+            // Ignoring WM_HOTKEY alone is insufficient: RegisterHotKey consumes the
+            // combination system-wide. Release it for the entire blocked interval.
+            ReleaseRegistration();
+            return true;
+        }
+        if (_registered)
+            return true;
+        if (!RegisterHotKey(_handle, _id, 0x4003, 0x41)) // MOD_NOREPEAT | MOD_CONTROL | MOD_ALT, A
+        {
+            int code = Marshal.GetLastWin32Error();
+            error = LastError = $"Ctrl+Alt+A konnte nicht registriert werden; die Kombination ist möglicherweise bereits belegt. " +
+                $"Windows-Fehler {code}: {new Win32Exception(code).Message}";
+            return false;
+        }
+        LastError = null;
+        _registered = true;
+        return true;
+    }
+
+    private void ReleaseRegistration()
+    {
+        if (_registered)
+            UnregisterHotKey(_handle, _id);
+        _registered = false;
+    }
+
+    private void RefreshRegistration()
+    {
+        if (!UpdateRegistration(out string? error))
+            RegistrationFailed?.Invoke(error!);
+    }
+
+    private void OnOwnerIsEnabledChanged(object sender, DependencyPropertyChangedEventArgs args) => RefreshRegistration();
+
+    private void OnCaptureStateChanged(object? sender, EventArgs args)
+    {
+        if (_owner.Dispatcher.CheckAccess())
+            RefreshRegistration();
+        else if (!_owner.Dispatcher.HasShutdownStarted)
+            _owner.Dispatcher.BeginInvoke(new Action(RefreshRegistration));
     }
 
     private void OnOwnerClosed(object? sender, EventArgs args) => Dispose();
@@ -90,8 +154,10 @@ public sealed class GlobalHotkey : IDisposable
             return;
         _disposed = true;
         _owner.Closed -= OnOwnerClosed;
-        if (_registered)
-            UnregisterHotKey(_handle, _id);
+        _owner.IsEnabledChanged -= OnOwnerIsEnabledChanged;
+        CaptureService.CaptureStateChanged -= OnCaptureStateChanged;
+        _requested = false;
+        ReleaseRegistration();
         if (_source is not null && !_source.IsDisposed)
             _source.RemoveHook(OnWindowMessage);
         _registered = false;
@@ -106,4 +172,8 @@ public sealed class GlobalHotkey : IDisposable
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool UnregisterHotKey(IntPtr window, int id);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindowEnabled(IntPtr window);
 }

@@ -15,37 +15,67 @@ public static class CaptureService
 {
     private static int _capturing;
 
-    public static Task<BitmapSource?> CaptureRegionAsync(Window owner) => CaptureAsync(owner, true);
+    internal static bool IsCapturing => Volatile.Read(ref _capturing) != 0;
+    internal static event EventHandler? CaptureStateChanged;
 
-    public static Task<BitmapSource?> CaptureScreenAsync(Window owner) => CaptureAsync(owner, false);
+    public static Task<BitmapSource?> CaptureRegionAsync(Window owner) => CaptureRegionAsync(owner, CancellationToken.None);
 
-    private static async Task<BitmapSource?> CaptureAsync(Window owner, bool region)
+    public static Task<BitmapSource?> CaptureScreenAsync(Window owner) => CaptureScreenAsync(owner, CancellationToken.None);
+
+    public static Task<BitmapSource?> CaptureRegionAsync(Window owner, CancellationToken cancellationToken) => CaptureAsync(owner, true, cancellationToken);
+
+    public static Task<BitmapSource?> CaptureScreenAsync(Window owner, CancellationToken cancellationToken) => CaptureAsync(owner, false, cancellationToken);
+
+    private static async Task<BitmapSource?> CaptureAsync(Window owner, bool region, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(owner);
         owner.Dispatcher.VerifyAccess();
+        cancellationToken.ThrowIfCancellationRequested();
         if (Interlocked.CompareExchange(ref _capturing, 1, 0) != 0)
             return null;
 
         Visibility visibility = owner.Visibility;
         WindowState state = owner.WindowState;
         bool ownerClosed = false;
-        void OnOwnerClosed(object? sender, EventArgs args) => ownerClosed = true;
-        owner.Closed += OnOwnerClosed;
         RegionOverlay? overlay = null;
+        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        void OnOwnerClosed(object? sender, EventArgs args)
+        {
+            ownerClosed = true;
+            lifetime.Cancel();
+            overlay?.Cancel();
+        }
+        owner.Closed += OnOwnerClosed;
         try
         {
+            CaptureStateChanged?.Invoke(null, EventArgs.Empty);
             owner.Hide();
-            await Task.Delay(100);
+            await Task.Delay(100, lifetime.Token);
             if (ownerClosed)
                 return null;
 
+            lifetime.Token.ThrowIfCancellationRequested();
+            // A tray action may have shown the owner during the delay. Hide again without
+            // yielding, then wait for this application's queued compositor work to finish.
+            owner.Hide();
+            Marshal.ThrowExceptionForHR(DwmFlush());
             Rectangle bounds = GetVirtualBounds();
             BitmapSource screenshot = CaptureDesktop(bounds);
+            lifetime.Token.ThrowIfCancellationRequested();
             if (!region)
                 return screenshot;
 
             overlay = new RegionOverlay(screenshot, bounds) { Owner = owner };
+            using CancellationTokenRegistration cancelSelection = lifetime.Token.Register(() =>
+            {
+                if (!owner.Dispatcher.HasShutdownStarted)
+                    owner.Dispatcher.BeginInvoke(new Action(() => overlay.Cancel()));
+            });
+            lifetime.Token.ThrowIfCancellationRequested();
             overlay.ShowDialog();
+            lifetime.Token.ThrowIfCancellationRequested();
+            if (ownerClosed)
+                return null;
             if (overlay.Failure is not null)
                 throw overlay.Failure;
             Int32Rect selection = overlay.Selection;
@@ -56,11 +86,15 @@ public static class CaptureService
             cropped.Freeze();
             return cropped;
         }
+        catch (OperationCanceledException) when (ownerClosed && !cancellationToken.IsCancellationRequested)
+        {
+            return null;
+        }
         finally
         {
             try
             {
-                overlay?.Close();
+                overlay?.Cancel();
                 owner.Closed -= OnOwnerClosed;
                 if (!ownerClosed)
                 {
@@ -79,6 +113,7 @@ public static class CaptureService
             finally
             {
                 Interlocked.Exchange(ref _capturing, 0);
+                CaptureStateChanged?.Invoke(null, EventArgs.Empty);
             }
         }
     }
@@ -86,6 +121,8 @@ public static class CaptureService
     // Requires the shell's PerMonitorV2 manifest: these metrics are physical pixels.
     private static Rectangle GetVirtualBounds()
     {
+        if (!AreDpiAwarenessContextsEqual(GetThreadDpiAwarenessContext(), new IntPtr(-4)))
+            throw new InvalidOperationException("Die Aufnahme benötigt die PerMonitorV2-DPI-Einstellung des Anwendungsmanifests.");
         var bounds = new Rectangle(GetSystemMetrics(76), GetSystemMetrics(77),
             GetSystemMetrics(78), GetSystemMetrics(79));
         CaptureGeometry.ValidateSize(bounds.Width, bounds.Height);
@@ -122,6 +159,16 @@ public static class CaptureService
 
     [DllImport("user32.dll")]
     private static extern int GetSystemMetrics(int index);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetThreadDpiAwarenessContext();
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AreDpiAwarenessContextsEqual(IntPtr first, IntPtr second);
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmFlush();
 }
 
 internal static class CaptureGeometry

@@ -28,6 +28,10 @@ internal sealed class RegionOverlay : Window
 
     internal RegionOverlay(BitmapSource screenshot, DrawingRectangle bounds)
     {
+        ArgumentNullException.ThrowIfNull(screenshot);
+        CaptureGeometry.ValidateSize(bounds.Width, bounds.Height);
+        if (screenshot.PixelWidth != bounds.Width || screenshot.PixelHeight != bounds.Height)
+            throw new ArgumentException("Bildraster und Desktopgrenzen müssen übereinstimmen.", nameof(screenshot));
         _bounds = bounds;
         Title = "Kairos Capture – Bereich auswählen";
         WindowStyle = WindowStyle.None;
@@ -42,6 +46,7 @@ internal sealed class RegionOverlay : Window
         Background = Brushes.Black;
         Cursor = Cursors.Cross;
         UseLayoutRounding = true;
+        FlowDirection = FlowDirection.LeftToRight;
         _surface = new OverlaySurface(screenshot);
         Content = _surface;
     }
@@ -74,11 +79,27 @@ internal sealed class RegionOverlay : Window
 
     private void PlaceOverDesktop()
     {
-        if (_handle != IntPtr.Zero && !SetWindowPos(_handle, new IntPtr(-1), _bounds.X, _bounds.Y,
+        if (_handle == IntPtr.Zero || _closed)
+            return;
+        if (!SetWindowPos(_handle, new IntPtr(-1), _bounds.X, _bounds.Y,
                 _bounds.Width, _bounds.Height, 0x0040)) // HWND_TOPMOST, SWP_SHOWWINDOW
         {
             Failure = new Win32Exception(Marshal.GetLastWin32Error(), "Das Auswahlfenster konnte nicht über dem Desktop platziert werden.");
-            Close();
+            Cancel();
+            return;
+        }
+
+        var origin = new NativePoint();
+        if (!GetClientRect(_handle, out NativeRect client) || !ClientToScreen(_handle, ref origin))
+        {
+            Failure = new Win32Exception(Marshal.GetLastWin32Error(), "Die physischen Fenstergrenzen konnten nicht geprüft werden.");
+            Cancel();
+        }
+        else if (origin.X != _bounds.X || origin.Y != _bounds.Y ||
+                 client.Right - client.Left != _bounds.Width || client.Bottom - client.Top != _bounds.Height)
+        {
+            Failure = new InvalidOperationException("Das Auswahlfenster deckt das Desktopraster nicht pixelgenau ab.");
+            Cancel();
         }
     }
 
@@ -153,17 +174,21 @@ internal sealed class RegionOverlay : Window
         base.OnClosed(e);
     }
 
-    private void Cancel()
+    internal void Cancel()
     {
+        if (_closed)
+            return;
         Selection = Int32Rect.Empty;
+        _accepted = false;
         _dragging = false;
         Close();
     }
 
     private bool TryReadCursor(out DrawingPoint cursor)
     {
-        // Both APIs use physical pixels under PerMonitorV2. Never infer screen DPI from WPF mouse events.
-        if (!GetCursorPos(out NativePoint point) || !ScreenToClient(_handle, ref point))
+        // Read the physical desktop position directly, including negative monitor origins.
+        // WPF mouse coordinates and individual monitor scale factors never enter the crop.
+        if (!GetPhysicalCursorPos(out NativePoint point))
         {
             Failure = new Win32Exception(Marshal.GetLastWin32Error(), "Die Zeigerposition konnte nicht gelesen werden.");
             cursor = default;
@@ -176,7 +201,7 @@ internal sealed class RegionOverlay : Window
 
     private void UpdateSelection(DrawingPoint cursor)
     {
-        Selection = CaptureGeometry.Select(new DrawingRectangle(0, 0, _bounds.Width, _bounds.Height), _start, cursor);
+        Selection = CaptureGeometry.Select(_bounds, _start, cursor);
         _surface.Selection = Selection;
         _surface.InvalidateVisual();
     }
@@ -188,17 +213,30 @@ internal sealed class RegionOverlay : Window
         public int Y;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetCursorPos(out NativePoint point);
+    private static extern bool GetPhysicalCursorPos(out NativePoint point);
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool ScreenToClient(IntPtr window, ref NativePoint point);
+    private static extern bool ClientToScreen(IntPtr window, ref NativePoint point);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetClientRect(IntPtr window, out NativeRect rectangle);
 
     private sealed class OverlaySurface : FrameworkElement
     {
@@ -213,6 +251,10 @@ internal sealed class RegionOverlay : Window
         protected override void OnRender(DrawingContext drawing)
         {
             base.OnRender(drawing);
+            // One borderless HWND covers the physical virtual desktop (checked above).
+            // WPF has one scale for this entire HWND: ActualWidth = pixelWidth / scaleX.
+            // Stretching this 96-DPI raster and selection to ActualWidth cancels that scale
+            // again at render time, even where the HWND spans monitors of different DPI.
             var full = new Rect(0, 0, ActualWidth, ActualHeight);
             drawing.DrawImage(_screenshot, full);
             bool selected = Selection.Width > 0 && Selection.Height > 0;
