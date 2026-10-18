@@ -4,6 +4,8 @@ Untersuchung vom 18.10.2026. Der jüngste Nutzerauftrag priorisiert zunächst di
 
 Die zentrale Erkenntnis ist inzwischen durch native Decompilation belegt: Die installierte SunnyCapturer-Generation besitzt einen Editor mit eigenständigen Grafikobjekten, editierbaren Textknoten und einem Undo-Stack. Aufnahme und gemeinsamer Bitmap-Ausgabepfad sind bis zu ihren Qt-Aufrufen verfolgt. Die alten v1-Quellen bilden diese aktuelle Struktur nicht zuverlässig ab. Für die gewünschte direkte Bearbeitung ist deshalb ein eigenes Objektmodell die wichtige Rekonstruktionsvorgabe.
 
+**Nachtrag zur Overlay-Korrektur:** Der [gezielte Overlay-Vertrag](overlay-native/README.md) ordnet die vorhandenen nativen Belege für vollständigen Hintergrund, separate Auswahlkoordinaten, Szenenobjekte und Objekt-Erzeugungs-Undo neu. Die zusätzliche Maus-/Statuspfad-Vertiefung scheiterte zweimal am nativen Provider-Timeout; danach wurde die Sitzung geschlossen. Es gibt daraus keine neue erfolgreiche Decompilation. Rahmenänderung nach Annotationen und Toolbar-Persistenz werden dort ausdrücklich als noch nicht vollständig nativ belegt geführt. Die eigene Kairos-Version 0.2 setzt den vom Nutzer verlangten Ablauf inzwischen um; ihre [sechs Offline-Suiten und WPF-Renderprüfung](../ABNAHME.md) sind getrennte Implementierungsbelege und kein Ersatz für die offene reale Windows-Bedienprüfung.
+
 ## Ziel und Identität
 
 Unverändertes Ziel: `C:\Users\Axel_desktop\AppData\Local\Programs\SunnyCapturer\SunnyCapturer.exe`.
