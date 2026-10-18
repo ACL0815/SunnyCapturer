@@ -20,7 +20,7 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-        _diagnostics = e.Args.Length > 0 && e.Args[0] is "--self-test" or "--self-check" or "--render-preview";
+        _diagnostics = e.Args.Length > 0 && e.Args[0] is "--self-test" or "--self-check" or "--render-preview" or "--render-overlay-preview";
         DispatcherUnhandledException += OnDispatcherException;
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
         {
@@ -41,7 +41,7 @@ public partial class App : Application
                 return;
             }
             if (e.Args.Length > 1 || (e.Args.Length == 1 && e.Args[0] != "--demo"))
-                throw new ArgumentException("Aufruf: KairosCapture [--demo | --self-test <Ordner> | --render-preview <PNG-Datei>]");
+                throw new ArgumentException("Aufruf: KairosCapture [--demo | --self-test <Ordner> | --render-preview <PNG-Datei> | --render-overlay-preview <PNG-Datei>]");
             var window = new MainWindow();
             MainWindow = window;
             InitializeTray(window);

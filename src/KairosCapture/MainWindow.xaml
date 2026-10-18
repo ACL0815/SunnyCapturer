@@ -67,13 +67,13 @@
           <Grid Grid.Row="1" x:Name="Stage" ClipToBounds="True">
             <Grid.Background><DrawingBrush TileMode="Tile" Viewport="0,0,24,24" ViewportUnits="Absolute"><DrawingBrush.Drawing><DrawingGroup><GeometryDrawing Brush="#0E131A" Geometry="M0,0 H24 V24 H0 Z" /><GeometryDrawing Brush="#141923" Geometry="M0,0 H12 V12 H0 Z M12,12 H24 V24 H12 Z" /></DrawingGroup></DrawingBrush.Drawing></DrawingBrush></Grid.Background>
             <ScrollViewer x:Name="ImageScroll" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" SizeChanged="Stage_SizeChanged" PreviewMouseWheel="ImageScroll_MouseWheel" Visibility="Collapsed" Focusable="False">
-              <Grid Margin="28" HorizontalAlignment="Center" VerticalAlignment="Center"><Viewbox x:Name="ImageViewbox" Stretch="Fill" /></Grid>
+              <Grid Margin="28" HorizontalAlignment="Center" VerticalAlignment="Center"><Viewbox x:Name="ImageViewbox" Stretch="Fill"><Canvas x:Name="CropCanvas" ClipToBounds="True" /></Viewbox></Grid>
             </ScrollViewer>
             <Grid x:Name="EmptyState" Margin="26">
               <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="400">
                 <Border Width="76" Height="76" CornerRadius="22" BorderBrush="{StaticResource DockOutline}" BorderThickness="1" Background="#1C172A" Margin="0,0,0,24"><Grid Margin="22"><Path Stroke="#B097E9" StrokeThickness="1.6" Data="M0,10 L0,0 10,0 M22,0 L32,0 32,10 M32,22 L32,32 22,32 M10,32 L0,32 0,22" /><Ellipse Width="7" Height="7" Fill="#D3B576" /></Grid></Border>
                 <TextBlock Text="Ein Ausschnitt. Alles im Blick." FontSize="24" FontWeight="SemiBold" TextAlignment="Center" TextWrapping="Wrap" />
-                <TextBlock Text="Nimm einen Bereich auf und markiere,&#x0a;was zählt. Oder beginne mit einem Bild." Foreground="{StaticResource MutedBrush}" FontSize="13" LineHeight="22" TextAlignment="Center" Margin="0,12,0,23" />
+                <TextBlock Text="Nimm einen Bereich auf und bearbeite ihn&#x0a;direkt auf dem eingefrorenen Bildschirm." Foreground="{StaticResource MutedBrush}" FontSize="13" LineHeight="22" TextAlignment="Center" Margin="0,12,0,23" />
                 <Button x:Name="EmptyCaptureButton" Content="Bereich aufnehmen" Style="{StaticResource PrimaryButton}" Click="Capture_Click" HorizontalAlignment="Center" Padding="24,12" ToolTip="Strg+Alt+A" />
                 <TextBlock Text="Strg+Alt+A" FontSize="11" Foreground="{StaticResource LavenderBrush}" TextAlignment="Center" Margin="0,9,0,26" />
                 <Border Height="1" Background="{StaticResource BorderBrush}" Margin="28,0" />

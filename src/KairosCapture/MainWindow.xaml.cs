@@ -28,6 +28,7 @@ public partial class MainWindow : Window
     private readonly bool _diagnosticsMode;
     private readonly bool _ocrUnavailable;
     private AnnotationCanvas? _editor;
+    private Int32Rect _documentRegion;
     private GlobalHotkey? _hotkey;
     private EditorTool _tool = EditorTool.Select;
     private Brush _stroke = new SolidColorBrush(Color.FromRgb(125, 75, 227));
@@ -35,6 +36,7 @@ public partial class MainWindow : Window
     private bool _fit = true;
     private bool _settingZoom;
     private bool _refreshingAccounts;
+    private bool _syncingDrawingSettings;
     private bool _replacing;
     private bool _closing;
     private bool _disposed;
@@ -95,24 +97,73 @@ public partial class MainWindow : Window
     {
         ArgumentNullException.ThrowIfNull(image);
         Dispatcher.VerifyAccess();
+        LoadEditor(new AnnotationCanvas(image) { Tool = _tool, Stroke = _stroke, Thickness = _thickness },
+            new Int32Rect(0, 0, image.PixelWidth, image.PixelHeight), name, unsaved);
+    }
+
+    public void LoadEditor(AnnotationCanvas editor, Int32Rect region, string name, bool unsaved = true)
+    {
+        ArgumentNullException.ThrowIfNull(editor);
+        Dispatcher.VerifyAccess();
+        if (region.X < 0 || region.Y < 0 || region.Width <= 0 || region.Height <= 0 ||
+            !double.IsFinite(editor.Width) || !double.IsFinite(editor.Height) ||
+            (long)region.X + region.Width > editor.Width || (long)region.Y + region.Height > editor.Height)
+            throw new ArgumentOutOfRangeException(nameof(region), "Der Ausschnitt muss innerhalb des Editorbildes liegen.");
+        if (editor.Parent != null)
+            throw new ArgumentException("Der Editor muss vor der Übergabe vom bisherigen Parent gelöst sein.", nameof(editor));
         _ocrCts?.Cancel();
         _imageVersion++;
         if (_editor != null) _editor.Changed -= Editor_Changed;
-        _editor = new AnnotationCanvas(image) { Width = image.PixelWidth, Height = image.PixelHeight, Tool = _tool, Stroke = _stroke, Thickness = _thickness };
+        CropCanvas.Children.Clear();
+        _editor = editor;
+        _documentRegion = region;
+        CropCanvas.Width = region.Width;
+        CropCanvas.Height = region.Height;
+        Canvas.SetLeft(editor, -region.X);
+        Canvas.SetTop(editor, -region.Y);
+        CropCanvas.Children.Add(editor);
+        SyncDrawingSettings();
         _editor.Changed += Editor_Changed;
-        ImageViewbox.Child = _editor;
         _imageName = name;
         _savedRevision = 0;
         _revision = unsaved ? 1 : 0;
-        _savedHash = unsaved ? null : SHA256.HashData(ImageOutput.EncodePng(_editor.Flatten()));
+        _savedHash = unsaved ? null : SHA256.HashData(ImageOutput.EncodePng(_editor.Flatten(_documentRegion)));
         EmptyState.Visibility = Visibility.Collapsed;
         ImageScroll.Visibility = Visibility.Visible;
-        DimensionsText.Text = string.Format(CultureInfo.CurrentCulture, "{0:N0} × {1:N0} px", image.PixelWidth, image.PixelHeight);
+        DimensionsText.Text = string.Format(CultureInfo.CurrentCulture, "{0:N0} × {1:N0} px", region.Width, region.Height);
         OcrText.Clear();
         _fit = true;
         UpdateLayout();
         ApplyZoom();
         UpdateControls();
+    }
+
+    private void SyncDrawingSettings()
+    {
+        if (_editor == null) return;
+        _syncingDrawingSettings = true;
+        try
+        {
+            _tool = _editor.Tool;
+            _stroke = _editor.Stroke;
+            _thickness = _editor.Thickness;
+            SelectTool(_tool);
+            foreach (object child in DrawingSettings.Children)
+                if (child is RadioButton swatch)
+                    swatch.IsChecked = swatch.Background is SolidColorBrush color &&
+                        _stroke is SolidColorBrush selected && color.Color == selected.Color;
+            ComboBoxItem? selectedThickness = null;
+            foreach (ComboBoxItem item in ThicknessPicker.Items)
+                if (item.Tag is string value && double.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out double thickness) && thickness == _thickness)
+                    selectedThickness = item;
+            if (selectedThickness == null)
+            {
+                selectedThickness = new ComboBoxItem { Content = _thickness.ToString("0.##", CultureInfo.CurrentCulture) + " px", Tag = _thickness.ToString(CultureInfo.InvariantCulture) };
+                ThicknessPicker.Items.Add(selectedThickness);
+            }
+            ThicknessPicker.SelectedItem = selectedThickness;
+        }
+        finally { _syncingDrawingSettings = false; }
     }
 
     private void Editor_Changed(object? sender, EventArgs e) { _revision++; UpdateControls(); }
@@ -172,24 +223,67 @@ public partial class MainWindow : Window
         SetStatus(action + " fehlgeschlagen. " + reason, true);
     }
 
-    public async Task CaptureAsync(bool entireScreen = false)
+    public async Task CaptureAsync()
     {
         if (_replacing || _closing || _disposed) return;
         _replacing = true;
+        bool startOcr = false;
         UpdateControls();
         try
         {
-            if (!await PrepareReplacementAsync()) return;
-            SetStatus("Bereich wählen · Esc bricht die Aufnahme ab.");
-            BitmapSource? image = entireScreen ? await CaptureService.CaptureScreenAsync(this) : await CaptureService.CaptureRegionAsync(this);
-            if (image == null) { SetStatus("Aufnahme abgebrochen."); return; }
-            LoadImage(image, "Aufnahme " + DateTime.Now.ToString("yyyy-MM-dd HH-mm-ss", CultureInfo.InvariantCulture) + ".png", unsaved: true);
-            ShowFromTray();
-            SetStatus("Aufnahme bereit. Wähle links ein Werkzeug zum Markieren.");
+            SetStatus("Bereich aufziehen und direkt im eingefrorenen Bildschirm bearbeiten · Esc bricht ab.");
+            CaptureSessionResult result = await CaptureService.CaptureEditedRegionAsync(this);
+            startOcr = await AcceptCaptureResultAsync(result);
         }
         catch (OperationCanceledException) { SetStatus("Aufnahme abgebrochen."); }
         catch (Exception ex) { ReportError("Aufnahme", ex); }
         finally { _replacing = false; UpdateControls(); }
+        if (startOcr) await StartOcrAsync();
+    }
+
+    // Kept separate from desktop capture so the real handoff path can also run in offline STA checks.
+    internal async Task<bool> AcceptCaptureResultAsync(CaptureSessionResult result)
+    {
+        Dispatcher.VerifyAccess();
+        switch (result.Completion)
+        {
+            case CaptureCompletion.Cancelled:
+                SetStatus("Aufnahme abgebrochen.");
+                break;
+            case CaptureCompletion.Copied:
+                SetStatus("Aufnahme im Overlay in die Zwischenablage kopiert.");
+                break;
+            case CaptureCompletion.Saved:
+                SetStatus("Aufnahme im Overlay gespeichert.");
+                break;
+            case CaptureCompletion.Workbench:
+            case CaptureCompletion.Ocr:
+                if (result.Editor == null)
+                    throw new InvalidOperationException("Die Aufnahme hat keinen Editor zur Übergabe bereitgestellt.");
+                // Only an explicit handoff may replace the workbench document. Copy/save leave it intact.
+                if (!await PrepareReplacementAsync())
+                {
+                    SetStatus("Aufnahme nicht übernommen. Das bisherige Dokument bleibt erhalten.");
+                    return false;
+                }
+                LoadEditor(result.Editor, result.Region,
+                    "Aufnahme " + DateTime.Now.ToString("yyyy-MM-dd HH-mm-ss", CultureInfo.InvariantCulture) + ".png");
+                if (!_diagnosticsMode) ShowFromTray();
+                if (result.Completion == CaptureCompletion.Workbench)
+                    SetStatus("Aufnahme in der Werkbank. Markierungen und Rückgängig-Schritte bleiben erhalten.");
+                else if (_ocrUnavailable)
+                    SetStatus("Aufnahme übernommen. Die gespeicherten OpenAI-Kontodaten sind nicht lesbar; Texterkennung ist derzeit nicht verfügbar.", true);
+                else if (_openAi.ActiveAccount?.IsSignedIn != true)
+                    SetStatus("Aufnahme übernommen. Melde dich über „Weiter mit ChatGPT“ an, um Text zu erkennen.");
+                else if (_accountCts != null || ModelPicker.SelectedItem is not OpenAiModel)
+                    SetStatus("Aufnahme übernommen. Lade oder wähle rechts ein Modell und starte „Text erkennen“.");
+                else
+                    return true;
+                break;
+            default:
+                throw new InvalidOperationException("Die Aufnahme hat einen unbekannten Abschluss geliefert.");
+        }
+        return false;
     }
 
     private async void Capture_Click(object sender, RoutedEventArgs e) => await CaptureAsync();
@@ -241,17 +335,23 @@ public partial class MainWindow : Window
     private async Task<bool> PrepareReplacementAsync()
     {
         await CancelOcrAsync();
-        if (_editor == null) return true;
-        _editor.CommitText();
-        if (_revision == _savedRevision) return true;
-        byte[] current = SHA256.HashData(ImageOutput.EncodePng(_editor.Flatten()));
-        if (_savedHash != null && CryptographicOperations.FixedTimeEquals(current, _savedHash)) return true;
+        if (!HasUnsavedDocumentChanges()) return true;
         MessageBoxResult result = ShowSavePrompt();
         return result == MessageBoxResult.No || (result == MessageBoxResult.Yes && SaveImage());
     }
 
+    internal bool HasUnsavedDocumentChanges()
+    {
+        if (_editor == null) return false;
+        _editor.CommitText();
+        if (_revision == _savedRevision) return false;
+        byte[] current = SHA256.HashData(ImageOutput.EncodePng(_editor.Flatten(_documentRegion)));
+        return _savedHash == null || !CryptographicOperations.FixedTimeEquals(current, _savedHash);
+    }
+
     private MessageBoxResult ShowSavePrompt()
     {
+        if (_diagnosticsMode) throw new InvalidOperationException("Save prompts are disabled in offline diagnostics.");
         if (!IsVisible) ShowFromTray();
         var dialog = new Window { Owner = this, Title = "Änderungen speichern?", Width = 460, SizeToContent = SizeToContent.Height, ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.CenterOwner, ShowInTaskbar = false };
         var panel = new StackPanel { Margin = new Thickness(24) };
@@ -278,7 +378,7 @@ public partial class MainWindow : Window
         try
         {
             _editor.CommitText();
-            BitmapSource image = _editor.Flatten();
+            BitmapSource image = _editor.Flatten(_documentRegion);
             string? path = ImageOutput.Save(image, this);
             if (path == null) return false;
             _savedHash = SHA256.HashData(ImageOutput.EncodePng(image));
@@ -296,7 +396,7 @@ public partial class MainWindow : Window
     private void CopyImage()
     {
         if (_editor == null) return;
-        try { _editor.CommitText(); ImageOutput.Copy(_editor.Flatten()); SetStatus("Bild in die Zwischenablage kopiert."); }
+        try { _editor.CommitText(); ImageOutput.Copy(_editor.Flatten(_documentRegion)); SetStatus("Bild in die Zwischenablage kopiert."); }
         catch (Exception ex) { ReportError("Kopieren", ex); }
     }
 
@@ -315,6 +415,7 @@ public partial class MainWindow : Window
 
     private void Tool_Checked(object sender, RoutedEventArgs e)
     {
+        if (_syncingDrawingSettings) return;
         if (sender is RadioButton { Tag: string name } && Enum.TryParse(name, out EditorTool tool))
         {
             _editor?.CommitText();
@@ -324,10 +425,12 @@ public partial class MainWindow : Window
     }
     private void Color_Checked(object sender, RoutedEventArgs e)
     {
+        if (_syncingDrawingSettings) return;
         if (sender is RadioButton { Background: Brush brush }) { _stroke = brush; if (_editor != null) _editor.Stroke = brush; }
     }
     private void Thickness_Changed(object sender, SelectionChangedEventArgs e)
     {
+        if (_syncingDrawingSettings) return;
         if (sender is ComboBox { SelectedItem: ComboBoxItem { Tag: string value } } && double.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out double thickness))
         { _thickness = thickness; if (_editor != null) _editor.Thickness = thickness; }
     }
@@ -342,14 +445,14 @@ public partial class MainWindow : Window
     private void ApplyZoom()
     {
         if (_editor == null) return;
-        double scale = _fit ? Math.Min(NativePixelScale, Math.Min(Math.Max(1, ImageScroll.ViewportWidth - 56) / _editor.Width, Math.Max(1, ImageScroll.ViewportHeight - 56) / _editor.Height)) : ZoomSlider.Value / 100 * NativePixelScale;
+        double scale = _fit ? Math.Min(NativePixelScale, Math.Min(Math.Max(1, ImageScroll.ViewportWidth - 56) / _documentRegion.Width, Math.Max(1, ImageScroll.ViewportHeight - 56) / _documentRegion.Height)) : ZoomSlider.Value / 100 * NativePixelScale;
         SetZoom(scale);
     }
     private void SetZoom(double scale)
     {
         if (_editor == null || !double.IsFinite(scale) || scale <= 0) return;
-        ImageViewbox.Width = _editor.Width * scale;
-        ImageViewbox.Height = _editor.Height * scale;
+        ImageViewbox.Width = _documentRegion.Width * scale;
+        ImageViewbox.Height = _documentRegion.Height * scale;
         _settingZoom = true;
         ZoomSlider.Value = Math.Clamp(scale / NativePixelScale * 100, ZoomSlider.Minimum, ZoomSlider.Maximum);
         _settingZoom = false;
@@ -359,7 +462,7 @@ public partial class MainWindow : Window
     {
         if ((Keyboard.Modifiers & ModifierKeys.Control) == 0 || _editor == null) return;
         _fit = false;
-        SetZoom(Math.Clamp(ImageViewbox.Width / _editor.Width * (e.Delta > 0 ? 1.15 : 1 / 1.15), 0.1 * NativePixelScale, 3 * NativePixelScale));
+        SetZoom(Math.Clamp(ImageViewbox.Width / _documentRegion.Width * (e.Delta > 0 ? 1.15 : 1 / 1.15), 0.1 * NativePixelScale, 3 * NativePixelScale));
         e.Handled = true;
     }
 
@@ -480,7 +583,13 @@ public partial class MainWindow : Window
     private async void Ocr_Click(object sender, RoutedEventArgs e)
     {
         if (_ocrCts != null) { _ocrCts.Cancel(); SetStatus("Texterkennung wird abgebrochen …"); return; }
-        if (_editor == null || ModelPicker.SelectedItem is not OpenAiModel model || _accountCts != null) return;
+        await StartOcrAsync();
+    }
+    private async Task StartOcrAsync()
+    {
+        if (_editor == null || _diagnosticsMode || _ocrUnavailable || _disposed || _replacing ||
+            _ocrCts != null || _openAi.ActiveAccount?.IsSignedIn != true ||
+            ModelPicker.SelectedItem is not OpenAiModel model || _accountCts != null) return;
         _ocrTask = RecognizeAsync(model.Slug);
         await _ocrTask;
     }
@@ -498,7 +607,7 @@ public partial class MainWindow : Window
         try
         {
             _editor!.CommitText();
-            byte[] png = ImageOutput.EncodePng(_editor.Flatten());
+            byte[] png = ImageOutput.EncodePng(_editor.Flatten(_documentRegion));
             var progress = new Progress<string>(delta =>
             {
                 if (!StillCurrent() || !ReferenceEquals(_ocrCts, cts)) return;
