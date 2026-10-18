@@ -1,0 +1,167 @@
+{
+  "evidence_id": "local-runtime-20261018-01",
+  "observed_at": "2026-10-18T12:20:26.3226157Z",
+  "method": "PowerShell Get-Process / Process.Modules; no app launch or input",
+  "target_path": "C:\\Users\\Axel_desktop\\AppData\\Local\\Programs\\SunnyCapturer\\SunnyCapturer.exe",
+  "target_sha256": "e97cc2612b79ab154076844a13ec01cdeb70be0f14cf20675ce0e39dff81ecc8",
+  "process_id": 72416,
+  "process_start": "2026-10-18T08:30:29.3987844Z",
+  "working_set_bytes": 195575808,
+  "private_bytes": 358645760,
+  "main_window_handle": 665704,
+  "target_directory_modules": [
+    {
+      "name": "ass.dll",
+      "mapped_image_bytes": 3424256
+    },
+    {
+      "name": "avcodec-61.dll",
+      "mapped_image_bytes": 99332096
+    },
+    {
+      "name": "avfilter-10.dll",
+      "mapped_image_bytes": 42356736
+    },
+    {
+      "name": "avformat-61.dll",
+      "mapped_image_bytes": 19750912
+    },
+    {
+      "name": "avutil-59.dll",
+      "mapped_image_bytes": 19714048
+    },
+    {
+      "name": "MSVCP140_1.dll",
+      "mapped_image_bytes": 36864
+    },
+    {
+      "name": "MSVCP140_2.dll",
+      "mapped_image_bytes": 278528
+    },
+    {
+      "name": "MSVCP140_ATOMIC_WAIT.dll",
+      "mapped_image_bytes": 81920
+    },
+    {
+      "name": "MSVCP140.dll",
+      "mapped_image_bytes": 561152
+    },
+    {
+      "name": "postproc-58.dll",
+      "mapped_image_bytes": 126976
+    },
+    {
+      "name": "qcertonlybackend.dll",
+      "mapped_image_bytes": 110592
+    },
+    {
+      "name": "qgif.dll",
+      "mapped_image_bytes": 57344
+    },
+    {
+      "name": "qicns.dll",
+      "mapped_image_bytes": 61440
+    },
+    {
+      "name": "qico.dll",
+      "mapped_image_bytes": 57344
+    },
+    {
+      "name": "qjpeg.dll",
+      "mapped_image_bytes": 585728
+    },
+    {
+      "name": "qmodernwindowsstyle.dll",
+      "mapped_image_bytes": 221184
+    },
+    {
+      "name": "qpdf.dll",
+      "mapped_image_bytes": 53248
+    },
+    {
+      "name": "qschannelbackend.dll",
+      "mapped_image_bytes": 258048
+    },
+    {
+      "name": "qsvg.dll",
+      "mapped_image_bytes": 49152
+    },
+    {
+      "name": "qsvgicon.dll",
+      "mapped_image_bytes": 86016
+    },
+    {
+      "name": "Qt6Core.dll",
+      "mapped_image_bytes": 6189056
+    },
+    {
+      "name": "Qt6Gui.dll",
+      "mapped_image_bytes": 9359360
+    },
+    {
+      "name": "Qt6Network.dll",
+      "mapped_image_bytes": 1769472
+    },
+    {
+      "name": "Qt6Pdf.dll",
+      "mapped_image_bytes": 5406720
+    },
+    {
+      "name": "Qt6PdfWidgets.dll",
+      "mapped_image_bytes": 102400
+    },
+    {
+      "name": "Qt6Svg.dll",
+      "mapped_image_bytes": 532480
+    },
+    {
+      "name": "Qt6Widgets.dll",
+      "mapped_image_bytes": 6504448
+    },
+    {
+      "name": "qtga.dll",
+      "mapped_image_bytes": 49152
+    },
+    {
+      "name": "qtiff.dll",
+      "mapped_image_bytes": 446464
+    },
+    {
+      "name": "qwbmp.dll",
+      "mapped_image_bytes": 49152
+    },
+    {
+      "name": "qwebp.dll",
+      "mapped_image_bytes": 565248
+    },
+    {
+      "name": "qwindows.dll",
+      "mapped_image_bytes": 925696
+    },
+    {
+      "name": "SunnyCapturer.exe",
+      "mapped_image_bytes": 3588096
+    },
+    {
+      "name": "swresample-5.dll",
+      "mapped_image_bytes": 692224
+    },
+    {
+      "name": "swscale-8.dll",
+      "mapped_image_bytes": 774144
+    },
+    {
+      "name": "VCRUNTIME140_1.dll",
+      "mapped_image_bytes": 49152
+    },
+    {
+      "name": "VCRUNTIME140.dll",
+      "mapped_image_bytes": 122880
+    }
+  ],
+  "limitations": [
+    "One sample of an existing session; neither a cold-start benchmark nor proof of idle state.",
+    "Loaded modules do not prove individual functions executed; absent modules may load later.",
+    "Local Windows process observation, not a REA Evidence record. No user logs, tokens or memory dumps read."
+  ]
+}

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "tool": "static_inventory.py; Python standard library",
-  "script_sha256": "e9da1915f18bcda8c9cf1f5e856a85c627abea3a249e0a1d856d955d7a5461fe",
+  "script_sha256": "8ccd211d5b3331370b28d4eff5d466600d6f3ec0e2b685811424237b3887250d",
   "target_sha256": "e97cc2612b79ab154076844a13ec01cdeb70be0f14cf20675ce0e39dff81ecc8",
   "install_root": "C:\\Users\\Axel_desktop\\AppData\\Local\\Programs\\SunnyCapturer",
   "scope": "installed artifacts plus explicit checkout source files; static only",
