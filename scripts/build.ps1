@@ -32,6 +32,7 @@ $kairosEnvironment = @{
     DOTNET_ROOT = Split-Path -Parent $kairosDotnet
     DOTNET_CLI_TELEMETRY_OPTOUT = '1'
     DOTNET_SKIP_FIRST_TIME_EXPERIENCE = '1'
+    DOTNET_GENERATE_ASPNET_CERTIFICATE = 'false'
     DOTNET_NOLOGO = '1'
 }
 $kairosPreviousEnvironment = @{}
