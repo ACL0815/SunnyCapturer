@@ -1,0 +1,33 @@
+{
+  "request": {
+    "name": "list_names",
+    "arguments": {}
+  },
+  "started": "2026-10-18T14:25:46.818Z",
+  "finished": "2026-10-18T14:31:17.462Z",
+  "isError": true,
+  "raw_response": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":{\"code\":\"provider_timeout\",\"category\":\"timeout\",\"message\":\"Analysis took too long. Try a smaller request, then run `rea doctor` if it continues.\",\"retryable\":true,\"remediation\":{\"action\":\"Analysis took too long. Try a smaller request, then run `rea doctor` if it continues.\"},\"details\":{\"operation\":\"list_names\",\"timeout_ms\":330000}}}"
+      }
+    ],
+    "isError": true
+  },
+  "response": {
+    "error": {
+      "code": "provider_timeout",
+      "category": "timeout",
+      "message": "Analysis took too long. Try a smaller request, then run `rea doctor` if it continues.",
+      "retryable": true,
+      "remediation": {
+        "action": "Analysis took too long. Try a smaller request, then run `rea doctor` if it continues."
+      },
+      "details": {
+        "operation": "list_names",
+        "timeout_ms": 330000
+      }
+    }
+  }
+}

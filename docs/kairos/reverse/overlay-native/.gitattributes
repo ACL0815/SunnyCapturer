@@ -1,0 +1,4 @@
+# Preserve evidence byte hashes across Windows checkouts.
+* -text
+# Raw provider logs keep their original whitespace as well.
+*.log -whitespace

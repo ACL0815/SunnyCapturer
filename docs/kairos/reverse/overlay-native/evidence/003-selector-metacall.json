@@ -1,0 +1,35 @@
+{
+  "request": {
+    "name": "procedure_pseudo_code",
+    "arguments": {
+      "procedure": "0x140008690"
+    }
+  },
+  "started": "2026-10-18T14:20:16.110Z",
+  "finished": "2026-10-18T14:25:46.813Z",
+  "isError": true,
+  "raw_response": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":{\"code\":\"provider_timeout\",\"category\":\"timeout\",\"message\":\"Analysis took too long. Try a smaller request, then run `rea doctor` if it continues.\",\"retryable\":true,\"remediation\":{\"action\":\"Analysis took too long. Try a smaller request, then run `rea doctor` if it continues.\"},\"details\":{\"operation\":\"procedure_pseudo_code\",\"timeout_ms\":330000}}}"
+      }
+    ],
+    "isError": true
+  },
+  "response": {
+    "error": {
+      "code": "provider_timeout",
+      "category": "timeout",
+      "message": "Analysis took too long. Try a smaller request, then run `rea doctor` if it continues.",
+      "retryable": true,
+      "remediation": {
+        "action": "Analysis took too long. Try a smaller request, then run `rea doctor` if it continues."
+      },
+      "details": {
+        "operation": "procedure_pseudo_code",
+        "timeout_ms": 330000
+      }
+    }
+  }
+}

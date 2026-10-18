@@ -1,0 +1,38 @@
+{
+  "request": {
+    "name": "open_binary",
+    "arguments": {
+      "path": "C:/Users/Axel_desktop/AppData/Local/Programs/SunnyCapturer/SunnyCapturer.exe",
+      "provider_id": "ghidra"
+    }
+  },
+  "started": "2026-10-18T14:19:55.624Z",
+  "finished": "2026-10-18T14:19:56.449Z",
+  "isError": false,
+  "raw_response": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"result\":{\"path\":\"C:\\\\Users\\\\Axel_desktop\\\\AppData\\\\Local\\\\Programs\\\\SunnyCapturer\\\\SunnyCapturer.exe\",\"format\":\"pe\",\"kind\":\"executable\",\"sha256\":\"e97cc2612b79ab154076844a13ec01cdeb70be0f14cf20675ce0e39dff81ecc8\",\"architecture\":\"x86_64\"}}"
+      }
+    ],
+    "structuredContent": {
+      "result": {
+        "path": "C:\\Users\\Axel_desktop\\AppData\\Local\\Programs\\SunnyCapturer\\SunnyCapturer.exe",
+        "format": "pe",
+        "kind": "executable",
+        "sha256": "e97cc2612b79ab154076844a13ec01cdeb70be0f14cf20675ce0e39dff81ecc8",
+        "architecture": "x86_64"
+      }
+    }
+  },
+  "response": {
+    "result": {
+      "path": "C:\\Users\\Axel_desktop\\AppData\\Local\\Programs\\SunnyCapturer\\SunnyCapturer.exe",
+      "format": "pe",
+      "kind": "executable",
+      "sha256": "e97cc2612b79ab154076844a13ec01cdeb70be0f14cf20675ce0e39dff81ecc8",
+      "architecture": "x86_64"
+    }
+  }
+}

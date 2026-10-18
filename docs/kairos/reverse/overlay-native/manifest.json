@@ -1,0 +1,85 @@
+{
+  "algorithm": "sha256",
+  "artifacts": [
+    {
+      "path": ".gitattributes",
+      "bytes": 144,
+      "sha256": "25ec99b26fe658284b8f0f6bfdab15a27df1b9ad3ba9407fd8f470a39dff798d"
+    },
+    {
+      "path": "deferred-requests.json",
+      "bytes": 2943,
+      "sha256": "ffc122e1c9ebec6b8f204d72e117357ecd47a5fda7b817d6626c92868790a502"
+    },
+    {
+      "path": "investigation.json",
+      "bytes": 2669,
+      "sha256": "38e5ff18960befd1895aa9814ea6dd69787d589acf546e7e051243291f8dc533"
+    },
+    {
+      "path": "provider-ghidra-retry-checkpoint.log",
+      "bytes": 40152,
+      "sha256": "6981af035eae6aebd9c0a962b3c14112f944944c22bb011066333900253da064"
+    },
+    {
+      "path": "provider-stderr-after-first-timeout.log",
+      "bytes": 367,
+      "sha256": "f3b3c24975b661a7b7f7539a7a9422a8fa9eedbe3f09bda097f322fdc5780cd1"
+    },
+    {
+      "path": "provider-stderr-final.log",
+      "bytes": 723,
+      "sha256": "c30fecb7b8c507fe73ec24fb24a41ad004c5c4518799918521e01bee55e8d7aa"
+    },
+    {
+      "path": "README.md",
+      "bytes": 12985,
+      "sha256": "b0bff3acdde2192d4e2a39be4c4c31d8edb073ad0383270f40230cdd9bf6bd82"
+    },
+    {
+      "path": "requests.jsonl",
+      "bytes": 1804,
+      "sha256": "cfff72ab4ef44fbe936eb9bff3b4a799b576a83670b523571ae831921ec5821f"
+    },
+    {
+      "path": "reuse.json",
+      "bytes": 15507,
+      "sha256": "4caeaf101b3ce8b4bd8e606c7e00f299fb43d50a1dfa7198e9f13def95bada60"
+    },
+    {
+      "path": "verification.json",
+      "bytes": 3072,
+      "sha256": "c3c9219ee8e7db52d6ccdbbbe4753614c561e1226ccbf2f739bf4545ccb5e0b4"
+    },
+    {
+      "path": "evidence/001-open.json",
+      "bytes": 1329,
+      "sha256": "f0d3d734e465520192cf4143ef867281f1447e9bc560dd39f67ee4347eccdf3d"
+    },
+    {
+      "path": "evidence/002-session.json",
+      "bytes": 1252970,
+      "sha256": "45dc8681791442338de6bc6c7449ea890fc0133e56b3befad057a457b2421856"
+    },
+    {
+      "path": "evidence/003-selector-metacall.json",
+      "bytes": 1208,
+      "sha256": "2409ad39d10bbb5e1e3e662c3339db9fd1e13acb55088b2bc44942b879100260"
+    },
+    {
+      "path": "evidence/004-names.json",
+      "bytes": 1137,
+      "sha256": "dc064e008453520fbddb954212af1c75df4a47787f1a4880f31ce8a6a03843b6"
+    },
+    {
+      "path": "evidence/999-emergency-close.json",
+      "bytes": 393,
+      "sha256": "4c65836d95bc6ac77e9bc3fc648b489b993cf578552b32a7a4e42f20a9043f2e"
+    }
+  ],
+  "additional_script": {
+    "path": "scripts/reverse/overlay_native.mjs",
+    "sha256": "4b7652f270d6755cc38ec48db677686b781127412e81454529012907905d10a1",
+    "sha256_basis": "UTF-8 source with LF line endings (Git blob content); evidence files retain exact bytes via local .gitattributes"
+  }
+}

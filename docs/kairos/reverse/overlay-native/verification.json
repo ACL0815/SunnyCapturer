@@ -1,0 +1,90 @@
+{
+  "checked_at": "2026-10-18T14:32:55.671Z",
+  "authority": "ordinary-shell verification of saved REA responses and filesystem; not new REA analysis Evidence",
+  "target_sha256": "e97cc2612b79ab154076844a13ec01cdeb70be0f14cf20675ce0e39dff81ecc8",
+  "target_matches": true,
+  "actual_calls": 5,
+  "failed_native_calls": 2,
+  "new_decompiled_code_evidence": 0,
+  "no_native_call_after_second_timeout": true,
+  "close_succeeded": true,
+  "provider_project_directories_remaining": [],
+  "private_process_check": "PowerShell Win32_Process filter for this runtime path and overlay_native.mjs returned no rows after process exit",
+  "prior_files_checked": 56,
+  "prior_files_changed": [],
+  "record_validation_failures": [],
+  "local_report_links_checked": 28,
+  "missing_report_links": [],
+  "spool_syntax_check": "node --check scripts/reverse/overlay_native.mjs passed; no subsequent provider launch",
+  "spool_process_exit": {
+    "code": 1,
+    "cause": "Removed held queue entry remained in initial directory enumeration; local ENOENT after second provider timeout; finally close_binary succeeded. Corrected afterward without native rerun."
+  },
+  "records": [
+    {
+      "file": "evidence/001-open.json",
+      "tool": "open_binary",
+      "isError": false,
+      "evidence_id": null,
+      "error_code": null,
+      "started": "2026-10-18T14:19:55.624Z",
+      "finished": "2026-10-18T14:19:56.449Z",
+      "record_hash": true,
+      "request_hash": true,
+      "raw_response_hash": true,
+      "request_matches": true
+    },
+    {
+      "file": "evidence/002-session.json",
+      "tool": "binary_session",
+      "isError": false,
+      "evidence_id": null,
+      "error_code": null,
+      "started": "2026-10-18T14:20:14.960Z",
+      "finished": "2026-10-18T14:20:16.020Z",
+      "record_hash": true,
+      "request_hash": true,
+      "raw_response_hash": true,
+      "request_matches": true
+    },
+    {
+      "file": "evidence/003-selector-metacall.json",
+      "tool": "procedure_pseudo_code",
+      "isError": true,
+      "evidence_id": null,
+      "error_code": "provider_timeout",
+      "started": "2026-10-18T14:20:16.110Z",
+      "finished": "2026-10-18T14:25:46.813Z",
+      "record_hash": true,
+      "request_hash": true,
+      "raw_response_hash": true,
+      "request_matches": true
+    },
+    {
+      "file": "evidence/004-names.json",
+      "tool": "list_names",
+      "isError": true,
+      "evidence_id": null,
+      "error_code": "provider_timeout",
+      "started": "2026-10-18T14:25:46.818Z",
+      "finished": "2026-10-18T14:31:17.462Z",
+      "record_hash": true,
+      "request_hash": true,
+      "raw_response_hash": true,
+      "request_matches": true
+    },
+    {
+      "file": "evidence/999-emergency-close.json",
+      "tool": "close_binary",
+      "isError": false,
+      "evidence_id": null,
+      "error_code": null,
+      "started": "2026-10-18T14:31:17.465Z",
+      "finished": "2026-10-18T14:31:17.475Z",
+      "record_hash": true,
+      "request_hash": true,
+      "raw_response_hash": true,
+      "request_matches": true
+    }
+  ]
+}

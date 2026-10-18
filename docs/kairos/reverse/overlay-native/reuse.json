@@ -1,0 +1,343 @@
+{
+  "scope": "Static installed SunnyCapturer overlay contract only; previous evidence read and reused, no original records modified.",
+  "target": "C:/Users/Axel_desktop/AppData/Local/Programs/SunnyCapturer/SunnyCapturer.exe",
+  "sha256": "e97cc2612b79ab154076844a13ec01cdeb70be0f14cf20675ce0e39dff81ecc8",
+  "sources": [
+    {
+      "path": "docs/kairos/reverse/native/evidence/001-open.json",
+      "bytes": 618,
+      "sha256": "125febf311df81cbfe480a17d50c62fc8bf15f495f72d34429cbb759097583f9",
+      "evidence_id": null
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/002-session.json",
+      "bytes": 458078,
+      "sha256": "625a09567c5a79e422f86032ad204e280b1050ec27fadd715155ff678b07409b",
+      "evidence_id": null
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/003-screenshoter-metacall.json",
+      "bytes": 17918,
+      "sha256": "8c723a6e8cbe90032e84d144c6b3170bba4ca33d2e11fbabb4e7b264b1322306",
+      "evidence_id": "ev_b4f6f3895594f132b0f22ddd24cdedd496572fe4a783aef7d4b02203d67d8a4a"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/004-capturer-metacall.json",
+      "bytes": 16296,
+      "sha256": "e3e5093d0935879bddec1b5e8c2d8bf874afaed434e67ada14351b0da9e26ae1",
+      "evidence_id": "ev_df07fb5634a56c9e2efc442e4b58e810de085f0423397ec84493ae00d34b709f"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/005-editingmenu-metacall.json",
+      "bytes": 20660,
+      "sha256": "4b3c3f55e5f8fc54d7dfcc4477725ae3f55ddef2fddd6915539d85b11d1f12f1",
+      "evidence_id": "ev_b865851f47d5b91f0d77552d826ce5ce566e00e043af043debfad4bcc96b92cc"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/006-communication-metacall.json",
+      "bytes": 8206,
+      "sha256": "920b97cf6ce66edb4e43f55daf08ec40b15286d85fe8ce60b5fc2ede9f23123b",
+      "evidence_id": "ev_2f43e134c5b3af58867f07b3bbc3ac124cb09bcf2885dc38f300a07e4a4522ce"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/007-undostack-push-xrefs.json",
+      "bytes": 4936,
+      "sha256": "5fb6c1daddae62ed276a1d850ab149916652f7fb7784e461d6aef5ae6c4849c9",
+      "evidence_id": "ev_4ce969efd2dfe9755d86a082f0d43aff557fc1c6860b393297c9abe5ea3f895d"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/008-undostack-undo-xrefs.json",
+      "bytes": 4516,
+      "sha256": "a7656c596907f84b874ab39ee86f75d44a4ed3df78ea456c3c4953b166f730ac",
+      "evidence_id": "ev_0c142ca96edec64f213d1352751b27168873f2a766e790945a3f44e9c460cc8b"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/009-undostack-redo-xrefs.json",
+      "bytes": 4516,
+      "sha256": "e4284885a33d16762a5bdc04c0b70f7420cb747b4529ca587bc56ad67b652065",
+      "evidence_id": "ev_667e2f6535e5d641f347d199b96ee2bf2ef3a06dfcfdea88666b3efe7f2fe7bd"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/010-grabwindow-xrefs.json",
+      "bytes": 4516,
+      "sha256": "c14be371ded775d00ac0e6200f725013290e45f0f762bbbec3678ca5d430b51b",
+      "evidence_id": "ev_2388b152795e9d4f2dc833d36d04e7f9749f96a124bcf23ea85c2a112a2e3111"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/011-session-ready.json",
+      "bytes": 458572,
+      "sha256": "306d5e39fcebbb0ef1caace6fa497f63c1dfa4557424c6522d64c64c6a66fd3d",
+      "evidence_id": null
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/012-createitem.json",
+      "bytes": 3251105,
+      "sha256": "ade3885d00385c250c0d601a187689f3b9a5d8918ba8c188a7d81c888348506c",
+      "evidence_id": "ev_3311e1568aa356689221e9f7c645ffb066711c30a635510603212db176db5e9c"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/013-finishitem.json",
+      "bytes": 261939,
+      "sha256": "39450a87ad843f3452c073139df4b6fc50db56fd7846cb8f605a32aa41621db9",
+      "evidence_id": "ev_5adeb3e0fdd0e60c4c2de36ff49ad8a669c87fa3d857b8efcdc81db4c5a56d97"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/014-snip.json",
+      "bytes": 2385501,
+      "sha256": "b8d39c4500d8b27999e9230da24848ba71fe2ab9fd3f71472988a9dcb8be430b",
+      "evidence_id": "ev_cd43692a968a9cd6d1069ddfb241fe61da37c14a0146965a1402aa6338e3b1fd"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/015-extracttext.json",
+      "bytes": 354529,
+      "sha256": "f96465392a426564f62c25020c478251a82e5a8ffc87d2f3f5a067de690327ab",
+      "evidence_id": "ev_d4b68cffb291f78db568f770c827967f5a006965097f1e03e3499f037bf02772"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/016-screenshot.json",
+      "bytes": 401147,
+      "sha256": "eabd2d876cbd678ec6c8e6d14154f0e6e5a67588f77b10cf250f8d724c1679ac",
+      "evidence_id": "ev_2f6583d6f4d5448ddffbeb00f324287988f21d1b1395a7fd014b29ba958ac23a"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/017-oncapture.json",
+      "bytes": 11114,
+      "sha256": "ec6e85389bc5624c2e8203b818bd2787ca89257124d5a70992b82cb8907a639c",
+      "evidence_id": "ev_11fcc1e25b11fdbc374844e1b2265627cb13d30cdee604afa6420102f2a0483d"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/018-onsave.json",
+      "bytes": 22270,
+      "sha256": "41cd052e1be28b9de37d16c70540f3df615a4c0b23053fa907885699d0ab7b6e",
+      "evidence_id": "ev_1e986c986d2196ca9298f9d33d47d1aaed0cc8f09fc4a9f6cc59e2bacd53f341"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/019-copy.json",
+      "bytes": 6806,
+      "sha256": "0f73114e1ef880fa12a3b3d26797ef2a10d522e7ad59ef146e28a7993f9bd5f3",
+      "evidence_id": "ev_59bea9c9f695832d02f89b8dad0eb954ee3a842be31d537692e441c16e87dd8f"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/020-pin.json",
+      "bytes": 6426,
+      "sha256": "39af82fe5984ca7d4eb5370aa2ed4aa430829241967dcca771b753fe34607260",
+      "evidence_id": "ev_a50958c78bbce84d487543af09dc2c58a0ed5071e4b39f684022579e24c95863"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/021-undo-handler.json",
+      "bytes": 5818,
+      "sha256": "7f7b3a68fc6c4ff9ede9eb6de6bfc68f20b9684dfbd50025edfcb0e098b90cc6",
+      "evidence_id": "ev_7f070a419d28b4510b63d1aa2c67d40b8511dd06c6b57b4e063b361afd50f9e3"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/022-redo-handler.json",
+      "bytes": 5818,
+      "sha256": "2740c8d5738198b2ee817a9d11283c89ca050b30b35ef34a31ffd965d7272b34",
+      "evidence_id": "ev_64bf0706dbc6f38a63d1efb27796c1b7aeb2242229c376f36c1985856d6183ed"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/023-undo-connect.json",
+      "bytes": 5818,
+      "sha256": "1df48f6006723a0f45a9473dd3b2dae5a963f0f486f7e04c0aea2b61d4b355da",
+      "evidence_id": "ev_d9d3b4713c9a327a2a876df8a4ae2826c39759acbce155c5623a3151f43f3017"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/024-redo-connect.json",
+      "bytes": 5818,
+      "sha256": "91fd3cd88ae68ace35bba14cfbb85248046bfb20ae9f5a39ec3038680b2e9982",
+      "evidence_id": "ev_5759aaa98dea4a521ccc3007e794ff95ec680e6d4caf1461bcec09d7fc88793c"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/025-text-constructor.json",
+      "bytes": 7046,
+      "sha256": "227b21a47316a2947905eefed40a70fcab0e7e867bd6bef0ecba9e49bfebc26c",
+      "evidence_id": "ev_a8438bc4103abd3b5d684d6ea9a35bf0553810ad3f2a5e312e6c563250e6e711"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/026-shape-constructor.json",
+      "bytes": 7212,
+      "sha256": "ee4087b851a8922c833a5454412df4c8b45df654991b2f6418383d23bbc74876",
+      "evidence_id": "ev_34294dc1b8d17214e5eb4117792a0478125204038a058874ccb401371580b5c7"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/027-add-command-constructor.json",
+      "bytes": 5158,
+      "sha256": "612d457e5b987beacb2dcad2f6b719b441b60cc125d785485b165d3aea267073",
+      "evidence_id": "ev_8637735eda9bf5a9b30cfb6a2178cde007a04f4810e8989793ef2c5209367c92"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/028-scene-add-wrapper.json",
+      "bytes": 5538,
+      "sha256": "49372f0009fc334a7359f544f3ff5b37b28a70de62b5d9cd84d442dd4f4c1e43",
+      "evidence_id": "ev_19950df41fe406a6e2ad0fece9837f4ec5f8d6b1fe4e7605ac8cb59f35ecb455"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/029-ocr-timer-callback.json",
+      "bytes": 6438,
+      "sha256": "348b912a3a8be4cc4b7d623973db612fc8ff4412f5cfe8d50ec985899281535a",
+      "evidence_id": "ev_5426f9a214f359113e350844c59a79be788c08a528429ff5617415813dc6ef8c"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/030-communication-ocr.json",
+      "bytes": 7836,
+      "sha256": "1d38576d4f7a00a03287fcc25aa79dab304d597d0e2bcb80c53c821ad2008187",
+      "evidence_id": "ev_4a8516cff4bbfd5740bb2186bb6fd61a34fb9ea64bc4509b73139cf0be600d62"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/031-start.json",
+      "bytes": 9016,
+      "sha256": "5ce88fe8128ac421c93e0a1f4aa62c07e0f75ca884708994c6e76508980063f5",
+      "evidence_id": "ev_1fa8413fd6135e437958d9eda1436c1a7e9dd136015438d2a068bf630b127a9e"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/032-screenshoter-constructor.json",
+      "bytes": 64514,
+      "sha256": "a08ef1de99caf925437b7b520ea5f0eeab3b985fcd88293d8f3f187f0bc15ef3",
+      "evidence_id": "ev_25498c124ac92352b035d3b500f869562b1188914372b290465b7e9bdaf3119d"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/033-ocr-dispatch.json",
+      "bytes": 6334,
+      "sha256": "5ae0112a056d0afeefb865d79b4a1502b653c7fab6d6c7d3edd0e2a4878b5349",
+      "evidence_id": "ev_e67e45efdbe22267598a8a5a30ed3a860f72ef2927d4289c9f911569765ac4f4"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/034-created-command-references.json",
+      "bytes": 30250,
+      "sha256": "17b3b57e03513005d4cfbd1cf496c8ebc7f4d6972543618482a4ade5793e238c",
+      "evidence_id": "ev_7ab0b7e9c76409bb2a718f01578dfa43f0fd3c860f3e07c9e35053324dcf12c3"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/035-ocrui-metacall.json",
+      "bytes": 8140,
+      "sha256": "8705b9a001c0b4da1c7cffac362e9baa98071f5e2a48ef139513c50b3ff6514f",
+      "evidence_id": "ev_cd72c00474262ce8886d4eb31fc872e547ae0269508b349c8bb5f019a69566a2"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/036-ocrui-load-pixmap.json",
+      "bytes": 5042,
+      "sha256": "8634ea0cdb0a8ad66cb352685e7a2224f744929dac568f0ea6136b6e5a80a64b",
+      "evidence_id": "ev_acf602e0d977c90d4b84930a49f218e5cf483d9ea3b5ab26a140b7bcc268b3ec"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/037-created-command-vtable.json",
+      "bytes": 4789,
+      "sha256": "a52ea75e26cbc024d818e2dc213a571b46e7012df25f48c0274a2f0a893c8fa2",
+      "evidence_id": "ev_2db0d1a91c737afcf2bd527af0f58d1af05f9c16802046d8aed3ea7e18bb6d6b"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/038-imageview-metacall.json",
+      "bytes": 10304,
+      "sha256": "23a092c6599d137b367b1f198f30ac0bd8c0e9fcb7f6eb79fe23c262557b84b2",
+      "evidence_id": "ev_448e5145708521d76a94b88ea39841e22d4f082a7b35b10c027db66ab491002a"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/039-created-command-slot1.json",
+      "bytes": 5548,
+      "sha256": "8fb49644e10368f200fe8c502db1cbcac640240e02b5c4f819ce40b8e42668b7",
+      "evidence_id": "ev_7744342540242464bfa3dedb05fad5faf5862e83708da2fe71dbeae217163a37"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/040-created-command-slot2.json",
+      "bytes": 5976,
+      "sha256": "d6c50fe054f63d933e33cc1340bf40d054b3504da8d8d827dbcabf57810e5d6e",
+      "evidence_id": "ev_7fb2dfa66a280028b03dc9d629d5cfa195256f695519fdb9a9e04b092d3cc378"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/041-imageview-ocr-input.json",
+      "bytes": 8186,
+      "sha256": "cd06cf0b8361f2e635f722eb2f3cc0b7cb822b4105c659f3a093f1db45447743",
+      "evidence_id": "ev_ac4837b9f21cee4edf0b300e1713482e0680792a96bda888eac0eafb266dec1a"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/042-ocr-engine-dispatch.json",
+      "bytes": 13922,
+      "sha256": "074b9ff5b085816dc57722c9c4a5442a37dbeaf78cdbbef31d76ada66db5de1d",
+      "evidence_id": "ev_1b76fcdb50214ef67cd23cb1b7d44c6504b3599ce41bbe117294bce5ccee8473"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/043-ocr-backend-job.json",
+      "bytes": 51228,
+      "sha256": "7a8d98bc4342ba4b6a6cb3caacde0a0e72e9494cc20777ef98b604d55c7297cf",
+      "evidence_id": "ev_281f541a4ca8815c1dd897afb32d59042f07b2c4716c91ee9cdcd0915c682df0"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/044-offline-availability.json",
+      "bytes": 6090,
+      "sha256": "d37fa6923b5c69210d2de1e3d61d63099988bb6ca52cb212145371f9f5a6bfea",
+      "evidence_id": "ev_aca90997a282a7d50a95cff060530c3dc2dd7eb26208b31b024d7345bdde86c0"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/045-paddleocr-initialize.json",
+      "bytes": 5942,
+      "sha256": "e014dd81ad792d06f148bfdc17adeca6643fe35f60d00885f6eb8fae564e0c74",
+      "evidence_id": "ev_60a68c22f7c4f213a77ebfa51698188c6d790ff7e730ba63e5e0dc7fde37200e"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/046-paddleocr-call.json",
+      "bytes": 7258,
+      "sha256": "eefb65809c7474499b5bd9318eb6c393f56287c140d7f4cf40f221dd2504b36a",
+      "evidence_id": "ev_a7df5768b6ea2e28f5823d3ac334e74f2132b80d191478d36b419a171d3409dd"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/047-paddleocr-library-bindings.json",
+      "bytes": 9280,
+      "sha256": "a25d5a1c18de9a39bda568af4cd6fc63f20de5348d7cbe6bbe00102936bc3dbb",
+      "evidence_id": "ev_3f35b9a9b8519972b64e252743fe42e02d5fe6a3c578b4fb2f8a08669a2b07b0"
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/048-export.json",
+      "bytes": 568,
+      "sha256": "79f6794a7d10c3060201f179971c9780ef27920f5cdd2c79fde67a35d764cd81",
+      "evidence_id": null
+    },
+    {
+      "path": "docs/kairos/reverse/native/evidence/049-close.json",
+      "bytes": 214,
+      "sha256": "6808826e0eacde0a4f9b786913f274360a3358b7accc2c7c11590b08427c5549",
+      "evidence_id": null
+    },
+    {
+      "path": "docs/kairos/reverse/native/rea-evidence-bundle.json",
+      "bytes": 3682311,
+      "sha256": "d4470ca5e0e64f9b8c6d50569064ee26776b41c8a7b1f5442bce8ffb72058da9",
+      "evidence_id": null
+    },
+    {
+      "path": "docs/kairos/reverse/native/seeds.json",
+      "bytes": 17785,
+      "sha256": "79460f3efed27c2edea904096c49ed2b04684ab6fee09eef25ba3b1f87e0090c",
+      "evidence_id": null
+    },
+    {
+      "path": "docs/kairos/reverse/static/inventory.json",
+      "bytes": 1986129,
+      "sha256": "743d2bc59abc6a4caf9467d6428ed965ac88534fd85a52a46c3a88749e175095",
+      "evidence_id": null
+    },
+    {
+      "path": "docs/kairos/reverse/qt/inventory.json",
+      "bytes": 6754485,
+      "sha256": "9be6fdea29866103e3956a04067e5404060975666bb571a585c99a83691f6df7",
+      "evidence_id": null
+    },
+    {
+      "path": "scripts/reverse/native_deep.mjs",
+      "bytes": 9137,
+      "sha256": "55a567350a9d9a6fec50bc35d3c24ce03017b0f40b5a9f0e332dcad3010a5c7d",
+      "evidence_id": null
+    },
+    {
+      "path": "docs/kairos/reverse/native/acquisition.json",
+      "bytes": 560,
+      "sha256": "9c8ee9df3bf7152421fcb23f8a4b180333f8ff77f033d1e3407382e20e6f00dd",
+      "evidence_id": null
+    },
+    {
+      "path": "docs/kairos/reverse/native/verification.json",
+      "bytes": 3767,
+      "sha256": "7b8a79eef962be2f7184051db6d96b668a112f813abd181142e3107c3a4b70a2",
+      "evidence_id": null
+    }
+  ]
+}

@@ -1,0 +1,57 @@
+{
+  "target": {
+    "path": "C:/Users/Axel_desktop/AppData/Local/Programs/SunnyCapturer/SunnyCapturer.exe",
+    "sha256": "e97cc2612b79ab154076844a13ec01cdeb70be0f14cf20675ce0e39dff81ecc8"
+  },
+  "authorized_scope": [
+    "static installed executable code contract",
+    "selection move/resize and toolbar persistence after release",
+    "annotation object move/resize/text properties and undo",
+    "toolbar tool registration"
+  ],
+  "excluded": [
+    "target execution",
+    "GUI",
+    "cloud",
+    "credentials",
+    "implementation of Kairos",
+    "root MCP or persistent environment changes"
+  ],
+  "runtime": {
+    "private_root": "C:/Users/Axel_desktop/AppData/Local/KairosCapture/ReverseTools/overlay-contract-20261018",
+    "node": "C:/Users/Axel_desktop/.t3/projects/clockify/.rea-runtime/node-v24.18.0-win-x64/node.exe",
+    "launcher": "C:/Users/Axel_desktop/.t3/projects/clockify/.rea-runtime/node_modules/rea-agents/scripts/rea.mjs",
+    "ghidra_readonly": "C:/Users/Axel_desktop/.t3/worktrees/kapture/t3-f80e737e/.tools/reverse/ghidra/ghidra_12.1.4_PUBLIC",
+    "jdk_readonly": "C:/Users/Axel_desktop/.t3/worktrees/kapture/t3-f80e737e/.tools/reverse/jdk/jdk-21.0.12.1+1",
+    "process_environment_only": [
+      "TEMP",
+      "TMP",
+      "REA_ANALYSIS_PROVIDER",
+      "GHIDRA_INSTALL_DIR",
+      "JAVA_HOME",
+      "NATIVE_DEEP_PRIVATE_ROOT"
+    ]
+  },
+  "spool": {
+    "source": "scripts/reverse/native_deep.mjs",
+    "source_sha256": "55a567350a9d9a6fec50bc35d3c24ce03017b0f40b5a9f0e332dcad3010a5c7d",
+    "derived": "scripts/reverse/overlay_native.mjs",
+    "changes": [
+      "drop old seed-output mode",
+      "use new authorized runtime and evidence directories",
+      "verify target digest before provider startup",
+      "retain full MCP result alongside decoded Evidence",
+      "record SHA-256 for every request, raw MCP result, and stored response"
+    ],
+    "executed_sha256": "b8f8ecf14242cce031cf9772071ba2f39e5754771efb7ff6b4f1da8d015ae6b5",
+    "corrected_sha256": "d043feac412ec3ce0e2936a9abf19b9ab4e18f31215be191d1f03eecfce22467",
+    "post_run_corrections": [
+      "fingerprint same blocker by error code independent of tool name",
+      "skip queue files removed after directory enumeration"
+    ],
+    "corrected_version_provider_run": false,
+    "corrected_lf_normalized_sha256": "4b7652f270d6755cc38ec48db677686b781127412e81454529012907905d10a1"
+  },
+  "stop_rule": "Second occurrence of same blocker stops; external-provider blocker at most one retry; admission rules unchanged.",
+  "result": "externally blocked after two provider_timeout errors; closed without any third native analysis; no new decompiled code Evidence"
+}

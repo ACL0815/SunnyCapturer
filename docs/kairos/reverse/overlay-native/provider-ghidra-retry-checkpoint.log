@@ -1,0 +1,414 @@
+2026-10-18 16:25:53 INFO  (LoggingInitialization) Using log config file: jar:file:/C:/Users/Axel_desktop/.t3/worktrees/kapture/t3-f80e737e/.tools/reverse/ghidra/ghidra_12.1.4_PUBLIC/Ghidra/Framework/Generic/lib/Generic.jar!/generic.log4j.xml  
+2026-10-18 16:25:53 INFO  (LoggingInitialization) Using log file: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\ghidra.log  
+2026-10-18 16:25:53 DEBUG (GhidraObjectInputFilter) Including serial input filter: FileSystem/data/client.rmi.serial.filter  
+2026-10-18 16:25:53 INFO  (Preferences) Loading user preferences: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\preferences  
+2026-10-18 16:25:53 INFO  (ClassSearcher) Searching for classes...  
+2026-10-18 16:25:55 INFO  (ClassSearcher) Class search complete (1934 ms)  
+2026-10-18 16:25:56 INFO  (DefaultSSLContextInitializer) Initializing SSL Context  
+2026-10-18 16:25:56 INFO  (SecureRandomFactory) Initializing Random Number Generator...  
+2026-10-18 16:25:56 INFO  (SecureRandomFactory) Random Number Generator initialization complete: SHA1PRNG  
+2026-10-18 16:25:56 INFO  (DefaultTrustManagerFactory) Trust manager disabled, cacerts have not been set  
+2026-10-18 16:25:56 INFO  (FileCacheMaintenanceDaemon) Starting cache cleanup: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\cache\Axel_desktop-ghidra\fscache2  
+2026-10-18 16:25:56 INFO  (FileCacheMaintenanceDaemon) Finished cache cleanup, estimated storage used: 0  
+2026-10-18 16:25:57 INFO  (AnalyzeHeadless) Headless startup complete (8626 ms)  
+2026-10-18 16:25:57 INFO  (ClassSearcher) Class searcher loaded 59 extension points (20 false positives)  
+2026-10-18 16:25:58 INFO  (HeadlessAnalyzer) HEADLESS Script Paths:
+    C:\Users\Axel_desktop\.t3\worktrees\kapture\t3-f80e737e\.tools\reverse\ghidra\ghidra_12.1.4_PUBLIC\Ghidra\Features\FileFormats\ghidra_scripts
+    C:\Users\Axel_desktop\.t3\worktrees\kapture\t3-f80e737e\.tools\reverse\ghidra\ghidra_12.1.4_PUBLIC\Ghidra\Features\SystemEmulation\ghidra_scripts
+    C:\Users\Axel_desktop\.t3\worktrees\kapture\t3-f80e737e\.tools\reverse\ghidra\ghidra_12.1.4_PUBLIC\Ghidra\Processors\Atmel\ghidra_scripts
+    C:\Users\Axel_desktop\.t3\worktrees\kapture\t3-f80e737e\.tools\reverse\ghidra\ghidra_12.1.4_PUBLIC\Ghidra\Features\VersionTracking\ghidra_scripts
+    C:\Users\Axel_desktop\.t3\worktrees\kapture\t3-f80e737e\.tools\reverse\ghidra\ghidra_12.1.4_PUBLIC\Ghidra\Processors\DATA\ghidra_scripts
+    C:\Users\Axel_desktop\.t3\worktrees\kapture\t3-f80e737e\.tools\reverse\ghidra\ghidra_12.1.4_PUBLIC\Ghidra\Features\MicrosoftCodeAnalyzer\ghidra_scripts
+    C:\Users\Axel_desktop\.t3\worktrees\kapture\t3-f80e737e\.tools\reverse\ghidra\ghidra_12.1.4_PUBLIC\Ghidra\Features\SwiftDemangler\ghidra_scripts
+    C:\Users\Axel_desktop\.t3\worktrees\kapture\t3-f80e737e\.tools\reverse\ghidra\ghidra_12.1.4_PUBLIC\Ghidra\Debug\Debugger-rmi-trace\ghidra_scripts
+    C:\Users\Axel_desktop\.t3\worktrees\kapture\t3-f80e737e\.tools\reverse\ghidra\ghidra_12.1.4_PUBLIC\Ghidra\Debug\Debugger\ghidra_scripts
+    C:\Users\Axel_desktop\.t3\worktrees\kapture\t3-f80e737e\.tools\reverse\ghidra\ghidra_12.1.4_PUBLIC\Ghidra\Processors\JVM\ghidra_scripts
+    C:\Users\Axel_desktop\.t3\worktrees\kapture\t3-f80e737e\.tools\reverse\ghidra\ghidra_12.1.4_PUBLIC\Ghidra\Features\FunctionID\ghidra_scripts
+    C:\Users\Axel_desktop\.t3\worktrees\kapture\t3-f80e737e\.tools\reverse\ghidra\ghidra_12.1.4_PUBLIC\Ghidra\Features\PyGhidra\ghidra_scripts
+    C:\Users\Axel_desktop\.t3\worktrees\kapture\t3-f80e737e\.tools\reverse\ghidra\ghidra_12.1.4_PUBLIC\Ghidra\Processors\8051\ghidra_scripts
+    C:\Users\Axel_desktop\.t3\projects\clockify\.rea-runtime\node_modules\rea-agents\bridge\ghidra
+    C:\Users\Axel_desktop\.t3\worktrees\kapture\t3-f80e737e\.tools\reverse\ghidra\ghidra_12.1.4_PUBLIC\Ghidra\Features\BSim\ghidra_scripts
+    C:\Users\Axel_desktop\.t3\worktrees\kapture\t3-f80e737e\.tools\reverse\ghidra\ghidra_12.1.4_PUBLIC\Ghidra\Processors\PIC\ghidra_scripts
+    C:\Users\Axel_desktop\.t3\worktrees\kapture\t3-f80e737e\.tools\reverse\ghidra\ghidra_12.1.4_PUBLIC\Ghidra\Features\BytePatterns\ghidra_scripts
+    C:\Users\Axel_desktop\.t3\worktrees\kapture\t3-f80e737e\.tools\reverse\ghidra\ghidra_12.1.4_PUBLIC\Ghidra\Features\WildcardAssembler\ghidra_scripts
+    C:\Users\Axel_desktop\.t3\worktrees\kapture\t3-f80e737e\.tools\reverse\ghidra\ghidra_12.1.4_PUBLIC\Ghidra\Features\Base\ghidra_scripts
+    C:\Users\Axel_desktop\.t3\worktrees\kapture\t3-f80e737e\.tools\reverse\ghidra\ghidra_12.1.4_PUBLIC\Ghidra\Features\DecompilerDependent\ghidra_scripts
+    C:\Users\Axel_desktop\.t3\worktrees\kapture\t3-f80e737e\.tools\reverse\ghidra\ghidra_12.1.4_PUBLIC\Ghidra\Features\GnuDemangler\ghidra_scripts
+    C:\Users\Axel_desktop\.t3\worktrees\kapture\t3-f80e737e\.tools\reverse\ghidra\ghidra_12.1.4_PUBLIC\Ghidra\Features\PDB\ghidra_scripts
+    C:\Users\Axel_desktop\.t3\worktrees\kapture\t3-f80e737e\.tools\reverse\ghidra\ghidra_12.1.4_PUBLIC\Ghidra\Features\Decompiler\ghidra_scripts  
+2026-10-18 16:25:58 INFO  (HeadlessAnalyzer) HEADLESS: execution starts  
+2026-10-18 16:25:58 INFO  (HeadlessAnalyzer) Creating temporary project: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\project\rea-project  
+2026-10-18 16:25:58 DEBUG (DefaultProjectManager) No tools found; Installing default tools  
+2026-10-18 16:25:58 DEBUG (DefaultProjectManager) 	no recent project directories found  
+2026-10-18 16:25:58 INFO  (DefaultProject) Creating project: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\project\rea-project  
+2026-10-18 16:25:58 INFO  (HeadlessAnalyzer) REPORT: Processing input files:   
+2026-10-18 16:25:58 INFO  (HeadlessAnalyzer)      project: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\project\rea-project  
+2026-10-18 16:25:58 INFO  (HeadlessAnalyzer) IMPORTING: file:///C:/Users/Axel_desktop/AppData/Local/KairosCapture/ReverseTools/overlay-contract-20261018/rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48/target-e97cc2612b79.exe  
+2026-10-18 16:26:04 INFO  (ProgramLoader) Using Loader: Portable Executable (PE)  
+2026-10-18 16:26:04 INFO  (ProgramLoader) Using Language/Compiler: x86:LE:64:default:windows  
+2026-10-18 16:26:04 INFO  (ProgramLoader) Using Library Search Path: [., C:\WINDOWS\SysWOW64, C:\Users\Axel_desktop\.t3\worktrees\kapture\t3-f80e737e\.tools\reverse\jdk\jdk-21.0.12.1+1\bin, C:\WINDOWS\Sun\Java\bin, C:\WINDOWS\system32, C:\WINDOWS, C:\Program Files\PowerShell\7, C:\Users\Axel_desktop\.codex\tmp\arg0-windows\codex-arg0nkeUf5, C:\Users\Axel_desktop\AppData\Roaming\npm\node_modules\@openai\codex\node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\codex-path, C:\Ruby34-x64\bin, C:\Program Files (x86)\VMware\VMware Workstation\bin\, C:\Program Files\ImageMagick-7.1.1-Q16-HDRI, C:\Program Files\Eclipse Adoptium\jre-8.0.422.5-hotspot\bin, C:\Program Files (x86)\Common Files\Oracle\Java\javapath, C:\Windows\system32, C:\Windows, C:\Windows\System32\Wbem, C:\Windows\System32\WindowsPowerShell\v1.0\, C:\Windows\System32\OpenSSH\, C:\ProgramData\chocolatey\bin, C:\Program Files\dotnet\, C:\Program Files (x86)\Boxcryptor\bin\, C:\Program Files (x86)\Speedify\, C:\Program Files\PuTTY\, C:\Program Files\Microsoft Network Monitor 3\, C:\Program Files (x86)\AOMEI(1), C:\Program Files\Git\cmd, C:\Program Files\Meld\, C:\Program Files\nodejs\, C:\Program Files\Pandoc\, C:\Users\Axel_desktop\AppData\Roaming\npm, C:\Program Files\PowerShell\7\, C:\Program Files\Tailscale\, C:\Program Files\KeePassXC\, C:\Program Files\Yubico\YubiKey Manager CLI\, C:\Program Files\GitHub CLI\, %SystemRoot%\system32, %SystemRoot%, %SystemRoot%\System32\Wbem, %SYSTEMROOT%\System32\WindowsPowerShell\v1.0\, %SYSTEMROOT%\System32\OpenSSH\, C:\Users\Axel_desktop\tools\jdk-21\bin, C:\Users\Axel_desktop\.grok\bin, C:\Programme w o Installer\ffmpeg\bin, C:\Users\Axel_desktop\AppData\Local\pnpm, C:\Users\Axel_desktop\AppData\Local\Programs\Python\Launcher\, C:\Users\Axel_desktop\.cargo\bin, C:\Users\Axel_desktop\anaconda3, C:\Users\Axel_desktop\anaconda3\Library\mingw-w64\bin, C:\Users\Axel_desktop\anaconda3\Library\usr\bin, C:\Users\Axel_desktop\anaconda3\Library\bin, C:\Users\Axel_desktop\anaconda3\Scripts, C:\Users\Axel_desktop\AppData\Local\Microsoft\WindowsApps, C:\Users\Axel_desktop\.dotnet\tools, C:\Program Files (x86)\SVP 4\mpv64, C:\Users\Axel_desktop\AppData\Local\Programs\Microsoft VS Code\bin, C:\Users\Axel_desktop\AppData\Local\Programs\Fiddler, C:\Program Files\mitmproxy\bin, C:\Users\Axel_desktop\AppData\Local\Microsoft\WinGet\Links, C:\Users\Axel_desktop\AppData\Roaming\Programs\Zero Install, C:\Users\Axel_desktop\AppData\Local\GitHubDesktop\bin, C:\mcp-test\WorkDir\tools\bin, C:\Users\Axel_desktop\.lmstudio\bin, C:\Users\Axel_desktop\AppData\Local\PowerToys\DSCModules\, C:\Users\Axel_desktop\AppData\Local\Microsoft\WinGet\Packages\Anthropic.ClaudeCode_Microsoft.Winget.Source_8wekyb3d8bbwe, C:\Program Files\GitHub CLI, C:\Users\Axel_desktop\.t3\projects\clockify\.re-tools\home\.dotnet\tools, C:\Users\Axel_desktop\AppData\Local\Programs\nodejs, C:\Users\Axel_desktop\AppData\Local\Volta\bin, C:\Users\Axel_desktop\.local\bin, C:\Users\Axel_desktop\.bun\bin, C:\Users\Axel_desktop\scoop\shims]  
+2026-10-18 16:26:05 INFO  (TLSDirectory) TLS callbacks at 14019a058  
+2026-10-18 16:26:23 INFO  (TLSDirectory) TLS callbacks at 1801bd870  
+2026-10-18 16:26:45 DEBUG (WEVTResourceDataType) Error processing Provider Element.  
+2026-10-18 16:26:54 INFO  (TLSDirectory) TLS callbacks at 1801d33c0  
+2026-10-18 16:26:58 INFO  (TLSDirectory) TLS callbacks at 1800aee08  
+2026-10-18 16:26:58 DEBUG (WEVTResourceDataType) Error processing Provider Element.  
+2026-10-18 16:27:09 INFO  (TLSDirectory) TLS callbacks at 1800e5888  
+2026-10-18 16:27:09 DEBUG (WEVTResourceDataType) Error processing Provider Element.  
+2026-10-18 16:27:11 INFO  (TLSDirectory) TLS callbacks at 1800ae9e0  
+2026-10-18 16:27:11 WARN  (ExportDataDirectory) Invalid or missing function at 1800c2738  
+2026-10-18 16:27:14 INFO  (TLSDirectory) TLS callbacks at 180632c40  
+2026-10-18 16:27:14 WARN  (ExportDataDirectory) Invalid or missing function at 18071975c  
+2026-10-18 16:27:27 INFO  (TLSDirectory) TLS callbacks at 18003ee78  
+2026-10-18 16:27:28 WARN  (ExportDataDirectory) Invalid or missing function at 1800c894c  
+2026-10-18 16:27:28 DEBUG (WEVTResourceDataType) Error processing Provider Element.  
+2026-10-18 16:27:30 DEBUG (WEVTResourceDataType) Error processing Provider Element.  
+2026-10-18 16:27:32 INFO  (ProgramLoader) Additional info:
+Loading file:///C:/Users/Axel_desktop/AppData/Local/KairosCapture/ReverseTools/overlay-contract-20261018/rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48/target-e97cc2612b79.exe?MD5=14b75e4f4050a4990b3c9ace0d156a18...
+------------------------------------------------
+
+Searching 61 paths for library ADVAPI32.DLL...
+Skipping library which is the wrong architecture: file:///C:/Windows/SysWOW64/advapi32.dll
+Loading file:///C:/Windows/System32/advapi32.dll?MD5=8b341831df1be2e0b83fb26fc9aba2a4...
+Created exports file: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\advapi32.exports
+Library not saved to project.
+------------------------------------------------
+
+Searching 61 paths for library API-MS-WIN-CORE-WINRT-ERROR-L1-1-1.DLL...
+Library not found.
+------------------------------------------------
+
+Searching 61 paths for library API-MS-WIN-CORE-WINRT-L1-1-0.DLL...
+Library not found.
+------------------------------------------------
+
+Searching 61 paths for library API-MS-WIN-CRT-CONVERT-L1-1-0.DLL...
+Loading file:///C:/Users/Axel_desktop/.t3/worktrees/kapture/t3-f80e737e/.tools/reverse/jdk/jdk-21.0.12.1+1/bin/api-ms-win-crt-convert-l1-1-0.dll?MD5=3560176d0cdbe2f5d33f543348e0a027...
+Created exports file: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\api-ms-win-crt-convert-l1-1-0.exports
+Library not saved to project.
+------------------------------------------------
+
+Searching 61 paths for library API-MS-WIN-CRT-ENVIRONMENT-L1-1-0.DLL...
+Loading file:///C:/Users/Axel_desktop/.t3/worktrees/kapture/t3-f80e737e/.tools/reverse/jdk/jdk-21.0.12.1+1/bin/api-ms-win-crt-environment-l1-1-0.dll?MD5=e93c7f013493b12ad40229b19db02ce6...
+Created exports file: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\api-ms-win-crt-environment-l1-1-0.exports
+Library not saved to project.
+------------------------------------------------
+
+Searching 61 paths for library API-MS-WIN-CRT-FILESYSTEM-L1-1-0.DLL...
+Loading file:///C:/Users/Axel_desktop/.t3/worktrees/kapture/t3-f80e737e/.tools/reverse/jdk/jdk-21.0.12.1+1/bin/api-ms-win-crt-filesystem-l1-1-0.dll?MD5=47555752931cecf90e796499b62ec729...
+Created exports file: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\api-ms-win-crt-filesystem-l1-1-0.exports
+Library not saved to project.
+------------------------------------------------
+
+Searching 61 paths for library API-MS-WIN-CRT-HEAP-L1-1-0.DLL...
+Loading file:///C:/Users/Axel_desktop/.t3/worktrees/kapture/t3-f80e737e/.tools/reverse/jdk/jdk-21.0.12.1+1/bin/api-ms-win-crt-heap-l1-1-0.dll?MD5=527bbbfded529ea77ee798d94ce0f243...
+Created exports file: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\api-ms-win-crt-heap-l1-1-0.exports
+Library not saved to project.
+------------------------------------------------
+
+Searching 61 paths for library API-MS-WIN-CRT-LOCALE-L1-1-0.DLL...
+Loading file:///C:/Users/Axel_desktop/.t3/worktrees/kapture/t3-f80e737e/.tools/reverse/jdk/jdk-21.0.12.1+1/bin/api-ms-win-crt-locale-l1-1-0.dll?MD5=09796dab12cbbd920f632aeb89820193...
+Created exports file: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\api-ms-win-crt-locale-l1-1-0.exports
+Library not saved to project.
+------------------------------------------------
+
+Searching 61 paths for library API-MS-WIN-CRT-MATH-L1-1-0.DLL...
+Loading file:///C:/Users/Axel_desktop/.t3/worktrees/kapture/t3-f80e737e/.tools/reverse/jdk/jdk-21.0.12.1+1/bin/api-ms-win-crt-math-l1-1-0.dll?MD5=aa9624cb27cc50a3fbbd3b223a617b1c...
+Created exports file: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\api-ms-win-crt-math-l1-1-0.exports
+Library not saved to project.
+------------------------------------------------
+
+Searching 61 paths for library API-MS-WIN-CRT-RUNTIME-L1-1-0.DLL...
+Loading file:///C:/Users/Axel_desktop/.t3/worktrees/kapture/t3-f80e737e/.tools/reverse/jdk/jdk-21.0.12.1+1/bin/api-ms-win-crt-runtime-l1-1-0.dll?MD5=bbaa58e9e1abdf7d8c4c69652d29d789...
+Created exports file: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\api-ms-win-crt-runtime-l1-1-0.exports
+Library not saved to project.
+------------------------------------------------
+
+Searching 61 paths for library API-MS-WIN-CRT-STDIO-L1-1-0.DLL...
+Loading file:///C:/Users/Axel_desktop/.t3/worktrees/kapture/t3-f80e737e/.tools/reverse/jdk/jdk-21.0.12.1+1/bin/api-ms-win-crt-stdio-l1-1-0.dll?MD5=ef37235fc43157a4c93241d5e49e304b...
+Created exports file: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\api-ms-win-crt-stdio-l1-1-0.exports
+Library not saved to project.
+------------------------------------------------
+
+Searching 61 paths for library API-MS-WIN-CRT-STRING-L1-1-0.DLL...
+Loading file:///C:/Users/Axel_desktop/.t3/worktrees/kapture/t3-f80e737e/.tools/reverse/jdk/jdk-21.0.12.1+1/bin/api-ms-win-crt-string-l1-1-0.dll?MD5=639b1fb35cb61ba633eb1791b750631f...
+Created exports file: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\api-ms-win-crt-string-l1-1-0.exports
+Library not saved to project.
+------------------------------------------------
+
+Searching 61 paths for library API-MS-WIN-CRT-TIME-L1-1-0.DLL...
+Loading file:///C:/Users/Axel_desktop/.t3/worktrees/kapture/t3-f80e737e/.tools/reverse/jdk/jdk-21.0.12.1+1/bin/api-ms-win-crt-time-l1-1-0.dll?MD5=fccce207a34c947f01d3f23a7dd09569...
+Created exports file: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\api-ms-win-crt-time-l1-1-0.exports
+Library not saved to project.
+------------------------------------------------
+
+Searching 61 paths for library API-MS-WIN-SHCORE-SCALING-L1-1-1.DLL...
+Library not found.
+------------------------------------------------
+
+Searching 61 paths for library ASS.DLL...
+Library not found.
+------------------------------------------------
+
+Searching 61 paths for library AVCODEC-61.DLL...
+Library not found.
+------------------------------------------------
+
+Searching 61 paths for library AVFILTER-10.DLL...
+Library not found.
+------------------------------------------------
+
+Searching 61 paths for library AVFORMAT-61.DLL...
+Library not found.
+------------------------------------------------
+
+Searching 61 paths for library AVUTIL-59.DLL...
+Library not found.
+------------------------------------------------
+
+Searching 61 paths for library D3D11.DLL...
+Skipping library which is the wrong architecture: file:///C:/Windows/SysWOW64/d3d11.dll
+Loading file:///C:/Windows/System32/d3d11.dll?MD5=83cabfbeee0ba96926cb3320e6907f7d...
+Index 4 out of bounds for length 4
+Created exports file: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\d3d11.exports
+Library not saved to project.
+------------------------------------------------
+
+Searching 61 paths for library DBGHELP.DLL...
+Skipping library which is the wrong architecture: file:///C:/Windows/SysWOW64/dbghelp.dll
+Loading file:///C:/Windows/System32/dbghelp.dll?MD5=1b18ea629e10a7af069326d4f90f2a7f...
+Created exports file: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\dbghelp.exports
+Library not saved to project.
+------------------------------------------------
+
+Searching 61 paths for library DWMAPI.DLL...
+Skipping library which is the wrong architecture: file:///C:/Windows/SysWOW64/dwmapi.dll
+Loading file:///C:/Windows/System32/dwmapi.dll?MD5=c0ccc02a3547b051c538f21b48e745b2...
+[dwmapi.dll]: failed to create WEVTResource at 1800299a0: Failed to resolve data length for WEVTResource
+Created exports file: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\dwmapi.exports
+Library not saved to project.
+------------------------------------------------
+
+Searching 61 paths for library KERNEL32.DLL...
+Skipping library which is the wrong architecture: file:///C:/Windows/SysWOW64/kernel32.dll
+Loading file:///C:/Windows/System32/kernel32.dll?MD5=046e6b86273b9cc2ed367bdcf9c12b44...
+Created exports file: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\kernel32.exports
+Library not saved to project.
+------------------------------------------------
+
+Searching 61 paths for library MF.DLL...
+Skipping library which is the wrong architecture: file:///C:/Windows/SysWOW64/mf.dll
+Loading file:///C:/Windows/System32/mf.dll?MD5=2b11da36c6948f5b9d8ebba42b851a38...
+Index 1 out of bounds for length 1
+Created exports file: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\mf.exports
+Library not saved to project.
+------------------------------------------------
+
+Searching 61 paths for library MFPLAT.DLL...
+Skipping library which is the wrong architecture: file:///C:/Windows/SysWOW64/mfplat.dll
+Loading file:///C:/Windows/System32/mfplat.dll?MD5=8521b5f6a6b1d9152fe9a5175bbf44c5...
+Created exports file: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\mfplat.exports
+Library not saved to project.
+------------------------------------------------
+
+Searching 61 paths for library MFREADWRITE.DLL...
+Skipping library which is the wrong architecture: file:///C:/Windows/SysWOW64/mfreadwrite.dll
+Loading file:///C:/Windows/System32/mfreadwrite.dll?MD5=9ebfe0c430b8ec966df82bc4f9b3710a...
+[mfreadwrite.dll]: failed to create WEVTResource at 1800ce978: Failed to resolve data length for WEVTResource
+Created exports file: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\mfreadwrite.exports
+Library not saved to project.
+------------------------------------------------
+
+Searching 61 paths for library MSVCP140.DLL...
+Skipping library which is the wrong architecture: file:///C:/Windows/SysWOW64/msvcp140.dll
+Loading file:///C:/Users/Axel_desktop/.t3/worktrees/kapture/t3-f80e737e/.tools/reverse/jdk/jdk-21.0.12.1+1/bin/msvcp140.dll?MD5=72f3d84384e888bf0d38852eb863026b...
+Created exports file: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\msvcp140.exports
+Library not saved to project.
+------------------------------------------------
+
+Searching 61 paths for library MSVCP140_ATOMIC_WAIT.DLL...
+Skipping library which is the wrong architecture: file:///C:/Windows/SysWOW64/msvcp140_atomic_wait.dll
+Loading file:///C:/Windows/System32/msvcp140_atomic_wait.dll?MD5=23d24c039c2b4dc4ed855be0275e605c...
+Created exports file: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\msvcp140_atomic_wait.exports
+Library not saved to project.
+------------------------------------------------
+
+Searching 61 paths for library NTDLL.DLL...
+Skipping library which is the wrong architecture: file:///C:/Windows/SysWOW64/ntdll.dll
+Loading file:///C:/Windows/System32/ntdll.dll?MD5=1597898344e90b3c8db7fe5d209d8105...
+Created exports file: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\ntdll.exports
+Library not saved to project.
+------------------------------------------------
+
+Searching 61 paths for library OLE32.DLL...
+Skipping library which is the wrong architecture: file:///C:/Windows/SysWOW64/ole32.dll
+Loading file:///C:/Windows/System32/ole32.dll?MD5=307ac650881c55f4ba2666de9a7191e4...
+[ole32.dll]: failed to create WEVTResource at 180184740: Failed to resolve data length for WEVTResource
+Created exports file: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\ole32.exports
+Library not saved to project.
+------------------------------------------------
+
+Searching 61 paths for library OLEAUT32.DLL...
+Skipping library which is the wrong architecture: file:///C:/Windows/SysWOW64/oleaut32.dll
+Loading file:///C:/Windows/System32/oleaut32.dll?MD5=36de5774ec87b0d53c327ae1f7f103cd...
+Created exports file: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\oleaut32.exports
+Library not saved to project.
+------------------------------------------------
+
+Searching 61 paths for library QT6CORE.DLL...
+Library not found.
+------------------------------------------------
+
+Searching 61 paths for library QT6GUI.DLL...
+Library not found.
+------------------------------------------------
+
+Searching 61 paths for library QT6NETWORK.DLL...
+Library not found.
+------------------------------------------------
+
+Searching 61 paths for library QT6PDF.DLL...
+Library not found.
+------------------------------------------------
+
+Searching 61 paths for library QT6PDFWIDGETS.DLL...
+Library not found.
+------------------------------------------------
+
+Searching 61 paths for library QT6WIDGETS.DLL...
+Library not found.
+------------------------------------------------
+
+Searching 61 paths for library SHELL32.DLL...
+Skipping library which is the wrong architecture: file:///C:/Windows/SysWOW64/shell32.dll
+Loading file:///C:/Windows/System32/shell32.dll?MD5=aa8575c390922c7a6f00c6ddf4c63538...
+Created exports file: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\shell32.exports
+Library not saved to project.
+------------------------------------------------
+
+Searching 61 paths for library SHLWAPI.DLL...
+Skipping library which is the wrong architecture: file:///C:/Windows/SysWOW64/shlwapi.dll
+Loading file:///C:/Windows/System32/shlwapi.dll?MD5=66152731699a275bcbd4aa575223dc98...
+Created exports file: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\shlwapi.exports
+Library not saved to project.
+------------------------------------------------
+
+Searching 61 paths for library USER32.DLL...
+Skipping library which is the wrong architecture: file:///C:/Windows/SysWOW64/user32.dll
+Loading file:///C:/Windows/System32/user32.dll?MD5=0a96167c4b0625336617aee21c3a7ad1...
+[user32.dll]: failed to create WEVTResource at 1800e7a70: Failed to resolve data length for WEVTResource
+Created exports file: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\user32.exports
+Library not saved to project.
+------------------------------------------------
+
+Searching 61 paths for library VCRUNTIME140.DLL...
+Skipping library which is the wrong architecture: file:///C:/Windows/SysWOW64/vcruntime140.dll
+Loading file:///C:/Users/Axel_desktop/.t3/worktrees/kapture/t3-f80e737e/.tools/reverse/jdk/jdk-21.0.12.1+1/bin/vcruntime140.dll?MD5=caf9edded91c1f6c0022b278c16679aa...
+Created exports file: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\vcruntime140.exports
+Library not saved to project.
+------------------------------------------------
+
+Searching 61 paths for library VCRUNTIME140_1.DLL...
+Loading file:///C:/Windows/SysWOW64/vcruntime140_1.dll?MD5=2f74f7bbf256d0acb305068a6960ea5a...
+Created exports file: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\vcruntime140_1.exports
+Library not saved to project.
+------------------------------------------------
+
+Searching 61 paths for library WINMM.DLL...
+Skipping library which is the wrong architecture: file:///C:/Windows/SysWOW64/winmm.dll
+Loading file:///C:/Windows/System32/winmm.dll?MD5=6ec996cd475eac679e62cb9ec054d494...
+[winmm.dll]: failed to create WEVTResource at 180030310: Failed to resolve data length for WEVTResource
+Created exports file: C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\winmm.exports
+Library not saved to project.
+------------------------------------------------
+
+Applying cached symbols from WINMM.DLL
+Applying C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\d3d11.exports
+Applying C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\advapi32.exports
+Applying C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\dbghelp.exports
+Applying cached symbols from SHLWAPI.DLL
+Applying cached symbols from SHELL32.DLL
+Applying C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\dwmapi.exports
+Applying C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\ntdll.exports
+Applying C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\mfplat.exports
+Applying C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\mf.exports
+Applying C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\mfreadwrite.exports
+Applying C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\kernel32.exports
+Applying C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\user32.exports
+Applying C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\ole32.exports
+Applying C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\oleaut32.exports
+Applying C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\msvcp140.exports
+Applying C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\msvcp140_atomic_wait.exports
+Applying C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\vcruntime140.exports
+Applying C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\vcruntime140_1.exports
+Applying C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\api-ms-win-crt-runtime-l1-1-0.exports
+Applying C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\api-ms-win-crt-heap-l1-1-0.exports
+Applying C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\api-ms-win-crt-math-l1-1-0.exports
+Applying C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\api-ms-win-crt-string-l1-1-0.exports
+Applying C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\api-ms-win-crt-stdio-l1-1-0.exports
+Applying C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\api-ms-win-crt-convert-l1-1-0.exports
+Applying C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\api-ms-win-crt-locale-l1-1-0.exports
+Applying C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\api-ms-win-crt-filesystem-l1-1-0.exports
+Applying C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\api-ms-win-crt-environment-l1-1-0.exports
+Applying C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\overlay-contract-20261018\rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48\config\Axel_desktop-ghidra\ghidra_12.1.4_PUBLIC\symbols\win64\api-ms-win-crt-time-l1-1-0.exports
+Linking the External Programs of 'target-e97cc2612b79.exe' to imported libraries...
+  [QT6PDFWIDGETS.DLL] -> not found in project
+  [ASS.DLL] -> not found in project
+  [WINMM.DLL] -> not found in project
+  [QT6GUI.DLL] -> not found in project
+  [QT6CORE.DLL] -> not found in project
+  [QT6WIDGETS.DLL] -> not found in project
+  [QT6PDF.DLL] -> not found in project
+  [QT6NETWORK.DLL] -> not found in project
+  [D3D11.DLL] -> not found in project
+  [ADVAPI32.DLL] -> not found in project
+  [AVUTIL-59.DLL] -> not found in project
+  [AVCODEC-61.DLL] -> not found in project
+  [AVFILTER-10.DLL] -> not found in project
+  [AVFORMAT-61.DLL] -> not found in project
+  [DBGHELP.DLL] -> not found in project
+  [SHLWAPI.DLL] -> not found in project
+  [SHELL32.DLL] -> not found in project
+  [DWMAPI.DLL] -> not found in project
+  [NTDLL.DLL] -> not found in project
+  [API-MS-WIN-SHCORE-SCALING-L1-1-1.DLL] -> not found in project
+  [MFPLAT.DLL] -> not found in project
+  [MF.DLL] -> not found in project
+  [MFREADWRITE.DLL] -> not found in project
+  [KERNEL32.DLL] -> not found in project
+  [USER32.DLL] -> not found in project
+  [OLE32.DLL] -> not found in project
+  [OLEAUT32.DLL] -> not found in project
+  [MSVCP140.DLL] -> not found in project
+  [MSVCP140_ATOMIC_WAIT.DLL] -> not found in project
+  [VCRUNTIME140.DLL] -> not found in project
+  [VCRUNTIME140_1.DLL] -> not found in project
+  [API-MS-WIN-CRT-RUNTIME-L1-1-0.DLL] -> not found in project
+  [API-MS-WIN-CRT-HEAP-L1-1-0.DLL] -> not found in project
+  [API-MS-WIN-CRT-MATH-L1-1-0.DLL] -> not found in project
+  [API-MS-WIN-CRT-STRING-L1-1-0.DLL] -> not found in project
+  [API-MS-WIN-CRT-STDIO-L1-1-0.DLL] -> not found in project
+  [API-MS-WIN-CRT-CONVERT-L1-1-0.DLL] -> not found in project
+  [API-MS-WIN-CRT-LOCALE-L1-1-0.DLL] -> not found in project
+  [API-MS-WIN-CRT-FILESYSTEM-L1-1-0.DLL] -> not found in project
+  [API-MS-WIN-CRT-ENVIRONMENT-L1-1-0.DLL] -> not found in project
+  [API-MS-WIN-CRT-TIME-L1-1-0.DLL] -> not found in project
+  [API-MS-WIN-CORE-WINRT-ERROR-L1-1-1.DLL] -> not found in project
+  [API-MS-WIN-CORE-WINRT-L1-1-0.DLL] -> not found in project
+------------------------------------------------
+
+  
+2026-10-18 16:27:32 INFO  (HeadlessAnalyzer) IMPORTING: Loaded 0 additional files  
+2026-10-18 16:27:32 INFO  (HeadlessAnalyzer) ANALYZING all memory and code: file:///C:/Users/Axel_desktop/AppData/Local/KairosCapture/ReverseTools/overlay-contract-20261018/rea-ghidra-2cd8b3be8a95a4896a17107c263e4e48/target-e97cc2612b79.exe  
+2026-10-18 16:27:32 WARN  (NoReturnFunctionAnalyzer) Ignoring leading '_' chars on no-return name '___raise_securityfailure' specified in file: C:\Users\Axel_desktop\.t3\worktrees\kapture\t3-f80e737e\.tools\reverse\ghidra\ghidra_12.1.4_PUBLIC\Ghidra\Features\Base\data\PEFunctionsThatDoNotReturn  
+2026-10-18 16:27:32 WARN  (NoReturnFunctionAnalyzer) Ignoring leading '_' chars on no-return name '___report_rangecheckfailure' specified in file: C:\Users\Axel_desktop\.t3\worktrees\kapture\t3-f80e737e\.tools\reverse\ghidra\ghidra_12.1.4_PUBLIC\Ghidra\Features\Base\data\PEFunctionsThatDoNotReturn  
+2026-10-18 16:27:32 INFO  (PdbUniversalAnalyzer) Skipping PDB processing: missing PDB information in program metadata  
+2026-10-18 16:28:01 INFO  (DecompilerSwitchAnalyzer) hit non-returning function, restarting decompiler switch analyzer later  
+2026-10-18 16:28:05 WARN  (DecompileCallback) Decompiling 140093990: Unable to read bytes at ram:1645c8948  
+2026-10-18 16:28:07 WARN  (DecompileCallback) Decompiling 140028fd0: Unable to read bytes at ram:20ccccccc  
+2026-10-18 16:28:08 WARN  (DecompileCallback) Decompiling 1400c9d40: Unable to read bytes at ram:20ccccccc  
+2026-10-18 16:28:12 WARN  (DecompileCallback) Decompiling 14002fb00: Unable to read bytes at ram:143020100  
+2026-10-18 16:28:18 WARN  (DecompileCallback) Decompiling 140094160: Unable to read bytes at ram:178ec8348  
+2026-10-18 16:28:18 WARN  (DecompileCallback) Decompiling 14002d5c0: Unable to read bytes at ram:20ccccccc  
+2026-10-18 16:28:22 WARN  (DecompileCallback) Decompiling 1400c9d40: Unable to read bytes at ram:20ccccccc  
+2026-10-18 16:28:42 WARN  (DecompileCallback) Decompiling 1400c9d40: Unable to read bytes at ram:20ccccccc  

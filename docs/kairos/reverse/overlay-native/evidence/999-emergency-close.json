@@ -1,0 +1,23 @@
+{
+  "request": {
+    "name": "close_binary",
+    "arguments": {}
+  },
+  "started": "2026-10-18T14:31:17.465Z",
+  "finished": "2026-10-18T14:31:17.475Z",
+  "isError": false,
+  "raw_response": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"result\":null}"
+      }
+    ],
+    "structuredContent": {
+      "result": null
+    }
+  },
+  "response": {
+    "result": null
+  }
+}
