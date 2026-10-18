@@ -2,6 +2,7 @@ using System;
 using System.ComponentModel;
 using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
@@ -40,13 +41,14 @@ internal sealed class RegionOverlay : Window
     private enum FrameGesture { None, New, Move, Resize }
     private readonly DrawingRectangle _bounds;
     private readonly bool _editing;
+    private readonly Func<Window, Task<bool>>? _confirmHandoff;
     private readonly Canvas _scene;
     private readonly FrameChrome _chrome;
     private readonly Border _toolbar;
     private readonly TextBlock _label, _error;
     private readonly Button _undo, _redo;
     private IntPtr _handle;
-    private bool _closed, _rawAccepted;
+    private bool _closed, _rawAccepted, _handoffPending;
     private FrameGesture _gesture;
     private FrameHandle _frameHandle;
     private Point _start;
@@ -61,7 +63,8 @@ internal sealed class RegionOverlay : Window
     internal FrameworkElement PreviewRoot => _scene;
     internal FrameworkElement Toolbar => _toolbar;
 
-    internal RegionOverlay(BitmapSource screenshot, DrawingRectangle bounds, bool editing = true)
+    internal RegionOverlay(BitmapSource screenshot, DrawingRectangle bounds, bool editing = true,
+        Func<Window, Task<bool>>? confirmHandoff = null)
     {
         ArgumentNullException.ThrowIfNull(screenshot);
         CaptureGeometry.ValidateSize(bounds.Width, bounds.Height);
@@ -69,6 +72,7 @@ internal sealed class RegionOverlay : Window
             throw new ArgumentException("Bildraster und Desktopgrenzen müssen übereinstimmen.", nameof(screenshot));
         _bounds = bounds;
         _editing = editing;
+        _confirmHandoff = confirmHandoff;
         Title = "Kairos Capture – auf dem Bildschirm bearbeiten";
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize;
@@ -125,10 +129,10 @@ internal sealed class RegionOverlay : Window
         AddButton(style, "Löschen", Editor.DeleteSelected);
         stack.Children.Add(style);
         var outputs = new WrapPanel();
-        AddButton(outputs, "Kopieren", () => Complete(CaptureCompletion.Copied));
-        AddButton(outputs, "Speichern", () => Complete(CaptureCompletion.Saved));
-        AddButton(outputs, "OCR", () => Complete(CaptureCompletion.Ocr));
-        AddButton(outputs, "Werkbank", () => Complete(CaptureCompletion.Workbench));
+        AddButton(outputs, "Kopieren", () => _ = CompleteAsync(CaptureCompletion.Copied));
+        AddButton(outputs, "Speichern", () => _ = CompleteAsync(CaptureCompletion.Saved));
+        AddButton(outputs, "OCR", () => _ = CompleteAsync(CaptureCompletion.Ocr));
+        AddButton(outputs, "Werkbank", () => _ = CompleteAsync(CaptureCompletion.Workbench));
         AddButton(outputs, "Abbrechen", Cancel);
         stack.Children.Add(outputs);
         stack.Children.Add(_error);
@@ -148,13 +152,13 @@ internal sealed class RegionOverlay : Window
 
     private static SolidColorBrush Brush(string colour) => new((Color)ColorConverter.ConvertFromString(colour));
 
-    private static Button AddButton(Panel panel, string label, Action click)
+    private Button AddButton(Panel panel, string label, Action click)
     {
         var button = new Button { Style = null, Template = ToolbarButtonTemplate, Content = label, Margin = new Thickness(2), Padding = new Thickness(8, 5, 8, 5),
             Background = Brush("#090E13"), Foreground = Brush("#F4F2FA"), BorderBrush = Brush("#B097E9"),
             BorderThickness = new Thickness(1), FontFamily = new FontFamily("Segoe UI"), FontSize = 13,
             MinHeight = 30, Focusable = false };
-        button.Click += (_, _) => click();
+        button.Click += (_, _) => { if (!_closed && !_handoffPending) click(); };
         panel.Children.Add(button);
         return button;
     }
@@ -221,6 +225,7 @@ internal sealed class RegionOverlay : Window
     protected override void OnPreviewMouseLeftButtonDown(MouseButtonEventArgs e)
     {
         base.OnPreviewMouseLeftButtonDown(e);
+        if (_handoffPending) { e.Handled = true; return; }
         if (IsControlSource(e.OriginalSource as DependencyObject)) return;
         if (!ReadCursor(out Point point)) return;
         if (!BeginFrameGesture(point, Keyboard.IsKeyDown(Key.Space))) return;
@@ -269,7 +274,7 @@ internal sealed class RegionOverlay : Window
     {
         base.OnPreviewMouseRightButtonDown(e);
         e.Handled = true;
-        Cancel();
+        if (!_handoffPending) Cancel();
     }
 
     protected override void OnPreviewKeyDown(KeyEventArgs e)
@@ -283,12 +288,20 @@ internal sealed class RegionOverlay : Window
 
     internal bool HandleSessionKey(Key key, ModifierKeys modifiers = ModifierKeys.None)
     {
+        if (_closed || _handoffPending) return true;
         if (Editor.IsEditingText) return false;
-        if (key == Key.Escape) { Cancel(); return true; }
+        if (key == Key.Escape)
+        {
+            if (!_editing) Cancel();
+            else if (_gesture != FrameGesture.None) EndFrameGesture(true);
+            else if (Editor.HasActiveGesture) Editor.HandleKey(Key.Escape);
+            else Cancel();
+            return true;
+        }
         if (Selection.IsEmpty) return false;
         if ((key == Key.C && modifiers == ModifierKeys.Control) || (key == Key.Enter && modifiers == ModifierKeys.None))
-            return Complete(CaptureCompletion.Copied);
-        if (key == Key.S && modifiers == ModifierKeys.Control) return Complete(CaptureCompletion.Saved);
+        { _ = CompleteAsync(CaptureCompletion.Copied); return true; }
+        if (key == Key.S && modifiers == ModifierKeys.Control) { _ = CompleteAsync(CaptureCompletion.Saved); return true; }
         if (Editor.HandleKey(key, modifiers)) return true;
         if (key == Key.V && modifiers == ModifierKeys.None) { Editor.Tool = EditorTool.Select; UpdateTools(); return true; }
         return false;
@@ -296,7 +309,7 @@ internal sealed class RegionOverlay : Window
 
     internal bool BeginFrameGesture(Point point, bool move = false)
     {
-        if (_closed || _gesture != FrameGesture.None) return false;
+        if (_closed || _handoffPending || _gesture != FrameGesture.None) return false;
         _before = Selection;
         _start = Clamp(point);
         _frameHandle = HitFrame(_start);
@@ -341,9 +354,10 @@ internal sealed class RegionOverlay : Window
     {
         if (_gesture == FrameGesture.None) return;
         _gesture = FrameGesture.None;
+        if (IsMouseCaptured) ReleaseMouseCapture();
         if (cancel) SetRegion(_before);
         if (Selection.Width < 2 || Selection.Height < 2) SetRegion(Int32Rect.Empty);
-        if (!_editing && !Selection.IsEmpty)
+        if (!_editing && !cancel && !Selection.IsEmpty)
         {
             _rawAccepted = true;
             Close();
@@ -356,6 +370,7 @@ internal sealed class RegionOverlay : Window
 
     internal void SetRegion(Int32Rect region)
     {
+        if (_closed || _handoffPending) return;
         if (region.X < 0 || region.Y < 0 || region.Width < 0 || region.Height < 0 ||
             (long)region.X + region.Width > _bounds.Width || (long)region.Y + region.Height > _bounds.Height)
             throw new ArgumentOutOfRangeException(nameof(region));
@@ -369,7 +384,7 @@ internal sealed class RegionOverlay : Window
         Editor.Clip = new RectangleGeometry(ready ? new Rect(Selection.X, Selection.Y, Selection.Width, Selection.Height) : Rect.Empty);
         Editor.IsHitTestVisible = _editing && ready && _gesture == FrameGesture.None;
         _toolbar.Visibility = _editing && ready && _gesture == FrameGesture.None ? Visibility.Visible : Visibility.Collapsed;
-        _label.Text = $"{Selection.Width} × {Selection.Height} px   ·   Leertaste + Ziehen: Bereich verschieben   ·   Esc: abbrechen";
+        _label.Text = $"{Selection.Width} × {Selection.Height} px   ·   Leertaste + Ziehen: Bereich verschieben   ·   Esc: Geste verwerfen, sonst abbrechen";
         PositionToolbar();
         _chrome.InvalidateVisual();
     }
@@ -412,25 +427,44 @@ internal sealed class RegionOverlay : Window
         return result;
     }
 
-    internal bool Complete(CaptureCompletion completion)
+    internal async Task<bool> CompleteAsync(CaptureCompletion completion)
     {
-        if (_closed || Selection.IsEmpty || completion == CaptureCompletion.Cancelled) return false;
+        if (_closed || _handoffPending || Selection.IsEmpty || completion == CaptureCompletion.Cancelled) return false;
         if (completion == CaptureCompletion.Copied)
             return ExecuteOutput(completion, image => { ImageOutput.Copy(image); return true; });
         if (completion == CaptureCompletion.Saved)
             return ExecuteOutput(completion, image => ImageOutput.Save(image, this) != null);
-        Editor.EndGesture();
-        Editor.CommitText();
-        _scene.Children.Remove(Editor); // Detach before shell takes ownership; preserve objects and history.
-        Editor.Clip = null;
-        Result = new CaptureSessionResult(completion, Editor, Selection);
-        Close();
-        return true;
+        _handoffPending = true;
+        try
+        {
+            Editor.EndGesture();
+            Editor.CommitText();
+            _scene.IsEnabled = false;
+            if (_confirmHandoff != null && !await _confirmHandoff(this)) return false;
+            // The owner/lifetime may have closed us while the shell awaited OCR or a dialog.
+            if (_closed) return false;
+            _scene.Children.Remove(Editor); // Detach only after permission; preserve objects and history.
+            Editor.Clip = null;
+            Result = new CaptureSessionResult(completion, Editor, Selection)
+                { ReplacementConfirmed = _confirmHandoff != null };
+            Close();
+            return true;
+        }
+        catch (Exception exception)
+        {
+            ShowOutputError(exception);
+            return false;
+        }
+        finally
+        {
+            _handoffPending = false;
+            _scene.IsEnabled = true;
+        }
     }
 
     internal bool ExecuteOutput(CaptureCompletion completion, Func<BitmapSource, bool> write)
     {
-        if (_closed || Selection.IsEmpty) return false;
+        if (_closed || _handoffPending || Selection.IsEmpty) return false;
         try
         {
             if (!write(Editor.Flatten(Selection))) return false;
@@ -440,11 +474,17 @@ internal sealed class RegionOverlay : Window
         }
         catch (Exception exception)
         {
-            _error.Text = "Ausgabe fehlgeschlagen: " + exception.Message;
-            _error.Visibility = Visibility.Visible;
-            PositionToolbar();
+            ShowOutputError(exception);
             return false;
         }
+    }
+
+    private void ShowOutputError(Exception exception)
+    {
+        if (_closed) return;
+        _error.Text = "Ausgabe fehlgeschlagen: " + exception.Message;
+        _error.Visibility = Visibility.Visible;
+        PositionToolbar();
     }
 
     internal void Cancel()

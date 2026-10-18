@@ -117,6 +117,7 @@ public partial class MainWindow : Window
         CropCanvas.Children.Clear();
         _editor = editor;
         _documentRegion = region;
+        editor.SetEditingBounds(region);
         CropCanvas.Width = region.Width;
         CropCanvas.Height = region.Height;
         Canvas.SetLeft(editor, -region.X);
@@ -232,7 +233,8 @@ public partial class MainWindow : Window
         try
         {
             SetStatus("Bereich aufziehen und direkt im eingefrorenen Bildschirm bearbeiten · Esc bricht ab.");
-            CaptureSessionResult result = await CaptureService.CaptureEditedRegionAsync(this);
+            CaptureSessionResult result = await CaptureService.CaptureEditedRegionAsync(this, CancellationToken.None,
+                dialogOwner => PrepareReplacementAsync(dialogOwner));
             startOcr = await AcceptCaptureResultAsync(result);
         }
         catch (OperationCanceledException) { SetStatus("Aufnahme abgebrochen."); }
@@ -245,6 +247,7 @@ public partial class MainWindow : Window
     internal async Task<bool> AcceptCaptureResultAsync(CaptureSessionResult result)
     {
         Dispatcher.VerifyAccess();
+        if (_disposed || _closing) return false;
         switch (result.Completion)
         {
             case CaptureCompletion.Cancelled:
@@ -261,7 +264,7 @@ public partial class MainWindow : Window
                 if (result.Editor == null)
                     throw new InvalidOperationException("Die Aufnahme hat keinen Editor zur Übergabe bereitgestellt.");
                 // Only an explicit handoff may replace the workbench document. Copy/save leave it intact.
-                if (!await PrepareReplacementAsync())
+                if (!result.ReplacementConfirmed && !await PrepareReplacementAsync())
                 {
                     SetStatus("Aufnahme nicht übernommen. Das bisherige Dokument bleibt erhalten.");
                     return false;
@@ -332,12 +335,13 @@ public partial class MainWindow : Window
         finally { _replacing = false; UpdateControls(); }
     }
 
-    private async Task<bool> PrepareReplacementAsync()
+    private async Task<bool> PrepareReplacementAsync(Window? dialogOwner = null)
     {
         await CancelOcrAsync();
+        if (_disposed || (dialogOwner != null && _closing)) return false;
         if (!HasUnsavedDocumentChanges()) return true;
-        MessageBoxResult result = ShowSavePrompt();
-        return result == MessageBoxResult.No || (result == MessageBoxResult.Yes && SaveImage());
+        MessageBoxResult result = ShowSavePrompt(dialogOwner);
+        return result == MessageBoxResult.No || (result == MessageBoxResult.Yes && SaveImage(dialogOwner));
     }
 
     internal bool HasUnsavedDocumentChanges()
@@ -349,11 +353,11 @@ public partial class MainWindow : Window
         return _savedHash == null || !CryptographicOperations.FixedTimeEquals(current, _savedHash);
     }
 
-    private MessageBoxResult ShowSavePrompt()
+    private MessageBoxResult ShowSavePrompt(Window? dialogOwner = null)
     {
         if (_diagnosticsMode) throw new InvalidOperationException("Save prompts are disabled in offline diagnostics.");
-        if (!IsVisible) ShowFromTray();
-        var dialog = new Window { Owner = this, Title = "Änderungen speichern?", Width = 460, SizeToContent = SizeToContent.Height, ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.CenterOwner, ShowInTaskbar = false };
+        if (dialogOwner == null && !IsVisible) ShowFromTray();
+        var dialog = new Window { Owner = dialogOwner ?? this, Title = "Änderungen speichern?", Width = 460, SizeToContent = SizeToContent.Height, ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.CenterOwner, ShowInTaskbar = false };
         var panel = new StackPanel { Margin = new Thickness(24) };
         panel.Children.Add(new TextBlock { Text = "Änderungen speichern?", FontSize = 20, FontWeight = FontWeights.SemiBold });
         panel.Children.Add(new TextBlock { Text = "Deine Markierungen wurden noch nicht gespeichert.", Margin = new Thickness(0, 10, 0, 23), TextWrapping = TextWrapping.Wrap });
@@ -372,14 +376,14 @@ public partial class MainWindow : Window
         return result;
     }
 
-    private bool SaveImage()
+    private bool SaveImage(Window? dialogOwner = null)
     {
         if (_editor == null) return false;
         try
         {
             _editor.CommitText();
             BitmapSource image = _editor.Flatten(_documentRegion);
-            string? path = ImageOutput.Save(image, this);
+            string? path = ImageOutput.Save(image, dialogOwner ?? this);
             if (path == null) return false;
             _savedHash = SHA256.HashData(ImageOutput.EncodePng(image));
             _savedRevision = _revision;

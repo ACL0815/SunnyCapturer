@@ -145,6 +145,87 @@ public static class EditorSelfChecks
         CheckGestureBoundaries(source);
         CheckSelectionRendering(source);
         CheckPenAndStacking(source);
+        CheckEditingBounds(source);
+    }
+
+    private static void CheckEditingBounds(BitmapSource source)
+    {
+        Int32Rect crop = new(30, 20, 70, 60);
+        Rect bounds = new(crop.X, crop.Y, crop.Width, crop.Height);
+        AnnotationCanvas canvas = new(source) { Stroke = Brushes.Black };
+        Draw(canvas, EditorTool.Redact, new Point(40, 30), new Point(60, 50));
+        byte[] original = Bytes(canvas.Flatten());
+        object? identity = canvas.SelectedIdentity;
+        canvas.SetEditingBounds(crop);
+        Require(ReferenceEquals(identity, canvas.SelectedIdentity) && Equal(original, Bytes(canvas.Flatten())),
+            "Setting input bounds must preserve the full export and selected object.");
+        canvas.Tool = EditorTool.Select;
+        canvas.BeginGesture(new Point(50, 40));
+        canvas.UpdateGesture(new Point(500, 500));
+        canvas.EndGesture();
+        Require(Near(canvas.SelectionBounds, new Rect(80, 60, 20, 20)), "Workbench move must stop at the visible right/bottom edges.");
+        canvas.BeginGesture(new Point(90, 70));
+        canvas.UpdateGesture(new Point(-500, -500));
+        canvas.EndGesture();
+        Require(Near(canvas.SelectionBounds, new Rect(30, 20, 20, 20)), "Workbench move must stop at the visible left/top edges.");
+        canvas.Undo(); canvas.Undo();
+        Require(Equal(original, Bytes(canvas.Flatten())), "Bounded moves must undo to exact full-raster pixels.");
+        canvas.BeginGesture(new Point(50, 40)); canvas.EndGesture();
+        canvas.BeginGesture(canvas.SelectionBounds.BottomRight);
+        canvas.UpdateGesture(new Point(500, 500)); canvas.EndGesture();
+        Require(Near(canvas.SelectionBounds, new Rect(40, 30, 60, 50)), "Workbench resize must clamp right/bottom to the crop.");
+        canvas.BeginGesture(canvas.SelectionBounds.TopLeft);
+        canvas.UpdateGesture(new Point(-500, -500)); canvas.EndGesture();
+        Require(Near(canvas.SelectionBounds, bounds), "Workbench resize must clamp left/top to the crop.");
+        canvas.Undo(); canvas.Undo();
+        Require(Equal(original, Bytes(canvas.Flatten())), "Bounded resizes must remain independently undoable.");
+        canvas.Undo();
+        Require(!canvas.CanUndo && canvas.CanRedo, "Setting input bounds must not introduce history.");
+        Draw(canvas, EditorTool.Rectangle, new Point(2, 2), new Point(15, 15));
+        Require(!canvas.CanUndo && canvas.CanRedo && !canvas.HasActiveGesture,
+            "A gesture begun outside the crop must leave both history stacks intact.");
+        Draw(canvas, EditorTool.Redact, new Point(50, 40), new Point(500, 500));
+        Require(bounds.Contains(canvas.SelectionBounds) && Near(canvas.SelectionBounds, new Rect(50, 40, 50, 40)),
+            "New shapes must clamp to the crop without rebasing coordinates.");
+        byte[] full = Bytes(canvas.Flatten());
+        byte[] expectedCrop = new byte[crop.Width * crop.Height * 4];
+        canvas.Flatten().CopyPixels(crop, expectedCrop, crop.Width * 4, 0);
+        Require(Equal(expectedCrop, Bytes(canvas.Flatten(crop))) && canvas.Width == 128 && canvas.Height == 96,
+            "Editing bounds must retain full-raster dimensions and exact cropped export.");
+        canvas.Undo(); canvas.Redo();
+        Require(Equal(full, Bytes(canvas.Flatten())), "A bounded draft must preserve exact redo pixels.");
+
+        AnnotationCanvas text = new(source) { Tool = EditorTool.Text, Stroke = Brushes.Black };
+        text.SetEditingBounds(crop);
+        text.BeginGesture(new Point(99, 79));
+        TextBox box = ActiveText(text);
+        Require(Canvas.GetLeft(box) >= bounds.Left && Canvas.GetTop(box) >= bounds.Top &&
+            Canvas.GetLeft(box) + box.Width <= bounds.Right && Canvas.GetTop(box) + box.MaxHeight <= bounds.Bottom,
+            "New text input must fit in the visible crop, including an edge click.");
+        box.Text = "A\nB\nC\nD\nE";
+        text.CommitText();
+        Require(bounds.Contains(text.SelectionBounds), "New multiline text must remain inside the crop after commit.");
+        text.Tool = EditorTool.Select;
+        text.BeginGesture(text.SelectionBounds.BottomRight);
+        text.UpdateGesture(new Point(500, 500)); text.EndGesture();
+        Require(bounds.Contains(text.SelectionBounds), "Text resize must remain in the visible crop.");
+
+        // Entirely and partly outside text already exists before handoff; bounds alone must never reflow it.
+        AnnotationCanvas old = new(source) { Tool = EditorTool.Text, Stroke = Brushes.Black };
+        old.BeginGesture(new Point(2, 2)); ActiveText(old).Text = "X"; old.CommitText();
+        byte[] outside = Bytes(old.Flatten());
+        old.BeginGesture(new Point(85, 65)); ActiveText(old).Text = "AB"; old.CommitText();
+        object? oldIdentity = old.SelectedIdentity;
+        byte[] partly = Bytes(old.Flatten());
+        old.SetEditingBounds(crop);
+        Require(ReferenceEquals(oldIdentity, old.SelectedIdentity) && Equal(partly, Bytes(old.Flatten())),
+            "Setting bounds must not reposition or reflow pre-existing outside/partial text.");
+        old.Undo();
+        Require(Equal(outside, Bytes(old.Flatten())), "Setting bounds must preserve old text undo geometry.");
+        old.Redo();
+        Require(Equal(partly, Bytes(old.Flatten())), "Setting bounds must preserve old text redo geometry.");
+        old.Undo(); old.Undo();
+        Require(!old.CanUndo && old.CanRedo, "Bounds must not add a hidden history entry for outside text.");
     }
 
     private static void CheckResizeHandles(BitmapSource source)

@@ -31,7 +31,15 @@ public static class CaptureService
     public static async Task<CaptureSessionResult> CaptureEditedRegionAsync(Window owner, CancellationToken cancellationToken = default) =>
         (await CaptureAsync(owner, true, true, cancellationToken)).Edited;
 
-    private static async Task<(BitmapSource? Raw, CaptureSessionResult Edited)> CaptureAsync(Window owner, bool region, bool editing, CancellationToken cancellationToken)
+    public static async Task<CaptureSessionResult> CaptureEditedRegionAsync(Window owner, CancellationToken cancellationToken,
+        Func<Window, Task<bool>> confirmHandoff)
+    {
+        ArgumentNullException.ThrowIfNull(confirmHandoff);
+        return (await CaptureAsync(owner, true, true, cancellationToken, confirmHandoff)).Edited;
+    }
+
+    private static async Task<(BitmapSource? Raw, CaptureSessionResult Edited)> CaptureAsync(Window owner, bool region, bool editing,
+        CancellationToken cancellationToken, Func<Window, Task<bool>>? confirmHandoff = null)
     {
         ArgumentNullException.ThrowIfNull(owner);
         owner.Dispatcher.VerifyAccess();
@@ -70,7 +78,7 @@ public static class CaptureService
             if (!region)
                 return (screenshot, new(CaptureCompletion.Cancelled));
 
-            overlay = new RegionOverlay(screenshot, bounds, editing) { Owner = owner };
+            overlay = new RegionOverlay(screenshot, bounds, editing, confirmHandoff) { Owner = owner };
             using CancellationTokenRegistration cancelSelection = lifetime.Token.Register(() =>
             {
                 if (!owner.Dispatcher.HasShutdownStarted)

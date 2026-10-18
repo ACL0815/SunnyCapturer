@@ -175,6 +175,10 @@ internal static class AppDiagnostics
                 "Handoff must retain the editor tool and drawing style.");
             Require(editor.CanUndo && editor.CanRedo && ImageOutput.EncodePng(editor.Flatten(region)).SequenceEqual(first),
                 "Adopting the editor must preserve annotations and both history stacks.");
+            Draw(editor, EditorTool.Rectangle, new Point(2, 2), new Point(15, 15));
+            Require(editor.CanUndo && editor.CanRedo && ImageOutput.EncodePng(editor.Flatten(region)).SequenceEqual(first),
+                "Workbench input outside the crop must not change pixels or either history stack.");
+            editor.Tool = EditorTool.Arrow;
             editor.Redo();
             Require(ImageOutput.EncodePng(editor.Flatten(region)).SequenceEqual(second), "Redo from the overlay must work in the workbench.");
             editor.Undo();
@@ -209,6 +213,21 @@ internal static class AppDiagnostics
             }
             Require(!window.IsVisible && new WindowInteropHelper(window).Handle == IntPtr.Zero,
                 "Offline handoff checks must never show a window or create a native window handle.");
+
+            var approved = new RegionOverlay(source, new System.Drawing.Rectangle(0, 0, width, height),
+                confirmHandoff: owner => Task.FromResult(owner is RegionOverlay));
+            approved.SetRegion(region);
+            Draw(approved.Editor, EditorTool.Redact, new Point(50, 40), new Point(80, 70));
+            byte[] approvedPixels = ImageOutput.EncodePng(approved.Editor.Flatten(region));
+            Require(approved.CompleteAsync(CaptureCompletion.Workbench).GetAwaiter().GetResult() && approved.Result.ReplacementConfirmed,
+                "A successful pre-detach callback must mark the result as already approved.");
+            // The old workbench is unsaved: a second prompt would throw in diagnostics mode.
+            CompleteOffline(window.AcceptCaptureResultAsync(approved.Result));
+            Require(ReferenceEquals(crop.Children[0], approved.Editor) && approved.Editor.CanUndo &&
+                ImageOutput.EncodePng(approved.Editor.Flatten(region)).SequenceEqual(approvedPixels),
+                "The shell must adopt an approved editor without asking again or changing its pixels/history.");
+            approved.Editor.Undo();
+            Require(!approved.Editor.CanUndo, "Adoption and setting input bounds must add no history entries.");
         }
         finally { window.Close(); }
 
@@ -217,9 +236,14 @@ internal static class AppDiagnostics
         try
         {
             var savedEditor = new AnnotationCanvas(source) { Stroke = Brushes.Black, Thickness = 2 };
-            savedWindow.LoadEditor(savedEditor, region, "Gespeichert.png", unsaved: false);
             Draw(savedEditor, EditorTool.Rectangle, new Point(2, 2), new Point(15, 15));
+            savedWindow.LoadEditor(savedEditor, region, "Gespeichert.png", unsaved: false);
+            byte[] savedFull = ImageOutput.EncodePng(savedEditor.Flatten());
+            savedEditor.Undo();
             Require(!savedWindow.HasUnsavedDocumentChanges(), "The saved hash must ignore edits entirely outside the crop.");
+            savedEditor.Redo();
+            Require(!savedWindow.HasUnsavedDocumentChanges() && savedFull.SequenceEqual(ImageOutput.EncodePng(savedEditor.Flatten())),
+                "A pre-existing outside object must retain its exact full-raster redo after setting workbench bounds.");
             Draw(savedEditor, EditorTool.Rectangle, new Point(60, 40), new Point(80, 70));
             Require(savedWindow.HasUnsavedDocumentChanges(), "Edits inside the crop must dirty the saved output.");
             savedEditor.Undo();

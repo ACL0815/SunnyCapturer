@@ -45,6 +45,7 @@ public sealed class AnnotationCanvas : Canvas
     private Annotation? _selected, _draft, _moving, _resizing, _textItem;
     private State? _beforeResize;
     private Rect _resizeBounds;
+    private Rect _editingBounds;
     private Handle _resizeHandle;
     private TextBox? _textBox;
     private PolyLineSegment? _penPoints;
@@ -64,6 +65,7 @@ public sealed class AnnotationCanvas : Canvas
         _image = image.IsFrozen ? image : (BitmapSource)image.GetCurrentValueAsFrozen();
         Width = image.PixelWidth;
         Height = image.PixelHeight;
+        _editingBounds = new Rect(0, 0, Width, Height);
         Background = Brushes.Transparent;
         ClipToBounds = true;
         Focusable = true;
@@ -125,8 +127,18 @@ public sealed class AnnotationCanvas : Canvas
     }
 
     internal bool IsEditingText => _textBox != null;
+    internal bool HasActiveGesture => _draft != null || _moving != null || _resizing != null;
     internal object? SelectedIdentity => _selected;
     internal bool HasAnnotationAt(Point point) => HitHandle(point) != Handle.None || Hit(point) != null;
+
+    internal void SetEditingBounds(Int32Rect region)
+    {
+        if (region.X < 0 || region.Y < 0 || region.Width <= 0 || region.Height <= 0 ||
+            (long)region.X + region.Width > _image.PixelWidth || (long)region.Y + region.Height > _image.PixelHeight)
+            throw new ArgumentOutOfRangeException(nameof(region));
+        // Input constraint only: old geometry, full-raster exports and both history stacks stay intact.
+        _editingBounds = new Rect(region.X, region.Y, region.Width, region.Height);
+    }
 
     public bool CanUndo => _undo.Count != 0;
     public bool CanRedo => _redo.Count != 0;
@@ -184,7 +196,7 @@ public sealed class AnnotationCanvas : Canvas
             return;
         }
         State oldState = Snapshot(item);
-        SetText(item, text);
+        SetText(item, text, isNew);
         item.Offset = ClampOffset(item, item.Offset);
         State newState = Snapshot(item);
         _selected = item;
@@ -323,6 +335,7 @@ public sealed class AnnotationCanvas : Canvas
 
     internal bool HandleKey(Key key, ModifierKeys modifiers = ModifierKeys.None)
     {
+        if (!IsEnabled) return false;
         // A focused TextBox owns normal text editing, including Delete and its local undo.
         if (_textBox != null)
         {
@@ -346,6 +359,7 @@ public sealed class AnnotationCanvas : Canvas
     // These gesture methods are also used by the offline STA self-check; no synthetic input is needed.
     internal void BeginGesture(Point point, int clickCount = 1)
     {
+        if (!IsEnabled || !_editingBounds.Contains(point)) return;
         EndGesture();
         CommitText();
         _start = ClampPoint(point);
@@ -392,6 +406,7 @@ public sealed class AnnotationCanvas : Canvas
 
     internal void UpdateGesture(Point point)
     {
+        if (!IsEnabled) return;
         point = ClampPoint(point);
         if (_resizing != null)
         {
@@ -510,13 +525,14 @@ public sealed class AnnotationCanvas : Canvas
     }
 
     private Point ClampPoint(Point point) => new(
-        Math.Clamp(point.X, 0, Width), Math.Clamp(point.Y, 0, Height));
+        Math.Clamp(point.X, _editingBounds.Left, _editingBounds.Right),
+        Math.Clamp(point.Y, _editingBounds.Top, _editingBounds.Bottom));
 
     private Point ClampOffset(Annotation item, Point offset) => new(
-        Math.Clamp(offset.X, -item.Bounds.Left * item.ScaleX,
-            Math.Max(-item.Bounds.Left * item.ScaleX, Width - item.Bounds.Right * item.ScaleX)),
-        Math.Clamp(offset.Y, -item.Bounds.Top * item.ScaleY,
-            Math.Max(-item.Bounds.Top * item.ScaleY, Height - item.Bounds.Bottom * item.ScaleY)));
+        Math.Clamp(offset.X, _editingBounds.Left - item.Bounds.Left * item.ScaleX,
+            Math.Max(_editingBounds.Left - item.Bounds.Left * item.ScaleX, _editingBounds.Right - item.Bounds.Right * item.ScaleX)),
+        Math.Clamp(offset.Y, _editingBounds.Top - item.Bounds.Top * item.ScaleY,
+            Math.Max(_editingBounds.Top - item.Bounds.Top * item.ScaleY, _editingBounds.Bottom - item.Bounds.Bottom * item.ScaleY)));
 
     private static Rect WorldBounds(Annotation item)
     {
@@ -603,23 +619,35 @@ public sealed class AnnotationCanvas : Canvas
         bool top = _resizeHandle.HasFlag(Handle.Top), bottom = _resizeHandle.HasFlag(Handle.Bottom);
         // Use pointer delta so grabbing near a handle never makes the object jump.
         Vector delta = point - _start;
-        double l = left ? Math.Clamp(b.Left + delta.X, 0, Math.Max(0, b.Right - 2)) : b.Left;
-        double r = right ? Math.Clamp(b.Right + delta.X, Math.Min(Width, b.Left + 2), Width) : b.Right;
-        double t = top ? Math.Clamp(b.Top + delta.Y, 0, Math.Max(0, b.Bottom - 2)) : b.Top;
-        double d = bottom ? Math.Clamp(b.Bottom + delta.Y, Math.Min(Height, b.Top + 2), Height) : b.Bottom;
+        double l = left ? Math.Clamp(b.Left + delta.X, _editingBounds.Left, Math.Max(_editingBounds.Left, b.Right - 2)) : b.Left;
+        double r = right ? Math.Clamp(b.Right + delta.X, Math.Min(_editingBounds.Right, b.Left + 2), _editingBounds.Right) : b.Right;
+        double t = top ? Math.Clamp(b.Top + delta.Y, _editingBounds.Top, Math.Max(_editingBounds.Top, b.Bottom - 2)) : b.Top;
+        double d = bottom ? Math.Clamp(b.Bottom + delta.Y, Math.Min(_editingBounds.Bottom, b.Top + 2), _editingBounds.Bottom) : b.Bottom;
+        double minWidth = Math.Min(2, _editingBounds.Width), minHeight = Math.Min(2, _editingBounds.Height);
         if (_resizing.Tool == EditorTool.Text)
         {
             double dx = b.Width + (left ? -delta.X : delta.X);
             double dy = b.Height + (top ? -delta.Y : delta.Y);
             double ratio = (dx * b.Width + dy * b.Height) / (b.Width * b.Width + b.Height * b.Height);
-            double maximum = Math.Min((left ? b.Right : Width - b.Left) / b.Width,
-                (top ? b.Bottom : Height - b.Top) / b.Height);
+            double anchorX = left ? Math.Clamp(b.Right, _editingBounds.Left + minWidth, _editingBounds.Right)
+                : Math.Clamp(b.Left, _editingBounds.Left, _editingBounds.Right - minWidth);
+            double anchorY = top ? Math.Clamp(b.Bottom, _editingBounds.Top + minHeight, _editingBounds.Bottom)
+                : Math.Clamp(b.Top, _editingBounds.Top, _editingBounds.Bottom - minHeight);
+            double maximum = Math.Min((left ? anchorX - _editingBounds.Left : _editingBounds.Right - anchorX) / b.Width,
+                (top ? anchorY - _editingBounds.Top : _editingBounds.Bottom - anchorY) / b.Height);
             double minimum = Math.Min(maximum, Math.Max(2 / b.Width, 2 / b.Height));
             ratio = Math.Clamp(ratio, minimum, maximum);
-            l = left ? b.Right - b.Width * ratio : b.Left;
-            r = right ? b.Left + b.Width * ratio : b.Right;
-            t = top ? b.Bottom - b.Height * ratio : b.Top;
-            d = bottom ? b.Top + b.Height * ratio : b.Bottom;
+            l = left ? anchorX - b.Width * ratio : anchorX;
+            r = right ? anchorX + b.Width * ratio : anchorX;
+            t = top ? anchorY - b.Height * ratio : anchorY;
+            d = bottom ? anchorY + b.Height * ratio : anchorY;
+        }
+        else
+        {
+            l = Math.Clamp(l, _editingBounds.Left, _editingBounds.Right - minWidth);
+            r = Math.Clamp(r, l + minWidth, _editingBounds.Right);
+            t = Math.Clamp(t, _editingBounds.Top, _editingBounds.Bottom - minHeight);
+            d = Math.Clamp(d, t + minHeight, _editingBounds.Bottom);
         }
         _resizing.ScaleX = _beforeResize.ScaleX * (r - l) / b.Width;
         _resizing.ScaleY = _beforeResize.ScaleY * (d - t) / b.Height;
@@ -634,10 +662,10 @@ public sealed class AnnotationCanvas : Canvas
         item ??= new Annotation
         {
             Tool = EditorTool.Text, Brush = Stroke.CloneCurrentValue(),
-            Offset = new Point(Math.Min(point.X, Math.Max(0, Width - 24)),
-                Math.Min(point.Y, Math.Max(0, Height - 32)))
+            Offset = new Point(Math.Min(point.X, Math.Max(_editingBounds.Left, _editingBounds.Right - 24)),
+                Math.Min(point.Y, Math.Max(_editingBounds.Top, _editingBounds.Bottom - 32)))
         };
-        if (item.TextWidth == 0) item.TextWidth = Math.Max(1, Math.Min(360, Width - item.Offset.X));
+        if (item.TextWidth == 0) item.TextWidth = Math.Max(1, Math.Min(360, _editingBounds.Right - item.Offset.X));
         _selected = _textItem = item;
         _originalText = item.Text;
         TextBox box = new()
@@ -647,8 +675,8 @@ public sealed class AnnotationCanvas : Canvas
             Foreground = item.Brush, Background = new SolidColorBrush(Color.FromArgb(40, 0, 0, 0)),
             BorderThickness = new System.Windows.Thickness(0), Padding = new System.Windows.Thickness(0),
             Width = Math.Min(item.TextWidth, Width / item.ScaleX),
-            MaxHeight = Math.Max(1, (Height - item.Offset.Y) / item.ScaleY),
-            MinHeight = Math.Min(32, Math.Max(1, (Height - item.Offset.Y) / item.ScaleY)),
+            MaxHeight = Math.Max(1, ((_newText ? _editingBounds.Bottom : Height) - item.Offset.Y) / item.ScaleY),
+            MinHeight = Math.Min(32, Math.Max(1, ((_newText ? _editingBounds.Bottom : Height) - item.Offset.Y) / item.ScaleY)),
             LayoutTransform = new ScaleTransform(item.ScaleX, item.ScaleY),
             AcceptsReturn = true, TextWrapping = TextWrapping.Wrap,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto
@@ -680,14 +708,14 @@ public sealed class AnnotationCanvas : Canvas
         if (box != null) Children.Remove(box);
     }
 
-    private void SetText(Annotation item, string text)
+    private void SetText(Annotation item, string text, bool constrainToRegion = false)
     {
         item.Text = text;
         FormattedText formatted = new(text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
             new Typeface("Segoe UI"), 24, item.Brush, 1)
         {
             MaxTextWidth = Math.Min(item.TextWidth, Width / item.ScaleX),
-            MaxTextHeight = Height / item.ScaleY
+            MaxTextHeight = (constrainToRegion ? Math.Max(1, _editingBounds.Bottom - item.Offset.Y) : Height) / item.ScaleY
         };
         item.Geometry = formatted.BuildGeometry(new Point());
         if (item.Geometry.CanFreeze) item.Geometry.Freeze();

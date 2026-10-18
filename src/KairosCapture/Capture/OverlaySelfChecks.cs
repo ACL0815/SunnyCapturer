@@ -2,11 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using KairosCapture.Editor;
 using DrawingRectangle = System.Drawing.Rectangle;
 
@@ -24,11 +26,163 @@ public static class OverlaySelfChecks
         CheckSelectedStyle(background);
         CheckRoutesAndText(background);
         CheckCompletion(background);
+        CheckHandoffPermission(background);
+        CheckGestureEscape(background);
         CheckRendering(background);
     }
 
-    private static RegionOverlay Create(BitmapSource background) => new(background,
-        new DrawingRectangle(-1600, -900, background.PixelWidth, background.PixelHeight));
+    private static RegionOverlay Create(BitmapSource background, Func<Window, Task<bool>>? confirmHandoff = null) => new(background,
+        new DrawingRectangle(-1600, -900, background.PixelWidth, background.PixelHeight), confirmHandoff: confirmHandoff);
+
+    private static void CheckHandoffPermission(BitmapSource background)
+    {
+        // Complete controlled delayed callbacks on this STA, just as a modal WPF owner does.
+        SynchronizationContext? previous = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext());
+        try
+        {
+            foreach (CaptureCompletion completion in new[] { CaptureCompletion.Workbench, CaptureCompletion.Ocr })
+            {
+                Task<bool> permission = Task.FromResult(false);
+                int calls = 0;
+                Window? dialogOwner = null;
+                var overlay = Create(background, owner => { calls++; dialogOwner = owner; return permission; });
+                Int32Rect crop = new(30, 20, 700, 430);
+                overlay.SetRegion(crop);
+                AnnotationCanvas editor = overlay.Editor;
+                byte[] baseline = Bytes(editor.Flatten());
+                Draw(editor, EditorTool.Rectangle, new Point(80, 70), new Point(120, 110));
+                byte[] first = Bytes(editor.Flatten());
+                Draw(editor, EditorTool.Ellipse, new Point(180, 170), new Point(220, 210));
+                byte[] second = Bytes(editor.Flatten());
+                editor.Undo();
+                editor.Tool = EditorTool.Select;
+                editor.BeginGesture(new Point(100, 90)); editor.EndGesture();
+                object? identity = editor.SelectedIdentity;
+                byte[] cropped = Bytes(editor.Flatten(crop));
+                Require(!overlay.CompleteAsync(completion).GetAwaiter().GetResult() && calls == 1 && ReferenceEquals(dialogOwner, overlay),
+                    "Denied handoff must use the live overlay as dialog owner.");
+                Require(!overlay.IsClosed && ReferenceEquals(editor.Parent, overlay.PreviewRoot) && editor.Clip != null &&
+                    overlay.Selection == crop && ReferenceEquals(identity, editor.SelectedIdentity) && editor.CanUndo && editor.CanRedo &&
+                    first.SequenceEqual(Bytes(editor.Flatten())) && cropped.SequenceEqual(Bytes(editor.Flatten(crop))),
+                    "Denied handoff must retain editor/object identity, crop, exact pixels and both history stacks.");
+
+                permission = Task.FromException<bool>(new InvalidOperationException("offline approval failure"));
+                Require(!overlay.CompleteAsync(completion).GetAwaiter().GetResult() && !overlay.IsClosed && editor.IsEnabled,
+                    "Approval exceptions must be observed and release the gate without closing the session.");
+                var pending = new TaskCompletionSource<bool>();
+                permission = pending.Task;
+                Task<bool> handoff = overlay.CompleteAsync(completion);
+                Require(!handoff.IsCompleted && !editor.IsEnabled && calls == 3, "Delayed approval must hold an input gate.");
+                Require(!overlay.CompleteAsync(completion).GetAwaiter().GetResult() &&
+                    !overlay.CompleteAsync(CaptureCompletion.Copied).GetAwaiter().GetResult() &&
+                    !overlay.CompleteAsync(CaptureCompletion.Saved).GetAwaiter().GetResult() && calls == 3,
+                    "Pending approval must reject duplicate handoffs, copy and save before any side effects.");
+                Require(!overlay.ExecuteOutput(CaptureCompletion.Saved, _ => throw new InvalidOperationException("must not write")) &&
+                    !overlay.BeginFrameGesture(new Point(30, 20)), "Pending approval must block output and frame gestures.");
+                overlay.SetRegion(new Int32Rect(0, 0, 50, 50));
+                editor.BeginGesture(new Point(100, 90)); editor.UpdateGesture(new Point(600, 400)); editor.EndGesture();
+                foreach (Button button in Buttons(overlay.Toolbar)) button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                overlay.HandleSessionKey(Key.Escape);
+                overlay.HandleSessionKey(Key.Delete);
+                overlay.HandleSessionKey(Key.Z, ModifierKeys.Control);
+                overlay.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Right)
+                    { RoutedEvent = UIElement.PreviewMouseRightButtonDownEvent });
+                Require(!overlay.IsClosed && calls == 3 && overlay.Selection == crop && ReferenceEquals(identity, editor.SelectedIdentity) &&
+                    editor.CanUndo && editor.CanRedo && first.SequenceEqual(Bytes(editor.Flatten())),
+                    "Pending approval must ignore cancellation, object/frame gestures and all toolbar/shortcut edits.");
+                pending.SetResult(false);
+                Require(handoff.IsCompletedSuccessfully && !handoff.Result && editor.IsEnabled && !overlay.IsClosed,
+                    "Delayed denial must keep the session and permit another attempt.");
+                pending = new TaskCompletionSource<bool>(); permission = pending.Task;
+                handoff = overlay.CompleteAsync(completion);
+                pending.SetResult(true);
+                Require(handoff.IsCompletedSuccessfully && handoff.Result && overlay.IsClosed && calls == 4 &&
+                    overlay.Result.ReplacementConfirmed && overlay.Result.Completion == completion && overlay.Result.Region == crop &&
+                    ReferenceEquals(overlay.Result.Editor, editor) && ReferenceEquals(identity, editor.SelectedIdentity) && editor.Parent == null,
+                    "Retry approval must detach exactly once and retain the approved editor/object/crop.");
+                Require(cropped.SequenceEqual(Bytes(editor.Flatten(crop))) && editor.CanUndo && editor.CanRedo,
+                    "Approved handoff must preserve pixels and both history stacks.");
+                editor.Undo();
+                Require(baseline.SequenceEqual(Bytes(editor.Flatten())) && !editor.CanUndo, "Denied/failed/pending approvals must add no undo entries.");
+                editor.Redo();
+                Require(first.SequenceEqual(Bytes(editor.Flatten())), "The original object must survive approval retry history.");
+                editor.Redo();
+                Require(second.SequenceEqual(Bytes(editor.Flatten())), "Existing redo must survive all approval attempts.");
+                Require(!overlay.IsVisible && new System.Windows.Interop.WindowInteropHelper(overlay).Handle == IntPtr.Zero,
+                    "Approval checks must never show a window or allocate a native handle.");
+            }
+            foreach (bool externalClose in new[] { false, true })
+            {
+                var pending = new TaskCompletionSource<bool>();
+                var overlay = Create(background, _ => pending.Task);
+                overlay.SetRegion(new Int32Rect(30, 20, 700, 430));
+                Task<bool> handoff = overlay.CompleteAsync(CaptureCompletion.Workbench);
+                if (externalClose) overlay.Close(); else overlay.Cancel(); // Owner/lifetime cancellation uses Cancel.
+                pending.SetResult(true);
+                Require(handoff.IsCompletedSuccessfully && !handoff.Result && overlay.IsClosed &&
+                    overlay.Result.Completion == CaptureCompletion.Cancelled && overlay.Result.Editor == null &&
+                    !overlay.Result.ReplacementConfirmed && ReferenceEquals(overlay.Editor.Parent, overlay.PreviewRoot),
+                    "A late approval after external close or owner cancellation must never detach/activate the editor.");
+            }
+        }
+        finally { SynchronizationContext.SetSynchronizationContext(previous); }
+    }
+
+    private static void CheckGestureEscape(BitmapSource background)
+    {
+        foreach (string gesture in new[] { "draft", "move", "resize", "frame move", "frame resize", "text" })
+        {
+            var overlay = Create(background);
+            Int32Rect crop = new(30, 20, 700, 430);
+            overlay.SetRegion(crop);
+            AnnotationCanvas editor = overlay.Editor;
+            Draw(editor, EditorTool.Redact, new Point(80, 70), new Point(120, 110));
+            byte[] before = Bytes(editor.Flatten());
+            editor.Tool = EditorTool.Select;
+            object? identity = editor.SelectedIdentity;
+            if (gesture == "draft")
+            {
+                editor.Tool = EditorTool.Rectangle;
+                editor.BeginGesture(new Point(180, 170)); editor.UpdateGesture(new Point(250, 230));
+            }
+            else if (gesture == "move" || gesture == "resize")
+            {
+                editor.BeginGesture(gesture == "move" ? new Point(100, 90) : editor.SelectionBounds.BottomRight);
+                editor.UpdateGesture(new Point(250, 230));
+            }
+            else if (gesture.StartsWith("frame", StringComparison.Ordinal))
+            {
+                Require(overlay.BeginFrameGesture(gesture == "frame move" ? new Point(300, 300) : new Point(30, 20)),
+                    "Escape frame fixture must begin a gesture.");
+                overlay.UpdateFrameGesture(new Point(200, 180));
+            }
+            else
+            {
+                editor.Tool = EditorTool.Text;
+                editor.BeginGesture(new Point(200, 180));
+                ((TextBox)editor.Children[0]).Text = "discard only this draft";
+                Require(!overlay.HandleSessionKey(Key.Escape), "TextBox must retain its own Escape handler.");
+                editor.HandleKey(Key.Escape);
+            }
+            if (gesture != "text") Require(overlay.HandleSessionKey(Key.Escape), "Gesture Escape must be handled.");
+            Require(!overlay.IsClosed && !editor.HasActiveGesture && !editor.IsEditingText && !overlay.IsMouseCaptured &&
+                !editor.IsMouseCaptured && overlay.Selection == crop && before.SequenceEqual(Bytes(editor.Flatten())),
+                gesture + " Escape must restore the prior pixels/crop and release capture while retaining the session.");
+            editor.Undo();
+            Require(!editor.CanUndo && !editor.HasChanges && editor.CanRedo, gesture + " Escape must not add a history entry.");
+            editor.Redo();
+            editor.Tool = EditorTool.Select;
+            editor.BeginGesture(new Point(100, 90)); editor.EndGesture();
+            Require(ReferenceEquals(identity, editor.SelectedIdentity) && before.SequenceEqual(Bytes(editor.Flatten())),
+                gesture + " Escape must retain the original object and exact redo pixels.");
+            Require(overlay.HandleSessionKey(Key.Escape) && overlay.IsClosed, "The next idle Escape must cancel the session.");
+        }
+        var raw = new RegionOverlay(background, new DrawingRectangle(0, 0, background.PixelWidth, background.PixelHeight), editing: false);
+        raw.BeginFrameGesture(new Point(30, 20)); raw.UpdateFrameGesture(new Point(200, 180));
+        Require(raw.HandleSessionKey(Key.Escape) && raw.IsClosed && raw.Selection.IsEmpty &&
+            raw.Result.Completion == CaptureCompletion.Cancelled, "Raw capture Escape must still cancel immediately during selection.");
+    }
 
     private static void CheckFrame(BitmapSource background)
     {
