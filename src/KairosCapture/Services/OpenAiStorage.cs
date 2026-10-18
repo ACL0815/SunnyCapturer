@@ -42,7 +42,7 @@ internal sealed class OpenAiStorage
             catch (IOException ex) when ((ex.HResult & 0xffff) is 32 or 33)
             {
                 if (Environment.TickCount64 >= deadline)
-                    throw new InvalidOperationException("Eine andere Kairos-Instanz bearbeitet die OpenAI-Sitzung. Bitte später erneut versuchen.");
+                    throw new OpenAiUserException(OpenAiUserError.SessionBusy);
                 await Task.Delay(100, ct).ConfigureAwait(false);
             }
         }
@@ -77,7 +77,7 @@ internal sealed class OpenAiStorage
         }
         catch (Exception ex) when (ex is JsonException or CryptographicException or InvalidDataException or ArgumentException or NullReferenceException)
         {
-            throw new InvalidOperationException("Die geschützten OpenAI-Kontodaten sind nicht lesbar. Die Datei wurde nicht verändert.");
+            throw new OpenAiUserException(OpenAiUserError.CredentialsUnreadable);
         }
         finally
         {

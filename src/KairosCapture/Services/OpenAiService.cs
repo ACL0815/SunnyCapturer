@@ -73,7 +73,7 @@ public sealed class OpenAiService : IDisposable
         lock (_sync)
         {
             ThrowIfDisposed();
-            if (_signingOut) throw new InvalidOperationException("Die OpenAI-Abmeldung läuft noch.");
+            if (_signingOut) throw new OpenAiUserException(OpenAiUserError.SigningOut);
             if (!_state.Registrations.Any(r => r.Key == key)) throw new ArgumentException("Unbekanntes OpenAI-Konto.", nameof(key));
             _activeKey = key;
             previous = _session;
@@ -89,13 +89,14 @@ public sealed class OpenAiService : IDisposable
         using var attempt = CancellationTokenSource.CreateLinkedTokenSource(ct, _lifetime.Token);
         attempt.CancelAfter(TimeSpan.FromMinutes(5));
         await _gate.WaitAsync(attempt.Token).ConfigureAwait(false);
-        lock (_sync)
-        {
-            ThrowIfDisposed();
-            _pendingSignIn = attempt;
-        }
         try
         {
+            lock (_sync)
+            {
+                ThrowIfDisposed();
+                if (_signingOut) throw new OpenAiUserException(OpenAiUserError.SigningOut);
+                _pendingSignIn = attempt;
+            }
             OpenAiState state;
             OpenAiRegistration? selected;
             using (await _storage.LockAsync(attempt.Token).ConfigureAwait(false))
@@ -165,11 +166,13 @@ public sealed class OpenAiService : IDisposable
                     PendingClientId = state.PendingClientId == callback.ClientId ? null : state.PendingClientId };
                 await SaveAsync(state, attempt.Token).ConfigureAwait(false);
             }
-            SelectAccount(key);
+            // SignOut reads the active account after it acquires the same gate. If it started
+            // after the atomic save, it must also clear this newly validated login.
+            ActivateAccount(key);
             if (!OpenAiProtocol.CanInfer(credentials))
-                throw new InvalidOperationException("OpenAI-Identität bestätigt, aber die Freigabe zur Nutzung des ChatGPT-Plans fehlt. Für OCR bitte dieses Konto erneut anmelden und die Plannutzung erlauben.");
+                throw new OpenAiUserException(OpenAiUserError.PlanPermissionMissing);
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested && !attempt.IsCancellationRequested)
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested && !_lifetime.IsCancellationRequested && !IsSigningOut())
         { throw new TimeoutException("Zeitüberschreitung bei der OpenAI-Anmeldung."); }
         finally
         {
@@ -180,19 +183,19 @@ public sealed class OpenAiService : IDisposable
 
     public async Task<string?> SignOutAsync(CancellationToken ct)
     {
-        string? key;
         lock (_sync)
         {
             ThrowIfDisposed();
-            if (_signingOut) throw new InvalidOperationException("Die OpenAI-Abmeldung läuft bereits.");
+            if (_signingOut) throw new OpenAiUserException(OpenAiUserError.SigningOut);
             _signingOut = true;
-            key = _activeKey;
             _session.Cancel();
             _pendingSignIn?.Cancel();
         }
         await _gate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
         try
         {
+            string? key;
+            lock (_sync) key = _activeKey;
             using (await _storage.LockAsync(CancellationToken.None).ConfigureAwait(false))
             {
                 OpenAiState state = _storage.Load();
@@ -222,9 +225,24 @@ public sealed class OpenAiService : IDisposable
         }
     }
 
+    private bool IsSigningOut() { lock (_sync) return _signingOut; }
+
+    private void ActivateAccount(string key)
+    {
+        CancellationTokenSource previous;
+        lock (_sync)
+        {
+            _activeKey = key;
+            previous = _session;
+            _session = new CancellationTokenSource();
+        }
+        previous.Cancel();
+        previous.Dispose();
+    }
+
     public async Task<IReadOnlyList<OpenAiModel>> GetModelsAsync(CancellationToken ct)
     {
-        using CancellationTokenSource operation = Operation(ct, TimeSpan.FromSeconds(45), out string key);
+        using CancellationTokenSource operation = Operation(ct, TimeSpan.FromSeconds(45), out string key, out CancellationToken session);
         try
         {
             string access = await AccessTokenAsync(key, operation.Token).ConfigureAwait(false);
@@ -236,7 +254,7 @@ public sealed class OpenAiService : IDisposable
             return Array.AsReadOnly(models.EnumerateArray().Where(m => OpenAiProtocol.Text(m, "visibility") == "list")
                 .Select(m => new OpenAiModel(OpenAiProtocol.RequiredText(m, "slug"), OpenAiProtocol.RequiredText(m, "display_name"))).ToArray());
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested && !_lifetime.IsCancellationRequested && !SessionChanged(key))
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested && !_lifetime.IsCancellationRequested && !session.IsCancellationRequested)
         { throw new TimeoutException("Die OpenAI-Modellliste konnte nicht rechtzeitig geladen werden."); }
     }
 
@@ -253,7 +271,7 @@ public sealed class OpenAiService : IDisposable
             throw new ArgumentException("Der PNG-Ausschnitt darf höchstens 64 Millionen Pixel enthalten.", nameof(png));
         if (string.IsNullOrWhiteSpace(model) || model.Length > 256 || model.Any(char.IsControl))
             throw new ArgumentException("Bitte ein Modell aus der OpenAI-Modellliste wählen.", nameof(model));
-        using CancellationTokenSource operation = Operation(ct, TimeSpan.FromMinutes(2), out string key);
+        using CancellationTokenSource operation = Operation(ct, TimeSpan.FromMinutes(2), out string key, out CancellationToken session);
         try
         {
             string access = await AccessTokenAsync(key, operation.Token).ConfigureAwait(false);
@@ -278,25 +296,25 @@ public sealed class OpenAiService : IDisposable
             await using Stream stream = await response.Content.ReadAsStreamAsync(operation.Token).ConfigureAwait(false);
             return await OpenAiProtocol.ReadSseAsync(stream, progress, operation.Token).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested && !_lifetime.IsCancellationRequested && !SessionChanged(key))
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested && !_lifetime.IsCancellationRequested && !session.IsCancellationRequested)
         { throw new TimeoutException("Die Texterkennung hat das Zeitlimit von zwei Minuten überschritten. Bitte einen kleineren Ausschnitt versuchen."); }
         catch (IOException) { throw new InvalidOperationException("Die OCR-Verbindung wurde unterbrochen. Der Teiltext ist unvollständig."); }
     }
 
-    private CancellationTokenSource Operation(CancellationToken ct, TimeSpan timeout, out string key)
+    private CancellationTokenSource Operation(CancellationToken ct, TimeSpan timeout, out string key, out CancellationToken session)
     {
         lock (_sync)
         {
             ThrowIfDisposed();
-            if (_signingOut || _activeKey is null) throw new InvalidOperationException("Bitte zuerst mit ChatGPT anmelden.");
+            if (_signingOut) throw new OpenAiUserException(OpenAiUserError.SigningOut);
+            if (_activeKey is null) throw new OpenAiUserException(OpenAiUserError.SignedOut);
             key = _activeKey;
-            var operation = CancellationTokenSource.CreateLinkedTokenSource(ct, _lifetime.Token, _session.Token);
+            session = _session.Token;
+            var operation = CancellationTokenSource.CreateLinkedTokenSource(ct, _lifetime.Token, session);
             operation.CancelAfter(timeout);
             return operation;
         }
     }
-
-    private bool SessionChanged(string key) { lock (_sync) return _signingOut || _activeKey != key || _session.IsCancellationRequested; }
 
     private async Task<string> AccessTokenAsync(string key, CancellationToken ct)
     {
@@ -309,28 +327,32 @@ public sealed class OpenAiService : IDisposable
                 Publish(state);
                 OpenAiRegistration r = state.Registrations.FirstOrDefault(r => r.Key == key)
                     ?? throw new InvalidOperationException("Das gewählte OpenAI-Konto ist nicht vorhanden.");
-                OpenAiCredentials c = r.Credentials ?? throw new InvalidOperationException("Bitte dieses OpenAI-Konto erneut anmelden.");
-                if (!OpenAiProtocol.CanInfer(c)) throw new InvalidOperationException("Die Freigabe zur Nutzung des ChatGPT-Plans fehlt. Bitte dieses Konto erneut anmelden und die Plannutzung erlauben.");
+                OpenAiCredentials c = r.Credentials ?? throw new OpenAiUserException(OpenAiUserError.SessionExpired);
+                if (!OpenAiProtocol.CanInfer(c)) throw new OpenAiUserException(OpenAiUserError.PlanPermissionMissing);
                 DateTimeOffset now = DateTimeOffset.UtcNow;
                 if (c.ExpiresAt > now.AddMinutes(1) || (now < c.EarliestRefreshAt && c.ExpiresAt > now)) return c.AccessToken;
-                if (now < c.EarliestRefreshAt) throw new InvalidOperationException("OpenAI erlaubt die Sitzungserneuerung erst ab " + c.EarliestRefreshAt.ToLocalTime().ToString("g", CultureInfo.CurrentCulture) + ". Bitte später erneut versuchen.");
-                if (c.RefreshToken.Length == 0) throw new InvalidOperationException("Die OpenAI-Sitzung kann nicht erneuert werden. Bitte erneut anmelden.");
+                if (now < c.EarliestRefreshAt) throw new OpenAiUserException(OpenAiUserError.RefreshTooEarly);
+                if (c.RefreshToken.Length == 0) throw new OpenAiUserException(OpenAiUserError.SessionExpired);
                 try
                 {
+                    // Once rotation starts, finish reading and persisting its result even when
+                    // the caller changes accounts or cancels. Never retry an ambiguous rotation.
+                    using var rotation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+                    rotation.CancelAfter(TimeSpan.FromSeconds(30));
                     using var request = Form(TokenEndpoint, new Dictionary<string, string>
                     {
                         ["grant_type"] = "refresh_token", ["client_id"] = r.ClientId,
                         ["refresh_token"] = c.RefreshToken, ["resource"] = OpenAiProtocol.Resource
                     });
-                    using JsonDocument token = await SendJsonAsync(request, ct).ConfigureAwait(false);
+                    using JsonDocument token = await SendJsonAsync(request, rotation.Token).ConfigureAwait(false);
                     if (OpenAiProtocol.Text(token.RootElement, "id_token") is { } id)
-                        OpenAiProtocol.ValidateIdToken(id, await GetKeysAsync(id, ct).ConfigureAwait(false), r.ClientId,
+                        OpenAiProtocol.ValidateIdToken(id, await GetKeysAsync(id, rotation.Token).ConfigureAwait(false), r.ClientId,
                             c.Nonce, DateTimeOffset.UtcNow, false, r.Subject);
                     OpenAiCredentials replacement = Credentials(token.RootElement, c.Nonce, c);
                     state = state with { Registrations = state.Registrations.Select(item => item.Key == key ? item with { Credentials = replacement } : item).ToArray() };
                     // A successful rotation must survive cancellation after the server consumed the old token.
                     await SaveAsync(state, CancellationToken.None).ConfigureAwait(false);
-                    if (!OpenAiProtocol.CanInfer(replacement)) throw new InvalidOperationException("OpenAI hat die Freigabe zur Plannutzung zurückgenommen. Bitte erneut anmelden.");
+                    if (!OpenAiProtocol.CanInfer(replacement)) throw new OpenAiUserException(OpenAiUserError.PlanPermissionRevoked);
                     ct.ThrowIfCancellationRequested();
                     return replacement.AccessToken;
                 }
@@ -349,18 +371,27 @@ public sealed class OpenAiService : IDisposable
     {
         if (!string.Equals(OpenAiProtocol.Text(token, "token_type"), "Bearer", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("OpenAI hat keinen Bearer-Token geliefert.");
-        string id = OpenAiProtocol.Text(token, "id_token") ?? previous?.IdToken ?? throw new InvalidOperationException("Das OpenAI-ID-Token fehlt.");
-        string scope = OpenAiProtocol.Text(token, "scope") ?? (previous is null ? throw new InvalidOperationException("Die gewährten OpenAI-Berechtigungen fehlen.") : string.Join(' ', previous.Scopes));
+        string id = TokenText(token, "id_token") ?? previous?.IdToken ?? throw new InvalidOperationException("Das OpenAI-ID-Token fehlt.");
+        string scope = TokenText(token, "scope") ?? (previous is null ? throw new InvalidOperationException("Die gewährten OpenAI-Berechtigungen fehlen.") : string.Join(' ', previous.Scopes));
         string[] scopes = scope.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.Ordinal).ToArray();
         if (!scopes.Contains("openid", StringComparer.Ordinal)) throw new InvalidOperationException("OpenAI hat die angeforderte Identitätsberechtigung nicht gewährt.");
-        string access = OpenAiProtocol.Text(token, "access_token") ?? "";
-        string refresh = OpenAiProtocol.Text(token, "refresh_token") ?? "";
+        string access = TokenText(token, "access_token") ?? "";
+        string refresh = TokenText(token, "refresh_token") ?? "";
         if ((scopes.Contains("resource.invoke", StringComparer.Ordinal) && scopes.Contains("chatgpt.tokens.use.direct", StringComparer.Ordinal) && access.Length == 0) ||
-            ((previous is not null || scopes.Contains("offline_access", StringComparer.Ordinal)) && refresh.Length == 0))
-            throw new InvalidOperationException("OpenAI hat keinen vollständigen oder rotierten Token-Satz geliefert. Bitte erneut anmelden.");
+            ((previous is not null || scopes.Contains("offline_access", StringComparer.Ordinal)) && refresh.Length == 0) ||
+            (previous is not null && refresh == previous.RefreshToken))
+            throw new OpenAiUserException(OpenAiUserError.IncompleteTokenSet);
         long expiry = token.TryGetProperty("expires_in", out JsonElement expires) && expires.TryGetInt64(out long seconds) ? seconds : 0;
         if (access.Length > 0 && expiry is <= 0 or > 604800) throw new InvalidOperationException("Die OpenAI-Token-Laufzeit ist ungültig.");
         return new OpenAiCredentials(access, refresh, id, nonce, scopes, DateTimeOffset.UtcNow.AddSeconds(expiry), OpenAiProtocol.EarliestRefresh(token));
+    }
+
+    private static string? TokenText(JsonElement token, string name)
+    {
+        if (!token.TryGetProperty(name, out JsonElement value)) return null;
+        if (value.ValueKind != JsonValueKind.String || value.GetString() is not { } text || text.Length > 65536 || text.Any(char.IsControl))
+            throw new InvalidOperationException("OpenAI hat einen ungültigen Token-Parameter geliefert (" + name + ").");
+        return text;
     }
 
     private async Task<JsonElement> GetKeysAsync(string idToken, CancellationToken ct)
@@ -426,8 +457,9 @@ public sealed class OpenAiService : IDisposable
         using HttpResponseMessage response = await SendAsync(request, timeout.Token).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode) throw await ErrorAsync(response, timeout.Token).ConfigureAwait(false);
         byte[] body = await ReadBodyAsync(response, timeout.Token).ConfigureAwait(false);
-        try { return JsonDocument.Parse(body); }
-        catch (JsonException) { throw new InvalidOperationException("OpenAI hat keine gültige JSON-Antwort geliefert."); }
+        try { return OpenAiProtocol.Object(body); }
+        catch (Exception ex) when (ex is JsonException or FormatException)
+        { throw new InvalidOperationException("OpenAI hat keine eindeutige JSON-Objektantwort geliefert."); }
     }
 
     private static async Task<byte[]> ReadBodyAsync(HttpResponseMessage response, CancellationToken ct)

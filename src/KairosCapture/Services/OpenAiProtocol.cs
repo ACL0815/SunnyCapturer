@@ -9,6 +9,8 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.IdentityModel.JsonWebTokens;
+using Microsoft.IdentityModel.Tokens;
 
 namespace KairosCapture.Services;
 
@@ -36,7 +38,8 @@ internal static class OpenAiProtocol
     internal static OpenAiCallback ValidateCallback(Uri callback, Uri redirect, string state, string? expectedClient)
     {
         if (callback.Scheme != redirect.Scheme || callback.Authority != redirect.Authority ||
-            callback.AbsolutePath != redirect.AbsolutePath || callback.Fragment.Length != 0 || callback.Query.Length > 16000)
+            callback.AbsolutePath != redirect.AbsolutePath || callback.UserInfo.Length != 0 ||
+            callback.Fragment.Length != 0 || callback.Query.Length > 16000)
             throw new InvalidOperationException("Ungültige OpenAI-Rückrufadresse.");
         var query = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (string part in callback.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
@@ -66,7 +69,7 @@ internal static class OpenAiProtocol
         return Convert.FromBase64String(value.Replace('-', '+').Replace('_', '/').PadRight((value.Length + 3) / 4 * 4, '='));
     }
 
-    private static JsonDocument Object(byte[] json)
+    internal static JsonDocument Object(byte[] json)
     {
         JsonDocument document = JsonDocument.Parse(json);
         if (document.RootElement.ValueKind != JsonValueKind.Object ||
@@ -95,7 +98,7 @@ internal static class OpenAiProtocol
         }
     }
 
-    internal static bool HasKey(JsonElement jwks, string kid) => jwks.TryGetProperty("keys", out JsonElement keys) &&
+    internal static bool HasKey(JsonElement jwks, string kid) => jwks.ValueKind == JsonValueKind.Object && jwks.TryGetProperty("keys", out JsonElement keys) &&
         keys.ValueKind == JsonValueKind.Array && keys.EnumerateArray().Any(k => Text(k, "kid") == kid);
 
     internal static OpenAiIdentity ValidateIdToken(string jwt, JsonElement jwks, string clientId, string nonce,
@@ -103,8 +106,11 @@ internal static class OpenAiProtocol
     {
         try
         {
+            if (!IsIssuedClient(clientId)) throw new FormatException();
             string kid = JwtKeyId(jwt);
             string[] parts = jwt.Split('.');
+            // Reject ambiguous duplicate claims rather than allowing parser-specific last-value wins.
+            using JsonDocument payload = Object(Decode(parts[1]));
             JsonElement[] matches = jwks.GetProperty("keys").EnumerateArray().Where(k => Text(k, "kid") == kid).ToArray();
             if (matches.Length != 1) throw new FormatException();
             JsonElement key = matches[0];
@@ -113,18 +119,24 @@ internal static class OpenAiProtocol
                 (key.TryGetProperty("key_ops", out JsonElement ops) &&
                     (ops.ValueKind != JsonValueKind.Array || !ops.EnumerateArray().Any(o => o.ValueKind == JsonValueKind.String && o.GetString() == "verify"))))
                 throw new FormatException();
-            byte[] modulus = Decode(RequiredText(key, "n"));
-            byte[] exponent = Decode(RequiredText(key, "e"));
-            if (modulus.Length is < 256 or > 1024 || exponent.Length is < 1 or > 8) throw new FormatException();
-            using RSA rsa = RSA.Create();
-            rsa.ImportParameters(new RSAParameters { Modulus = modulus, Exponent = exponent });
-            if (!rsa.VerifyData(Encoding.ASCII.GetBytes(parts[0] + "." + parts[1]), Decode(parts[2]),
-                HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1)) throw new CryptographicException();
+            var signingKey = new JsonWebKey(key.GetRawText());
+            if (signingKey.KeySize is < 2048 or > 8192) throw new FormatException();
+            var validation = new TokenValidationParameters
+            {
+                RequireSignedTokens = true, RequireExpirationTime = true,
+                ValidateIssuerSigningKey = true, IssuerSigningKey = signingKey,
+                ValidAlgorithms = new[] { SecurityAlgorithms.RsaSha256 }, TryAllIssuerSigningKeys = false,
+                ValidateIssuer = true, ValidIssuer = Issuer,
+                ValidateAudience = true, ValidAudience = clientId, IgnoreTrailingSlashWhenValidatingAudience = false,
+                ValidateLifetime = true, ClockSkew = TimeSpan.FromSeconds(5),
+                IncludeTokenOnFailedValidation = false, LogTokenId = false, LogValidationExceptions = false
+            };
+            var handler = new JsonWebTokenHandler { MapInboundClaims = false, MaximumTokenSizeInBytes = 65536 };
+            TokenValidationResult result = handler.ValidateTokenAsync(jwt, validation).ConfigureAwait(false).GetAwaiter().GetResult();
+            if (!result.IsValid) throw new InvalidOperationException();
 
-            // No identity claim is consumed before the pinned issuer's signature is verified.
-            using JsonDocument payload = Object(Decode(parts[1]));
+            // Consume identity claims only after the maintained library verifies the signature and issuer.
             JsonElement claims = payload.RootElement;
-            if (RequiredText(claims, "iss") != Issuer) throw new FormatException();
             JsonElement audience = claims.GetProperty("aud");
             bool multiple = audience.ValueKind == JsonValueKind.Array && audience.GetArrayLength() > 1;
             bool audienceMatches = audience.ValueKind == JsonValueKind.String ? audience.GetString() == clientId :
@@ -145,7 +157,7 @@ internal static class OpenAiProtocol
             if (subject.Length > 1024 || (expectedSubject is not null && expectedSubject != subject)) throw new FormatException();
             return new OpenAiIdentity(subject, Text(claims, "email") ?? "", Text(claims, "name") ?? "");
         }
-        catch (Exception ex) when (ex is FormatException or JsonException or CryptographicException or
+        catch (Exception ex) when (ex is SecurityTokenException or FormatException or JsonException or CryptographicException or
             InvalidOperationException or KeyNotFoundException or ArgumentException or OverflowException)
         {
             throw new InvalidOperationException("Das OpenAI-ID-Token konnte nicht sicher bestätigt werden (Signatur, Konto, Zeit, Audience oder Nonce).");
@@ -228,6 +240,9 @@ internal static class OpenAiProtocol
                         throw new OpenAiRequestException(null, Text(error, "code"), Text(error, "param"), Text(item, "request_id"), "SSE error");
                     case "response.incomplete":
                         throw new InvalidOperationException("OpenAI hat die Texterkennung unvollständig beendet. Bitte einen kleineren Ausschnitt versuchen.");
+                    case "response.cancelled":
+                    case "response.canceled":
+                        throw new InvalidOperationException("OpenAI hat die Texterkennung abgebrochen. Der Teiltext ist unvollständig.");
                     case "response.refusal.delta":
                     case "response.refusal.done":
                         throw new InvalidOperationException("Das gewählte Modell hat die Texterkennung abgelehnt.");
@@ -252,7 +267,15 @@ internal sealed class OpenAiRequestException : InvalidOperationException
     {
         string help = code switch
         {
+            "insufficient_quota" or "billing_hard_limit_reached" => "Das verfügbare Guthaben oder Abrechnungslimit reicht für diese Anfrage nicht aus. Nutzung und Guthaben in ChatGPT prüfen.",
+            "rate_limit_exceeded" => "Die zulässige Anfragerate wurde überschritten. Bitte später erneut versuchen.",
+            "insufficient_scope" or "chatpass_v2_scope_not_authorized" or "chatpass_v2_invalid_authorization_context" =>
+                "Die erteilte Berechtigung erlaubt diesen Zugriff nicht. Gewähltes Konto und Freigabe zur Nutzung des ChatGPT-Plans prüfen.",
             "subscription_sharing_usage_limit_exceeded" => "Das Nutzungslimit für die App oder den ChatGPT-Plan wurde erreicht. ChatGPT Einstellungen → Nutzung prüfen.",
+            "subscription_sharing_usage_unavailable" => "OpenAI konnte die verfügbare Nutzung vorübergehend nicht prüfen. Bitte später erneut versuchen; die Sitzung bleibt erhalten.",
+            "subscription_sharing_user_unavailable" => "Die Konto- oder Workspace-Information ist vorübergehend nicht verfügbar. Bitte später erneut versuchen.",
+            "subscription_sharing_route_not_supported" => "Dieser Endpunkt oder diese HTTP-Methode wird für die Verbindung nicht unterstützt.",
+            "subscription_sharing_invalid_user" => "OpenAI konnte den Kontokontext nicht bestätigen. Gewähltes Konto und Freigabe prüfen; bei bestätigter Trennung erneut anmelden.",
             "subscription_sharing_user_not_eligible" => "Dieses Konto oder dieser Workspace darf den ChatGPT-Plan hier nicht verwenden.",
             "subscription_sharing_unsupported_capability" => "Das gewählte Modell oder der Bildinput wird für diese Verbindung nicht unterstützt.",
             "invalid_grant" or "invalid_refresh_token" or "token_expired" or "refresh_token_expired" or
