@@ -17,7 +17,11 @@ Diese Abnahme ersetzt die unzureichende Prüfung des ersten separaten Werkbank-A
 | Mehrfach Undo und Redo | Objektänderungen werden nachvollziehbar zurückgenommen und wiederhergestellt; kein stilles Rastern oder Verlust der einzelnen Objekte. |
 | Kopieren bzw. PNG speichern | Exakt der aktuelle Ausschnitt mit den aktuellen Markierungen wird ausgegeben. Maske, Rahmen, Griffe und Werkzeugleiste erscheinen nicht im Bild. Das Hauptfenster wird dadurch nicht geöffnet. |
 | Explizit OCR oder Werkbank wählen | Derselbe Editor samt Objekten, Crop und History wird übergeben. Kopieren, Speichern und OCR verwenden denselben aktuellen Crop-Export. |
-| Escape / Abbrechen | Sitzung endet ohne Ausgabe. Textbearbeitung und laufende Gesten werden nach ihrem aktuellen Kontext behandelt; keine Eingabe wird versehentlich als neuer Auswahlrahmen aufgefasst. |
+| OCR/Werkbank wählen, während ein altes Werkbankdokument ungesichert ist; Rückfrage oder Speicherdialog abbrechen | Das aktuelle Overlay bleibt mit demselben Editor, Ausschnitt und History offen. Dialoge gehören zum Overlay; die neue Aufnahme wird nicht verworfen. |
+| Verzögerte Handoff-Freigabe, erneuter Klick, externe Schließung | Nur ein Freigabeversuch läuft. Währenddessen entstehen keine parallelen Ausgaben oder Gesten. Ein nach Schließung zurückkehrender Callback aktiviert kein Dokument. |
+| In der Werkbank ein Objekt am Ausschnittrand ziehen/skalieren oder neuen Text setzen | Neue Eingaben bleiben im sichtbaren Ausschnitt. Die vollständige Aufnahme und bereits außerhalb liegende alte Objekte bleiben unverändert erhalten. |
+| Escape bei aktiver Text-, Zeichen- oder Rahmengeste | Nur die aktuelle Eingabe/Geste wird verworfen; der vorherige Ausschnitt und ältere Markierungen bleiben erhalten. Ein weiteres Escape im Idle beendet die Sitzung. |
+| Abbrechen / Rechtsklick oder Escape ohne aktive Geste | Sitzung endet ohne Ausgabe. Keine Eingabe wird versehentlich als neuer Auswahlrahmen aufgefasst. |
 
 ## Belegarten
 
@@ -26,3 +30,7 @@ Root hat den integrierten Stand am 18.10.2026 mit SDK 10.0.401 gebaut: **0 Warnu
 `--render-overlay-preview` rendert die echte WPF-Oberfläche mit einem lokalen synthetischen Testbild. Root hat `test-results/overlay.png` (1280 × 800) selbst visuell geprüft: Maskierung, acht goldene Rahmengriffe, gesonderte Objektgriffe und lesbare dunkle Werkzeugleiste. Die Werkbank-Vorschau (`main-window.png`, 1440 × 840) wurde ebenfalls geprüft. Das ist ein echtes Offscreen-WPF-Rendering; es ist kein Nachweis physischer Mausbedienung.
 
 Die physische Computer-Use-Steuerung wurde durch Esc beendet und wird in diesem laufenden Turn nicht erneut benutzt. Die obige vollständige reale Maus-/Tastaturfolge gilt deshalb bis zu einer tatsächlichen Ausführung als **offen**, auch wenn Offline-Prüfungen und Vorschau grün sind. Mixed-DPI und echte OpenAI-OCR bleiben separate Laufzeitprüfungen.
+
+## Ergänzung aus dem Opus-Review
+
+Der [Opus/Ponytail-Gegencheck](../plans/2026-10-18-opus-overlay-review.md) bestätigte die Koordinaten-, Objekt-/History- und Routingstruktur. Er fand jedoch den möglichen Verlust der neuen Aufnahme bei abgelehnter Handoff-Rückfrage sowie zwei kleinere Grenzfälle bei Werkbank-Eingabegrenzen und Escape während einer Geste. Die [Root-Entscheidung für diese drei Korrekturen](../plans/2026-10-18-overlay-review-fixes.md) verlangt neue gezielte Gegenproben. Bis deren integrierte Root-Prüfung bestanden ist, ist die ursprüngliche grüne Sechs-Suiten-Prüfung kein Nachweis für diese ergänzten Fälle.
