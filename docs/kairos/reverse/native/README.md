@@ -38,12 +38,12 @@ REA bezeichnet Windows Ghidra P0 als experimentelle Grenze. Fehlende PDBs, nicht
 
 Die 49 tatsächlich ausgeführten Toolaufrufe stehen in [requests.jsonl](requests.jsonl), einschließlich `open_binary`, Export und `close_binary`; die Aufrufparameter sind keine nachträglich rekonstruierte Liste. Die Skripte stehen in [native_deep.ps1](../../../../scripts/reverse/native_deep.ps1) und [native_deep.mjs](../../../../scripts/reverse/native_deep.mjs). `native_deep.ps1` ohne Parameter zeigt nur den Plan. `-Acquire` lädt und entpackt die fest gepinnten Assets und verweigert bestehende Archive/Zielverzeichnisse; bei bereits vorhandenen verifizierten Werkzeugen wird dieser Schritt ausgelassen. Kein `rea setup/install` ist erforderlich.
 
-Im Worktree, mit den bereits erworbenen Werkzeugen, startet die eigene Sitzung so:
+Die bereits erworbenen Werkzeuge liegen im ursprünglichen Analyse-Worktree `C:\Users\Axel_desktop\.t3\worktrees\kapture\t3-f80e737e\.tools\reverse`. Nach Integration in den Parent-Checkout kann dieselbe Installation über diese absoluten Pfade wiederverwendet werden. Ein frischer anderer Rechner benötigt zunächst den gezeigten Plan und eine eigene Werkzeugbereitstellung. Die folgende Sitzung startet nur den Analyseprovider, nicht SunnyCapturer:
 
 ```powershell
 $node = 'C:\Users\Axel_desktop\.t3\projects\clockify\.rea-runtime\node-v24.18.0-win-x64\node.exe'
-$env:GHIDRA_INSTALL_DIR = Join-Path (Get-Location) '.tools\reverse\ghidra\ghidra_12.1.4_PUBLIC'
-$env:JAVA_HOME = Join-Path (Get-Location) '.tools\reverse\jdk\jdk-21.0.12.1+1'
+$env:GHIDRA_INSTALL_DIR = 'C:\Users\Axel_desktop\.t3\worktrees\kapture\t3-f80e737e\.tools\reverse\ghidra\ghidra_12.1.4_PUBLIC'
+$env:JAVA_HOME = 'C:\Users\Axel_desktop\.t3\worktrees\kapture\t3-f80e737e\.tools\reverse\jdk\jdk-21.0.12.1+1'
 $env:NATIVE_DEEP_PRIVATE_ROOT = 'C:\Users\Axel_desktop\AppData\Local\KairosCapture\ReverseTools\97cc3309-5721-48c0-984b-21dc6de14109'
 & $node .\scripts\reverse\native_deep.mjs
 ```

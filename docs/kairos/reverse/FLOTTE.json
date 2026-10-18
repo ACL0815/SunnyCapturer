@@ -57,11 +57,13 @@
       "childThreadId": "thread:delegated-task:command%3Amcp%3A070b1bb9-3ebb-482d-9bb1-d5b367e2eb64%3Adelegate-task%3Akairos-native-deep-20261018-r1",
       "provider": "codex",
       "model": "gpt-6.1-sol",
-      "status": "running",
+      "status": "completed",
       "options": {
         "reasoningEffort": "xhigh",
         "serviceTier": "priority"
-      }
+      },
+      "integrated_commit": "92fc682",
+      "root_review": "44 complete records / 49 raw response hashes / five dossiers verified, public REA bundle validation, core pseudocode read, native session closed."
     }
   ]
 }

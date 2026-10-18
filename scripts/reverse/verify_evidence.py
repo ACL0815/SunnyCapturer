@@ -1,4 +1,4 @@
-"""Cross-check the independent PE inventory against retained REA resource evidence."""
+"""Cross-check retained PE, Qt and native REA evidence against independent bytes."""
 import hashlib
 import json
 from pathlib import Path
@@ -52,9 +52,43 @@ def main():
             assert hashlib.sha256(raw[start:start + length]).hexdigest() == span["sha256"]
             spans += 1
     assert messages == qt["summary"]["messages"] and len(qt["files"]) == qt["summary"]["qm_files"]
+    native_root = reports / "native"
+    native_bundle = json.loads((native_root / "rea-evidence-bundle.json").read_text(encoding="utf-8-sig"))
+    native_records = {r["evidence_id"]: r for r in native_bundle["records"]}
+    assert len(native_records) == len(native_bundle["records"]) == 44, "Native record set changed"
+    index = json.loads((native_root / "evidence-index.json").read_text(encoding="utf-8-sig"))
+    retained_ids = set()
+    assert len(index) == len(list((native_root / "evidence").glob("*.json"))) == 49
+    for item in index:
+        path = native_root / item["file"]
+        raw = path.read_bytes()
+        assert hashlib.sha256(raw).hexdigest() == item["sha256"], f"Native evidence bytes changed: {item['file']}"
+        response = json.loads(raw.decode("utf-8-sig"))
+        assert not response["isError"] and not item["isError"]
+        assert response["request"] == {"name": item["tool"], "arguments": item["arguments"]}
+        if item["evidence_id"]:
+            evidence = response["response"]
+            assert evidence["evidence_id"] == item["evidence_id"]
+            assert evidence == native_records[item["evidence_id"]], "Bundle lost or changed a complete record"
+            retained_ids.add(item["evidence_id"])
+    assert retained_ids == set(native_records)
+    dossiers = [r for r in native_records.values() if r["operation"] == "analyze_function"]
+    assert len(dossiers) == 5
+    for record in native_records.values():
+        assert record["subject"]["digest"]["sha256"] == digest
+        assert record["analysis_profile"]["digest"] == "249564812a8d83b9b3f461098fc485ccde60c516d4497547a124081c91d654bf"
+    for dossier in dossiers:
+        result = dossier["normalized_result"]
+        assert result["procedure"]["body"]["available"] and result["procedure"]["body"]["contains_entry"]
+        flow = result["native_value_flow"]
+        assert flow["available"] and not flow["truncated"]
+        assert flow["known_omitted_edges"] == flow["known_omitted_inputs"] == flow["omitted_operations_lower_bound"] == 0
+    close = json.loads((native_root / "evidence/049-close.json").read_text(encoding="utf-8-sig"))
+    assert close["request"]["name"] == "close_binary" and close["response"]["result"] is None
     print(f"PASS: selected EXE identity, {inventory['file_count']} file totals, "
           f"{len(rea)} resource payloads independently matched, runtime identity.")
     print(f"PASS: {len(qt['files'])} QM files, {messages} messages, {spans} raw byte spans and source-index fields.")
+    print(f"PASS: {len(index)} native response hashes, {len(native_records)} complete records, {len(dossiers)} full dossiers and recorded session close.")
     print("Coverage: static structure and one process sample; no editor or OCR behavioral equivalence asserted.")
 
 

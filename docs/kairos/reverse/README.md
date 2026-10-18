@@ -2,7 +2,7 @@
 
 Untersuchung vom 18.10.2026. Der jüngste Nutzerauftrag priorisiert zunächst die installierte EXE mit `reverse-engineer-anything`. Dieser Ordner dokumentiert diese Untersuchung. **Ein gebautes Kairos Capture oder ein erfolgreicher OAuth-Login werden damit nicht behauptet.** Im Ausgangscheckout `42d627e` sind die Kairos-Start-/Architekturdokumente vorhanden, der darin beschriebene `src/KairosCapture`-Anwendungscode jedoch nicht.
 
-Die zentrale statische Erkenntnis: Die installierte SunnyCapturer-Generation besitzt deutlich mehr als eine Zeichenfunktion auf einer Bitmap. Qt-Metaobjekte, interaktive Textobjekte und benannte Bearbeitungskommandos stützen einen Editor mit eigenständigen Grafikobjekten. Die alten v1-Quellen bilden diese aktuelle Struktur nicht zuverlässig ab. Für die gewünschte direkte Bearbeitung ist deshalb ein eigenes Objektmodell die wichtige Rekonstruktionsvorgabe.
+Die zentrale Erkenntnis ist inzwischen durch native Decompilation belegt: Die installierte SunnyCapturer-Generation besitzt einen Editor mit eigenständigen Grafikobjekten, editierbaren Textknoten und einem Undo-Stack. Aufnahme und gemeinsamer Bitmap-Ausgabepfad sind bis zu ihren Qt-Aufrufen verfolgt. Die alten v1-Quellen bilden diese aktuelle Struktur nicht zuverlässig ab. Für die gewünschte direkte Bearbeitung ist deshalb ein eigenes Objektmodell die wichtige Rekonstruktionsvorgabe.
 
 ## Ziel und Identität
 
@@ -30,6 +30,20 @@ Die EXE wurde nicht gepatcht. Die Analyse läuft auf der explizit vorgegebenen I
 
 Die ausführlichen Berichte kennzeichnen **Beobachtung**, **Inferenz** und **Unbekannt**. Lokale Belegkürzel wie E1 sind keine REA-Evidence-IDs. Eine Klasse, ein importiertes API oder ein übersetzter Buttontext beweist für sich allein keinen ausgeführten Ablauf.
 
+## Native Codepfade: jetzt belegt
+
+Die [native Untersuchung](native/README.md) verwendet Ghidra 12.1.4 mit REA 6.4.0 und Temurin JDK 21.0.12.1+1. Sie enthält [44 vollständige REA-Records](native/rea-evidence-bundle.json), einen [Index der einzelnen Aufrufe](native/evidence-index.json) und fünf vollständige Funktionsdossiers einschließlich Assembly, Referenzen und High-Pcode-Wertfluss. Die folgenden Aussagen sind statische Codebeobachtungen, keine Laufzeitmessung:
+
+| Bereich | Verfolgter Zusammenhang | Hauptbeleg |
+| --- | --- | --- |
+| Aufnahme | `Capturer::onCpature` → `ScreenShoter::start` → `screenshot`; dort `QScreen::grabWindow` und Übernahme als Hintergrund der Grafikansicht. | `screenshot`, `0x1400c2e50`, `ev_2f6583d6f4d5448ddffbeb00f324287988f21d1b1395a7fd014b29ba958ac23a` |
+| Objekte/Text | `createItem` erzeugt getrennte Objekte. Der Textkonstruktor erstellt `QGraphicsTextItem` und aktiviert Textinteraktion. | `createItem`, `0x1400bdc40`, `ev_3311e1568aa356689221e9f7c645ffb066711c30a635510603212db176db5e9c` |
+| Undo/Redo | `finishItem` erstellt einen `CreatedCommand` für Szene und Item und ruft `QUndoStack::push`. Command-Slots entfernen das Item bzw. fügen dasselbe Item erneut hinzu. | `finishItem`, `0x1400be6b0`, `ev_5adeb3e0fdd0e60c4c2de36ff49ad8a669c87fa3d857b8efcdc81db4c5a56d97` |
+| Gemeinsame Ausgabe | `snip` leert Fokus/Selektion und erzeugt das Bitmap über `QWidget::grab`. `copy`, `pin`, `onSave` und `extractText` rufen diesen Pfad auf. | `snip`, `0x1400c3300`, `ev_cd43692a968a9cd6d1069ddfb241fe61da37c14a0146965a1402aa6338e3b1fd` |
+| OCR | `extractText` übergibt eine Bitmap-Kopie per Timer. Nach PNG-Zwischenspeicherung folgt ein Engine-Dispatch für Tencent, Baidu und Offline-CPU/GPU. Die native Variante lädt `sunny_ocr.dll` und löst ihre drei OCR-/Free-Exports auf. | `extractText`, `0x1400be5b0`, `ev_d4b68cffb291f78db568f770c827967f5a006965097f1e03e3499f037bf02772`; weitere Loader-Belege im nativen Index |
+
+Methodennamen sind durch Qt-MOC-Indizes und dekompilierte Dispatcher verknüpft. Feldrollen und C++-Signaturen bleiben teilweise rekonstruiert; insbesondere die angezeigte ABI-Signatur von `grabWindow` darf nicht als Originalquellcode gelesen werden. Die Analyse beweist weder das Verhalten aller Bearbeitungsbefehle noch Pixeltreue, Schwärzungssicherheit, erfolgreiche GPU-/Cloud-OCR oder vollständige Betriebssystem-Zwischenablagefunktionen.
+
 ## Laufzeitgrenze dieser Untersuchung
 
 Die vorhandene Sitzung war bereits vor der Untersuchung gestartet. [runtime-modules.json](runtime-modules.json) hält eine an EXE-Pfad und Dateihash gebundene Windows-Prozessstichprobe fest. Qt und FFmpeg sind darin geladen. `sunny_ocr.dll`, Paddle und cuDNN sind in dieser Stichprobe nicht geladen; sie können später dynamisch hinzukommen. Diese Aussage betrifft nur die Modulaufnahme, nicht alle bisherigen oder zukünftigen Programmzustände.
@@ -48,7 +62,9 @@ Die [Qt-Kataloganalyse](qt/BERICHT.md) ist integriert und von Root erneut ausgef
 
 Die [Architekturabwägung von Opus 5.5 mit Ponytail](ARCHITEKTUR-ABWAEGUNG.md) ist integriert und von Root fachlich nachgeprüft. Sie empfiehlt WPF/.NET 10 für den ersten Windows-Bau; Qt bleibt die Alternative, falls Pixel-/Mixed-DPI- oder gemessene Latenzkriterien nicht erfüllt werden oder weitere Desktop-Plattformen hinzukommen. Es gibt noch keine Messung, die WPF als schneller ausweist. Root hat zu starke Import-/DPI-/OAuth-Zulassungsbehauptungen auf ihre tatsächliche Beleggrenze korrigiert. Die Zusatzbefunde stehen in [architecture-extra-evidence.json](architecture-extra-evidence.json).
 
-Die portable native Codeanalyse läuft noch. Ihre Abdeckung und offenen Punkte müssen am tatsächlichen Ergebnis gelesen werden; ein Download oder ein gestarteter Agent ist kein Analyseerfolg. Die fehlende vollständige Windows-Editor-Bediensequenz ist im REA-Paket als offene Frage `unk_02c4fb520ff025f3c829f771142bb868bcd11b8b0e6a23f8cacf1ad70f8555f9` registriert.
+Die portable native Codeanalyse ist integriert. Der anfängliche Decompiler-Blocker wurde mit separat erworbenen, hashgeprüften portablen Werkzeugen und einem ausdrücklich freigegebenen normalen Laufzeitpfad behoben. Es gab keine globale Installation oder Änderung bestehender Java-/MCP-Konfigurationen. Die eigene Sitzung wurde geschlossen; Root prüfte die gespeicherte Schließantwort und fand keine privaten Ghidra-Projektverzeichnisse oder zugehörigen Providerprozesse mehr.
+
+Die fehlende vollständige Windows-Editor-Bediensequenz bleibt im separaten Root-REA-Paket als offene Frage `unk_02c4fb520ff025f3c829f771142bb868bcd11b8b0e6a23f8cacf1ad70f8555f9` registriert. Die leere Unknown-Registry des nativen Teilbundles ist ausdrücklich keine Aussage über vollständige Programmanalyse.
 
 ## Konsequenzen für den späteren Bau
 
@@ -76,4 +92,10 @@ git diff --check
 
 Der Laufzeitbefehl benötigt genau einen bereits laufenden Prozess der ausgewählten EXE; er startet oder bedient die App nicht. Die statischen Skripte verwenden die vorhandene Python-Standardbibliothek. Das Inventar bleibt an die vorgegebene EXE-Identität gebunden. Ein späteres App-Update verlangt eine neue Untersuchung.
 
-Von Root bereits erneut bestanden: PE-Selbstprüfung, vollständiger Inventarlauf, 107-Dateien-Gesamtsumme, EXE-Hash, unabhängiger Vergleich aller zehn PE-Ressourcennutzdaten, QM-Selbstprüfung mit fünf beschädigten Gegenproben, erneute QM-Generierung, 23.178 Originalbyte-Abgleiche samt Quelltextindex, Identitätsabgleich der Prozessstichprobe und `git diff --check`. Die Aussage gilt für diese Prüfungen; sie ist keine Verhaltensgleichheit oder Abnahme einer Kairos-Anwendung.
+Von Root erneut bestanden: PE-Selbstprüfung, vollständiger Inventarlauf, 107-Dateien-Gesamtsumme, EXE-Hash, unabhängiger Vergleich aller zehn PE-Ressourcennutzdaten, QM-Selbstprüfung mit fünf beschädigten Gegenproben, erneute QM-Generierung, 23.178 Originalbyte-Abgleiche samt Quelltextindex, Identitätsabgleich der Prozessstichprobe und `git diff --check`. Zusätzlich: öffentliche REA-Bundle-Validierung, alle 49 nativen Antwortdatei-Hashes, unveränderte vollständige Gleichheit der 44 Records zwischen Einzelantworten und Bundle, fünf vollständige Dossiers ohne bekannte Wertfluss-Trunkierung und Syntaxprüfung beider nativen Helfer. Root hat die entscheidenden Pseudocodepfade selbst gelesen und die MOC-Zuordnung sowie Qt-Undo-Reihenfolge gegengeprüft. Die Aussage gilt für diese Prüfungen; sie ist keine Verhaltensgleichheit oder Abnahme einer Kairos-Anwendung.
+
+## Abschluss der Frageliste
+
+- **Beantwortet:** Artefaktidentität, native Plattform/Qt-Version, Dateimengen/Abhängigkeiten, verfügbare UI-Texte, ausgewählter Standbild-Codepfad, Anlage von Grafik-/Textobjekten, Objekt-Erzeugungs-Undo und gemeinsamer Bitmap-Ausgabepfad, Offline-OCR-Loader/Engine-Dispatch, Unterschied zu historischen Quellen.
+- **Teilweise beantwortet:** direkte Bearbeitung (nicht jeder Command und jede Geste verfolgt), Export (gemeinsames Bitmap belegt, konkrete Pixel-/DPI-/Clipboard-Abnahme offen), Konfiguration (Symbole/Enginewerte belegt, aktive Nutzereinstellungen nicht untersucht), Frameworkwahl (begründeter Vorschlag, Prototypmessung offen).
+- **Unaufgelöst:** vollständige Bediensequenz, Mixed-DPI und Multimonitore, Latenz-/Speichervergleich, echte OCR-/GPU-Lauffähigkeit, nachgelagerter Cloud-Transport und konkrete private OpenAI-Kontofreigabe. Diese Lücken werden nicht durch statische Strings oder ein grünes Parser-Ergebnis ersetzt.

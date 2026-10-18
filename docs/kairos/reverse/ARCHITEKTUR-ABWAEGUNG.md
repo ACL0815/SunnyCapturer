@@ -34,6 +34,8 @@ Quellen: eigene Prüfung von Opus (REA `inspect_pe_resources`, `pefile`-Importli
 | Strings `https://8.137.12.26:5000/add_data`, `wmic baseboard get serialnumber`, `application/json`. | **Ob und wann** gesendet wird, ist nicht belegt. Für Kairos gilt als Regel: keine Telemetrie, keine Hardware-IDs. |
 | v1.x-Quelle: `std::vector<PaintNode> m_undo/m_redo` (`screenshot.h:145–146`), Capture `primaryScreen()->grabWindow(...)` mit *einer* globalen `devicePixelRatio` (`capturehelper.cpp:498–512`). v3/v5 im Checkout: nur README. | Die alte Generation zeigt die typische Mixed-DPI-Falle mit einem globalen Faktor. Die aktuelle Struktur ist eine andere, die alte Quelle ist kein Bauplan. |
 
+**Nachtrag der nativen Root-Abnahme:** Die spätere [Ghidra-Untersuchung](native/README.md) belegt im untersuchten Standbildpfad `QScreen::grabWindow`, getrennte Grafik-/Textobjekte, `CreatedCommand`/`QUndoStack`, gemeinsamen `snip`-Bitmap-Pfad über `QWidget::grab` und dynamische OCR-DLL-Anbindung. Die vorstehende Tabelle bewahrt die ursprünglichen Import-/Namensbefunde als eigene Evidenzstufe. Belegt sind die ausgewählten Codepfade; Mixed-DPI, andere Capture-Wege und tatsächliche Bedienung bleiben ungetestet. Für Kairos folgt daraus weiterhin ein Objektmodell und eine gemeinsame Ausgabe, keine Pflicht zur Übernahme von Sunnys Widget-Grab-Technik.
+
 ### 2.2 Arbeitsrechner (Befehlsausgabe 18.10.2026)
 
 | Werkzeug | Befund | Folge |
@@ -209,7 +211,7 @@ Die Zielwerte sind **Anforderungen**, keine Messergebnisse. Gemessen wird auf di
 
 | Offen | Wer / wie |
 | --- | --- |
-| Welche Capture-API Sunny für Standbilder nutzt (`grabWindow` oder WGC) und wie DPI tatsächlich gesetzt wird | Native-Deep-Analyse (Ghidra 12.1.4 + JDK 21 läuft bei Root), Xrefs auf `grabWindow` und `WindowsGraphicsCapturer` |
+| DPI-Modus und sämtliche alternativen Capture-Wege | Der ausgewählte `ScreenShoter::screenshot`-Pfad ist inzwischen mit `QScreen::grabWindow` belegt; DPI-Ausführung und andere Wege bleiben außerhalb dieser nativen Stichprobe. |
 | Sunny-Editorablauf, Undo-Semantik, Textfokus, Mixed-DPI-Verhalten | Laufzeit; das Overlay ist derzeit nicht steuerbar |
 | Ob `8.137.12.26:5000/add_data` und die Abfrage der Board-Seriennummer tatsächlich zur Laufzeit erfolgen | Netzwerk- und Prozessbeobachtung mit Einwilligung |
 | Sunny-Referenzwerte für A2–A5 | Messung mit Methode aus Abschnitt 9 |
