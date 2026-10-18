@@ -29,7 +29,7 @@ public sealed class AnnotationCanvas : Canvas
 
     private sealed record Edit(Action Undo, Action Redo);
     private sealed record State(Geometry Geometry, Rect Bounds, Point Offset, string Text,
-        double ScaleX, double ScaleY);
+        double ScaleX, double ScaleY, Brush Brush, double Thickness);
     [Flags]
     private enum Handle
     {
@@ -52,7 +52,7 @@ public sealed class AnnotationCanvas : Canvas
     private bool _gestureChanged, _newText;
     private string _originalText = "";
     private EditorTool _tool;
-    private Brush _stroke = new SolidColorBrush(Color.FromRgb(0xC4, 0xB5, 0xFD));
+    private Brush _stroke = new SolidColorBrush(Color.FromRgb(0xB0, 0x97, 0xE9));
     private double _thickness = 3;
 
     public AnnotationCanvas(BitmapSource image)
@@ -91,7 +91,13 @@ public sealed class AnnotationCanvas : Canvas
     public Brush Stroke
     {
         get => _stroke;
-        set => _stroke = value ?? throw new ArgumentNullException(nameof(value));
+        set
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            _stroke = value.CloneCurrentValue();
+            if (_stroke.CanFreeze) _stroke.Freeze();
+            ChangeSelectedStyle();
+        }
     }
 
     public double Thickness
@@ -101,8 +107,26 @@ public sealed class AnnotationCanvas : Canvas
         {
             if (!double.IsFinite(value)) throw new ArgumentOutOfRangeException(nameof(value));
             _thickness = Math.Clamp(value, 1, 24);
+            ChangeSelectedStyle(false);
         }
     }
+
+    private void ChangeSelectedStyle(bool colour = true)
+    {
+        if (Tool != EditorTool.Select || _selected == null || _selected.Tool == EditorTool.Redact) return;
+        EndGesture();
+        CommitText();
+        if (_selected is not Annotation item || item.Tool == EditorTool.Redact) return;
+        State before = Snapshot(item);
+        if (colour) item.Brush = _stroke;
+        else item.Thickness = _thickness;
+        State after = Snapshot(item);
+        if (before != after) Record(() => Restore(item, before), () => Restore(item, after));
+    }
+
+    internal bool IsEditingText => _textBox != null;
+    internal object? SelectedIdentity => _selected;
+    internal bool HasAnnotationAt(Point point) => HitHandle(point) != Handle.None || Hit(point) != null;
 
     public bool CanUndo => _undo.Count != 0;
     public bool CanRedo => _redo.Count != 0;
@@ -169,13 +193,25 @@ public sealed class AnnotationCanvas : Canvas
     }
 
     /// <summary>Exports at 96 DPI, where one canvas unit is exactly one output pixel.</summary>
-    public BitmapSource Flatten()
+    public BitmapSource Flatten() => Flatten(new Int32Rect(0, 0, _image.PixelWidth, _image.PixelHeight));
+
+    public BitmapSource Flatten(Int32Rect crop)
     {
+        if (crop.X < 0 || crop.Y < 0 || crop.Width < 1 || crop.Height < 1 ||
+            (long)crop.X + crop.Width > _image.PixelWidth || (long)crop.Y + crop.Height > _image.PixelHeight)
+            throw new ArgumentOutOfRangeException(nameof(crop));
         EndGesture();
         CommitText();
         DrawingVisual visual = new();
-        using (DrawingContext drawing = visual.RenderOpen()) DrawImageAndAnnotations(drawing);
-        RenderTargetBitmap bitmap = new(_image.PixelWidth, _image.PixelHeight, 96, 96, PixelFormats.Pbgra32);
+        using (DrawingContext drawing = visual.RenderOpen())
+        {
+            drawing.PushClip(new RectangleGeometry(new Rect(0, 0, crop.Width, crop.Height)));
+            drawing.PushTransform(new TranslateTransform(-crop.X, -crop.Y));
+            DrawImageAndAnnotations(drawing);
+            drawing.Pop();
+            drawing.Pop();
+        }
+        RenderTargetBitmap bitmap = new(crop.Width, crop.Height, 96, 96, PixelFormats.Pbgra32);
         bitmap.Render(visual);
         bitmap.Freeze();
         return bitmap;
@@ -491,7 +527,7 @@ public sealed class AnnotationCanvas : Canvas
 
     // Immutable geometry plus small per-object state makes edits exact and independently reversible.
     private static State Snapshot(Annotation item) => new(item.Geometry, item.Bounds, item.Offset,
-        item.Text, item.ScaleX, item.ScaleY);
+        item.Text, item.ScaleX, item.ScaleY, item.Brush, item.Thickness);
 
     private static void Restore(Annotation item, State state)
     {
@@ -501,6 +537,8 @@ public sealed class AnnotationCanvas : Canvas
         item.Text = state.Text;
         item.ScaleX = state.ScaleX;
         item.ScaleY = state.ScaleY;
+        item.Brush = state.Brush;
+        item.Thickness = state.Thickness;
     }
 
     internal Rect SelectionBounds => _selected == null ? Rect.Empty : WorldBounds(_selected);
@@ -604,6 +642,7 @@ public sealed class AnnotationCanvas : Canvas
         _originalText = item.Text;
         TextBox box = new()
         {
+            Style = null,
             Text = item.Text, FontFamily = new FontFamily("Segoe UI"), FontSize = 24,
             Foreground = item.Brush, Background = new SolidColorBrush(Color.FromArgb(40, 0, 0, 0)),
             BorderThickness = new System.Windows.Thickness(0), Padding = new System.Windows.Thickness(0),

@@ -22,17 +22,22 @@ public static class CaptureService
 
     public static Task<BitmapSource?> CaptureScreenAsync(Window owner) => CaptureScreenAsync(owner, CancellationToken.None);
 
-    public static Task<BitmapSource?> CaptureRegionAsync(Window owner, CancellationToken cancellationToken) => CaptureAsync(owner, true, cancellationToken);
+    public static async Task<BitmapSource?> CaptureRegionAsync(Window owner, CancellationToken cancellationToken) =>
+        (await CaptureAsync(owner, true, false, cancellationToken)).Raw;
 
-    public static Task<BitmapSource?> CaptureScreenAsync(Window owner, CancellationToken cancellationToken) => CaptureAsync(owner, false, cancellationToken);
+    public static async Task<BitmapSource?> CaptureScreenAsync(Window owner, CancellationToken cancellationToken) =>
+        (await CaptureAsync(owner, false, false, cancellationToken)).Raw;
 
-    private static async Task<BitmapSource?> CaptureAsync(Window owner, bool region, CancellationToken cancellationToken)
+    public static async Task<CaptureSessionResult> CaptureEditedRegionAsync(Window owner, CancellationToken cancellationToken = default) =>
+        (await CaptureAsync(owner, true, true, cancellationToken)).Edited;
+
+    private static async Task<(BitmapSource? Raw, CaptureSessionResult Edited)> CaptureAsync(Window owner, bool region, bool editing, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(owner);
         owner.Dispatcher.VerifyAccess();
         cancellationToken.ThrowIfCancellationRequested();
         if (Interlocked.CompareExchange(ref _capturing, 1, 0) != 0)
-            return null;
+            return (null, new(CaptureCompletion.Cancelled));
 
         Visibility visibility = owner.Visibility;
         WindowState state = owner.WindowState;
@@ -50,9 +55,9 @@ public static class CaptureService
         {
             CaptureStateChanged?.Invoke(null, EventArgs.Empty);
             owner.Hide();
-            await Task.Delay(100, lifetime.Token);
+            if (visibility == Visibility.Visible) await Task.Delay(100, lifetime.Token);
             if (ownerClosed)
-                return null;
+                return (null, new(CaptureCompletion.Cancelled));
 
             lifetime.Token.ThrowIfCancellationRequested();
             // A tray action may have shown the owner during the delay. Hide again without
@@ -63,9 +68,9 @@ public static class CaptureService
             BitmapSource screenshot = CaptureDesktop(bounds);
             lifetime.Token.ThrowIfCancellationRequested();
             if (!region)
-                return screenshot;
+                return (screenshot, new(CaptureCompletion.Cancelled));
 
-            overlay = new RegionOverlay(screenshot, bounds) { Owner = owner };
+            overlay = new RegionOverlay(screenshot, bounds, editing) { Owner = owner };
             using CancellationTokenRegistration cancelSelection = lifetime.Token.Register(() =>
             {
                 if (!owner.Dispatcher.HasShutdownStarted)
@@ -75,20 +80,22 @@ public static class CaptureService
             overlay.ShowDialog();
             lifetime.Token.ThrowIfCancellationRequested();
             if (ownerClosed)
-                return null;
+                return (null, new(CaptureCompletion.Cancelled));
             if (overlay.Failure is not null)
                 throw overlay.Failure;
+            if (editing)
+                return (null, overlay.Result);
             Int32Rect selection = overlay.Selection;
             if (selection.Width == 0 || selection.Height == 0)
-                return null;
+                return (null, new(CaptureCompletion.Cancelled));
 
             var cropped = new CroppedBitmap(screenshot, selection);
             cropped.Freeze();
-            return cropped;
+            return (cropped, new(CaptureCompletion.Cancelled));
         }
         catch (OperationCanceledException) when (ownerClosed && !cancellationToken.IsCancellationRequested)
         {
-            return null;
+            return (null, new(CaptureCompletion.Cancelled));
         }
         finally
         {
@@ -99,7 +106,11 @@ public static class CaptureService
                 if (!ownerClosed)
                 {
                     owner.WindowState = state;
-                    if (visibility == Visibility.Visible)
+                    if (editing && overlay?.Result.Completion is CaptureCompletion.Copied or CaptureCompletion.Saved or CaptureCompletion.Workbench or CaptureCompletion.Ocr)
+                    {
+                        owner.Hide();
+                    }
+                    else if (visibility == Visibility.Visible)
                     {
                         owner.Show();
                         owner.Activate();
