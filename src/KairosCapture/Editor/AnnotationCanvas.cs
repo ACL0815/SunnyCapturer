@@ -24,15 +24,28 @@ public sealed class AnnotationCanvas : Canvas
         internal Point Offset;
         internal string Text = "";
         internal double TextWidth;
+        internal double ScaleX = 1, ScaleY = 1;
     }
 
     private sealed record Edit(Action Undo, Action Redo);
+    private sealed record State(Geometry Geometry, Rect Bounds, Point Offset, string Text,
+        double ScaleX, double ScaleY);
+    [Flags]
+    private enum Handle
+    {
+        None = 0, Left = 1, Right = 2, Top = 4, Bottom = 8,
+        TopLeft = Left | Top, TopRight = Right | Top,
+        BottomLeft = Left | Bottom, BottomRight = Right | Bottom
+    }
 
     private readonly BitmapSource _image;
     private readonly List<Annotation> _items = new();
     private readonly Stack<Edit> _undo = new();
     private readonly Stack<Edit> _redo = new();
-    private Annotation? _selected, _draft, _moving, _textItem;
+    private Annotation? _selected, _draft, _moving, _resizing, _textItem;
+    private State? _beforeResize;
+    private Rect _resizeBounds;
+    private Handle _resizeHandle;
     private TextBox? _textBox;
     private PolyLineSegment? _penPoints;
     private Point _start, _originalOffset;
@@ -146,15 +159,13 @@ public sealed class AnnotationCanvas : Canvas
             else Notify();
             return;
         }
-        Point oldOffset = item.Offset;
+        State oldState = Snapshot(item);
         SetText(item, text);
         item.Offset = ClampOffset(item, item.Offset);
-        Point newOffset = item.Offset;
+        State newState = Snapshot(item);
         _selected = item;
         if (isNew) Add(item);
-        else Record(
-            () => { SetText(item, before); item.Offset = oldOffset; },
-            () => { SetText(item, text); item.Offset = newOffset; });
+        else Record(() => Restore(item, oldState), () => Restore(item, newState));
     }
 
     /// <summary>Exports at 96 DPI, where one canvas unit is exactly one output pixel.</summary>
@@ -177,9 +188,12 @@ public sealed class AnnotationCanvas : Canvas
         if (_selected != null && _textBox == null && Tool == EditorTool.Select)
         {
             Rect bounds = WorldBounds(_selected);
-            bounds.Inflate(3, 3);
-            drawing.DrawRectangle(null, new Pen(Brushes.Black, 3), bounds);
-            drawing.DrawRectangle(null, new Pen(_stroke, 1) { DashStyle = DashStyles.Dash }, bounds);
+            double unit = DisplayUnit();
+            drawing.DrawRectangle(null, new Pen(Brushes.Black, 3 * unit), bounds);
+            drawing.DrawRectangle(null, new Pen(Brushes.White, unit) { DashStyle = DashStyles.Dash }, bounds);
+            foreach ((Handle _, Point center) in Handles(_selected))
+                drawing.DrawRectangle(Brushes.White, new Pen(Brushes.Black, unit),
+                    new Rect(center.X - 4 * unit, center.Y - 4 * unit, 8 * unit, 8 * unit));
         }
     }
 
@@ -204,7 +218,7 @@ public sealed class AnnotationCanvas : Canvas
                 new Point(Math.Ceiling(bounds.Right), Math.Ceiling(bounds.Bottom))));
             return;
         }
-        drawing.PushTransform(new TranslateTransform(item.Offset.X, item.Offset.Y));
+        drawing.PushTransform(new MatrixTransform(item.ScaleX, 0, 0, item.ScaleY, item.Offset.X, item.Offset.Y));
         if (item.Tool == EditorTool.Highlight)
         {
             drawing.PushOpacity(0.3);
@@ -229,14 +243,18 @@ public sealed class AnnotationCanvas : Canvas
         if (_textBox?.IsMouseOver == true) return;
         Focus();
         BeginGesture(e.GetPosition(this), e.ClickCount);
-        if ((_draft != null || _moving != null) && !CaptureMouse()) EndGesture(true);
+        if ((_draft != null || _moving != null || _resizing != null) && !CaptureMouse()) EndGesture(true);
         e.Handled = true;
     }
 
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
-        if (_draft == null && _moving == null) return;
+        if (_draft == null && _moving == null && _resizing == null)
+        {
+            if (Tool == EditorTool.Select) Cursor = HandleCursor(HitHandle(e.GetPosition(this)));
+            return;
+        }
         if (e.LeftButton != MouseButtonState.Pressed) EndGesture();
         else UpdateGesture(e.GetPosition(this));
         e.Handled = true;
@@ -245,7 +263,7 @@ public sealed class AnnotationCanvas : Canvas
     protected override void OnMouseLeftButtonUp(MouseButtonEventArgs e)
     {
         base.OnMouseLeftButtonUp(e);
-        if (_draft == null && _moving == null) return;
+        if (_draft == null && _moving == null && _resizing == null) return;
         UpdateGesture(e.GetPosition(this));
         EndGesture();
         e.Handled = true;
@@ -260,11 +278,29 @@ public sealed class AnnotationCanvas : Canvas
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
-        if (e.Key != Key.Escape || _textBox != null) return;
-        EndGesture(true);
-        _selected = null;
-        InvalidateVisual();
-        e.Handled = true;
+        if (!e.Handled) e.Handled = HandleKey(e.Key, Keyboard.Modifiers);
+    }
+
+    internal bool HandleKey(Key key, ModifierKeys modifiers = ModifierKeys.None)
+    {
+        // A focused TextBox owns normal text editing, including Delete and its local undo.
+        if (_textBox != null)
+        {
+            if (key != Key.Escape) return false;
+            CloseTextBox();
+        }
+        else if (key == Key.Delete && modifiers == ModifierKeys.None) DeleteSelected();
+        else if (key == Key.Z && modifiers == ModifierKeys.Control) Undo();
+        else if (key == Key.Y && modifiers == ModifierKeys.Control ||
+            key == Key.Z && modifiers == (ModifierKeys.Control | ModifierKeys.Shift)) Redo();
+        else if (key != Key.Escape) return false;
+        if (key == Key.Escape)
+        {
+            EndGesture(true);
+            _selected = null;
+        }
+        Notify();
+        return true;
     }
 
     // These gesture methods are also used by the offline STA self-check; no synthetic input is needed.
@@ -281,8 +317,18 @@ public sealed class AnnotationCanvas : Canvas
         }
         if (Tool == EditorTool.Select)
         {
-            _selected = _moving = hit;
-            if (hit != null) _originalOffset = hit.Offset;
+            _resizeHandle = HitHandle(_start);
+            if (_resizeHandle != Handle.None && _selected != null)
+            {
+                _resizing = _selected;
+                _beforeResize = Snapshot(_resizing);
+                _resizeBounds = WorldBounds(_resizing);
+            }
+            else
+            {
+                _selected = _moving = hit;
+                if (hit != null) _originalOffset = hit.Offset;
+            }
         }
         else
         {
@@ -301,13 +347,18 @@ public sealed class AnnotationCanvas : Canvas
             }
             UpdateGesture(_start);
         }
-        InvalidateVisual();
+        Notify();
     }
 
     internal void UpdateGesture(Point point)
     {
         point = ClampPoint(point);
-        if (_moving != null)
+        if (_resizing != null)
+        {
+            if ((point - _start).Length < 2 && !_gestureChanged) return;
+            Resize(point);
+        }
+        else if (_moving != null)
         {
             if ((point - _start).Length < 2 && !_gestureChanged) return;
             _moving.Offset = ClampOffset(_moving, _originalOffset + (point - _start));
@@ -342,8 +393,10 @@ public sealed class AnnotationCanvas : Canvas
 
     internal void EndGesture(bool cancel = false)
     {
-        Annotation? draft = _draft, moving = _moving;
-        _draft = _moving = null;
+        Annotation? draft = _draft, moving = _moving, resizing = _resizing;
+        State? beforeResize = _beforeResize;
+        _draft = _moving = _resizing = null;
+        _beforeResize = null;
         _penPoints = null;
         _gestureChanged = false;
         if (IsMouseCaptured) ReleaseMouseCapture();
@@ -353,13 +406,20 @@ public sealed class AnnotationCanvas : Canvas
             _selected = draft;
             Add(draft);
         }
+        else if (resizing != null && beforeResize != null)
+        {
+            State after = Snapshot(resizing);
+            if (cancel) Restore(resizing, beforeResize);
+            else if (beforeResize != after)
+                Record(() => Restore(resizing, beforeResize), () => Restore(resizing, after));
+        }
         else if (moving != null)
         {
             Point before = _originalOffset, after = moving.Offset;
             if (cancel) moving.Offset = before;
             else if (before != after) Record(() => moving.Offset = before, () => moving.Offset = after);
         }
-        if (draft != null || moving != null) Notify();
+        if (draft != null || moving != null || resizing != null) Notify();
     }
 
     private static bool IsValid(Annotation item) => !item.Bounds.IsEmpty &&
@@ -394,13 +454,14 @@ public sealed class AnnotationCanvas : Canvas
         for (int i = _items.Count - 1; i >= 0; i--)
         {
             Annotation item = _items[i];
-            Point local = new(point.X - item.Offset.X, point.Y - item.Offset.Y);
+            Point local = new((point.X - item.Offset.X) / item.ScaleX, (point.Y - item.Offset.Y) / item.ScaleY);
             Rect bounds = item.Bounds;
-            bounds.Inflate(Math.Max(5, item.Thickness / 2), Math.Max(5, item.Thickness / 2));
+            double tolerance = 5 * DisplayUnit() / Math.Min(item.ScaleX, item.ScaleY);
+            bounds.Inflate(Math.Max(tolerance, item.Thickness / 2), Math.Max(tolerance, item.Thickness / 2));
             if (!bounds.Contains(local)) continue;
             if (item.Tool != EditorTool.Pen && item.Tool != EditorTool.Arrow ||
                 item.Geometry.FillContains(local) ||
-                item.Geometry.StrokeContains(new Pen(Brushes.Black, Math.Max(10, item.Thickness + 6)), local))
+                item.Geometry.StrokeContains(new Pen(Brushes.Black, Math.Max(tolerance * 2, item.Thickness + 6)), local))
                 return item;
         }
         return null;
@@ -410,14 +471,117 @@ public sealed class AnnotationCanvas : Canvas
         Math.Clamp(point.X, 0, Width), Math.Clamp(point.Y, 0, Height));
 
     private Point ClampOffset(Annotation item, Point offset) => new(
-        Math.Clamp(offset.X, -item.Bounds.Left, Math.Max(-item.Bounds.Left, Width - item.Bounds.Right)),
-        Math.Clamp(offset.Y, -item.Bounds.Top, Math.Max(-item.Bounds.Top, Height - item.Bounds.Bottom)));
+        Math.Clamp(offset.X, -item.Bounds.Left * item.ScaleX,
+            Math.Max(-item.Bounds.Left * item.ScaleX, Width - item.Bounds.Right * item.ScaleX)),
+        Math.Clamp(offset.Y, -item.Bounds.Top * item.ScaleY,
+            Math.Max(-item.Bounds.Top * item.ScaleY, Height - item.Bounds.Bottom * item.ScaleY)));
 
     private static Rect WorldBounds(Annotation item)
     {
-        Rect bounds = item.Bounds;
-        bounds.Offset(item.Offset.X, item.Offset.Y);
-        return bounds;
+        return new Rect(item.Bounds.Left * item.ScaleX + item.Offset.X,
+            item.Bounds.Top * item.ScaleY + item.Offset.Y,
+            item.Bounds.Width * item.ScaleX, item.Bounds.Height * item.ScaleY);
+    }
+
+    // Immutable geometry plus small per-object state makes edits exact and independently reversible.
+    private static State Snapshot(Annotation item) => new(item.Geometry, item.Bounds, item.Offset,
+        item.Text, item.ScaleX, item.ScaleY);
+
+    private static void Restore(Annotation item, State state)
+    {
+        item.Geometry = state.Geometry;
+        item.Bounds = state.Bounds;
+        item.Offset = state.Offset;
+        item.Text = state.Text;
+        item.ScaleX = state.ScaleX;
+        item.ScaleY = state.ScaleY;
+    }
+
+    internal Rect SelectionBounds => _selected == null ? Rect.Empty : WorldBounds(_selected);
+
+    private IEnumerable<(Handle Handle, Point Center)> Handles(Annotation item)
+    {
+        Rect b = WorldBounds(item);
+        if (item.Tool == EditorTool.Pen || b.Width < 0.01 || b.Height < 0.01) yield break;
+        yield return (Handle.Left | Handle.Top, b.TopLeft);
+        yield return (Handle.Right | Handle.Top, b.TopRight);
+        yield return (Handle.Right | Handle.Bottom, b.BottomRight);
+        yield return (Handle.Left | Handle.Bottom, b.BottomLeft);
+        if (item.Tool == EditorTool.Text) yield break; // Text keeps its original letter proportions.
+        yield return (Handle.Left, new Point(b.Left, b.Top + b.Height / 2));
+        yield return (Handle.Right, new Point(b.Right, b.Top + b.Height / 2));
+        yield return (Handle.Top, new Point(b.Left + b.Width / 2, b.Top));
+        yield return (Handle.Bottom, new Point(b.Left + b.Width / 2, b.Bottom));
+    }
+
+    private Handle HitHandle(Point point)
+    {
+        if (_selected == null || Tool != EditorTool.Select || _textBox != null) return Handle.None;
+        double radius = 6 * DisplayUnit(), best = double.PositiveInfinity;
+        Handle result = Handle.None;
+        foreach ((Handle handle, Point center) in Handles(_selected))
+        {
+            Vector delta = point - center;
+            if (Math.Abs(delta.X) <= radius && Math.Abs(delta.Y) <= radius && delta.LengthSquared < best)
+            {
+                best = delta.LengthSquared;
+                result = handle;
+            }
+        }
+        return result;
+    }
+
+    private double DisplayUnit()
+    {
+        // This canvas is commonly inside a Viewbox; handles stay eight display DIPs wide.
+        if (PresentationSource.FromVisual(this)?.RootVisual is not Visual root || root == this) return 1;
+        GeneralTransform transform = TransformToAncestor(root);
+        Point origin = transform.Transform(new Point());
+        double scale = Math.Max((transform.Transform(new Point(1, 0)) - origin).Length,
+            (transform.Transform(new Point(0, 1)) - origin).Length);
+        return 1 / Math.Max(0.01, scale);
+    }
+
+    private static Cursor HandleCursor(Handle handle) => handle switch
+    {
+        Handle.Left or Handle.Right => Cursors.SizeWE,
+        Handle.Top or Handle.Bottom => Cursors.SizeNS,
+        Handle.TopLeft or Handle.BottomRight => Cursors.SizeNWSE,
+        Handle.TopRight or Handle.BottomLeft => Cursors.SizeNESW,
+        _ => Cursors.Arrow
+    };
+
+    private void Resize(Point point)
+    {
+        if (_resizing == null || _beforeResize == null) return;
+        Rect b = _resizeBounds;
+        bool left = _resizeHandle.HasFlag(Handle.Left), right = _resizeHandle.HasFlag(Handle.Right);
+        bool top = _resizeHandle.HasFlag(Handle.Top), bottom = _resizeHandle.HasFlag(Handle.Bottom);
+        // Use pointer delta so grabbing near a handle never makes the object jump.
+        Vector delta = point - _start;
+        double l = left ? Math.Clamp(b.Left + delta.X, 0, Math.Max(0, b.Right - 2)) : b.Left;
+        double r = right ? Math.Clamp(b.Right + delta.X, Math.Min(Width, b.Left + 2), Width) : b.Right;
+        double t = top ? Math.Clamp(b.Top + delta.Y, 0, Math.Max(0, b.Bottom - 2)) : b.Top;
+        double d = bottom ? Math.Clamp(b.Bottom + delta.Y, Math.Min(Height, b.Top + 2), Height) : b.Bottom;
+        if (_resizing.Tool == EditorTool.Text)
+        {
+            double dx = b.Width + (left ? -delta.X : delta.X);
+            double dy = b.Height + (top ? -delta.Y : delta.Y);
+            double ratio = (dx * b.Width + dy * b.Height) / (b.Width * b.Width + b.Height * b.Height);
+            double maximum = Math.Min((left ? b.Right : Width - b.Left) / b.Width,
+                (top ? b.Bottom : Height - b.Top) / b.Height);
+            double minimum = Math.Min(maximum, Math.Max(2 / b.Width, 2 / b.Height));
+            ratio = Math.Clamp(ratio, minimum, maximum);
+            l = left ? b.Right - b.Width * ratio : b.Left;
+            r = right ? b.Left + b.Width * ratio : b.Right;
+            t = top ? b.Bottom - b.Height * ratio : b.Top;
+            d = bottom ? b.Top + b.Height * ratio : b.Bottom;
+        }
+        _resizing.ScaleX = _beforeResize.ScaleX * (r - l) / b.Width;
+        _resizing.ScaleY = _beforeResize.ScaleY * (d - t) / b.Height;
+        _resizing.Offset = new Point(l - _resizing.Bounds.Left * _resizing.ScaleX,
+            t - _resizing.Bounds.Top * _resizing.ScaleY);
+        _gestureChanged = Snapshot(_resizing) != _beforeResize;
     }
 
     private void BeginText(Annotation? item, Point point)
@@ -437,8 +601,10 @@ public sealed class AnnotationCanvas : Canvas
             Text = item.Text, FontFamily = new FontFamily("Segoe UI"), FontSize = 24,
             Foreground = item.Brush, Background = new SolidColorBrush(Color.FromArgb(40, 0, 0, 0)),
             BorderThickness = new System.Windows.Thickness(0), Padding = new System.Windows.Thickness(0),
-            Width = item.TextWidth, MaxHeight = Math.Max(1, Height - item.Offset.Y),
-            MinHeight = Math.Min(32, Math.Max(1, Height - item.Offset.Y)),
+            Width = Math.Min(item.TextWidth, Width / item.ScaleX),
+            MaxHeight = Math.Max(1, (Height - item.Offset.Y) / item.ScaleY),
+            MinHeight = Math.Min(32, Math.Max(1, (Height - item.Offset.Y) / item.ScaleY)),
+            LayoutTransform = new ScaleTransform(item.ScaleX, item.ScaleY),
             AcceptsReturn = true, TextWrapping = TextWrapping.Wrap,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto
         };
@@ -449,7 +615,7 @@ public sealed class AnnotationCanvas : Canvas
         box.LostKeyboardFocus += (_, _) => { if (_textBox == box && !box.IsKeyboardFocusWithin) CommitText(); };
         box.PreviewKeyDown += (_, e) =>
         {
-            if (e.Key == Key.Escape) { CloseTextBox(); Notify(); e.Handled = true; Focus(); }
+            if (e.Key == Key.Escape) { HandleKey(Key.Escape); e.Handled = true; Focus(); }
             else if (e.Key == Key.Enter && Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
             { CommitText(); e.Handled = true; Focus(); }
         };
@@ -475,8 +641,8 @@ public sealed class AnnotationCanvas : Canvas
         FormattedText formatted = new(text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
             new Typeface("Segoe UI"), 24, item.Brush, 1)
         {
-            MaxTextWidth = item.TextWidth,
-            MaxTextHeight = Height
+            MaxTextWidth = Math.Min(item.TextWidth, Width / item.ScaleX),
+            MaxTextHeight = Height / item.ScaleY
         };
         item.Geometry = formatted.BuildGeometry(new Point());
         if (item.Geometry.CanFreeze) item.Geometry.Freeze();
