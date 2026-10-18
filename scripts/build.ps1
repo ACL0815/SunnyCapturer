@@ -57,13 +57,19 @@ try {
         $kairosPreview = Join-Path $kairosChecks 'main-window.png'
         & $kairosDotnet $kairosAssembly --render-preview $kairosPreview
         $kairosPreviewExit = $LASTEXITCODE
+        $kairosOverlayPreview = Join-Path $kairosChecks 'overlay.png'
+        & $kairosDotnet $kairosAssembly --render-overlay-preview $kairosOverlayPreview
+        $kairosOverlayExit = $LASTEXITCODE
         if ($kairosCheckExit -ne 0) { throw "Offline-Prüfung fehlgeschlagen (Exit $kairosCheckExit). Bericht: $kairosChecks\self-test.json" }
         if ($kairosPreviewExit -ne 0 -or -not (Test-Path -LiteralPath $kairosPreview)) {
             throw "WPF-Vorschau fehlgeschlagen (Exit $kairosPreviewExit)."
         }
+        if ($kairosOverlayExit -ne 0 -or -not (Test-Path -LiteralPath $kairosOverlayPreview)) {
+            throw "Die Vorschau des Aufnahme-Overlays ist fehlgeschlagen (Exit $kairosOverlayExit)."
+        }
         $kairosReport = Get-Content -LiteralPath (Join-Path $kairosChecks 'self-test.json') -Raw | ConvertFrom-Json
         if (-not $kairosReport.passed) { throw 'Der Offline-Bericht enthält fehlgeschlagene oder fehlende Prüfungen.' }
-        Write-Host "Offline-Prüfungen bestanden. WPF-Vorschau: $kairosPreview"
+        Write-Host "Offline-Prüfungen bestanden. Aufnahme-Overlay: $kairosOverlayPreview"
     }
     if (-not $BuildOnly) {
         $kairosOutput = Join-Path $kairosRoot 'artifacts\KairosCapture-0.2.0-win-x64'

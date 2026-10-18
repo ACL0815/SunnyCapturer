@@ -1,12 +1,12 @@
 # Kairos Capture
 
-> Stand 18.10.2026: Die folgende App-Beschreibung ist ein Entwurf. Im aktuellen Checkout fehlt `src/KairosCapture`; Start und Build sind daher noch keine verfügbare Anwendung. Der aktuelle Untersuchungsstand und die geprüfte Technologieabwägung stehen im [Reverse-Engineering-Bericht](docs/kairos/reverse/README.md).
+> Stand 18.10.2026: Der erste gebaute Stand verfehlte den Kernablauf, weil er nach der Auswahl in ein separates Hauptfenster wechselte. Er ist dafür nicht abgenommen. Die verbindliche Korrektur ist [direkte Bearbeitung im offenen Aufnahme-Overlay mit nachträglich veränderbarem Rahmen und editierbaren Markierungen](docs/plans/2026-10-18-live-overlay-correction.md). Umsetzung und Abnahme dieser Korrektur laufen; der [Untersuchungsbericht](docs/kairos/reverse/README.md) bleibt die getrennte Belegbasis.
 
 Native Screenshot-Werkbank für Windows 11, geschrieben in C# mit WPF und .NET 10. Die Oberfläche übernimmt die dunkle Violett-/Lavendel-/Gold-Palette der Nutzervorlage. Die ursprünglichen SunnyCapturer-Dokumente und historischen Quellen bleiben im Repository verfügbar.
 
 ## Starten
 
-Nach dem Build `artifacts\KairosCapture-win-x64\KairosCapture.exe` öffnen. Alternativ:
+Nach dem korrigierten Build `artifacts\KairosCapture-0.2.0-win-x64\KairosCapture.exe` öffnen. Alternativ:
 
 ```powershell
 .\Start-KairosCapture.ps1

@@ -4,7 +4,7 @@ Stand 18.10.2026 · Lead-Architektur Claude Opus 5.5, Ponytail-Stufe *full* · S
 
 Root-Endabnahme: Importbefunde sind unten auf statische Hinweise begrenzt; weder ausgeführte DPI-/Capture-Aufrufe noch die Zulassung einer privaten OpenAI-App werden daraus abgeleitet. Eine feste Null-Pakete-Regel ist kein Grund, eine eigene OIDC-Validierung zu bauen.
 
-Im Checkout gibt es kein `src/`. `KAIROS.md` und `docs/kairos/ARCHITEKTUR.md` beschreiben ein geplantes WPF-Programm. Sie belegen weder einen Build noch eine Messung und wurden hier nicht geändert. Dieses Dokument trennt deshalb strikt zwischen **Beobachtung** (gelesene Bytes, Doku-Wortlaut, Befehlsausgabe), **Inferenz** und **offen**.
+Zum Zeitpunkt dieser Abwägung gab es im Checkout kein `src/`. `KAIROS.md` und `docs/kairos/ARCHITEKTUR.md` beschrieben damals ein geplantes WPF-Programm und belegten weder einen Build noch eine Messung. Spätere Bau- und Abnahmestände sind in [ABNAHME.md](../ABNAHME.md) getrennt dokumentiert. Dieses Dokument trennt **Beobachtung** (gelesene Bytes, Doku-Wortlaut, Befehlsausgabe), **Inferenz** und **offen**.
 
 ## 1. Ergebnis
 

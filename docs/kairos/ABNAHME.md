@@ -1,6 +1,6 @@
 # Kairos Capture: Bau und Abnahme
 
-Stand 18.10.2026. Status: **Release und Offline-Prüfungen bestanden; echte Bedienprüfung offen. Der Bauabzweig wurde nach Nutzerkritik gestoppt. Die Neuentwicklung ersetzt nicht den offenen SunnyCapturer-Untersuchungsauftrag.**
+Stand 18.10.2026. Status: **Der erste Release bestand seine Offline-Prüfungen, verfehlte aber den Produktkern und ist nicht abgenommen.** Nach Nutzerpräzisierung wird die [Overlay-Korrektur](../plans/2026-10-18-live-overlay-correction.md) umgesetzt. Die nachstehende Tabelle beschreibt die bisherigen Prüfungen, nicht die noch ausstehende Abnahme des korrigierten Kerns.
 
 ## Prüfgrenzen
 
@@ -16,6 +16,7 @@ Die SunnyCapturer-Untersuchung und die Nutzerbilder sind die fachliche Referenz.
 | Echte Windows-Bedienung | Aufnahme → Editor → Bearbeitung → Ausgabe; Abbruch und Tastatur | App gestartet (PID 21396, Titel Kairos Capture), weitere Computer-Use-Prüfung durch physisches Esc gestoppt; offen |
 | Echter OpenAI-Login/OCR | Konto-Freigabe, bildfähiges Modell, OCR-Ergebnis | Nutzeranmeldung erforderlich; nicht als Offline-Erfolg behauptet |
 | Hardware-Mixed-DPI | Auswahl und Ausgabe bei unterschiedlichen Monitor-Skalierungen | Nicht abgenommen |
+| Korrigierter Produktkern | Nach MouseUp offenes Overlay, Rahmen-Resize/-Move, weiter editierbare Objekte, gemeinsamer Crop-Export | Neue Implementierung und Root-Abnahme in Arbeit |
 
 ## Werkzeug und Reproduktion
 
