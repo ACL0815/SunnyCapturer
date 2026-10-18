@@ -1,0 +1,26 @@
+# Kernabnahme: Screenshot bleibt direkt bearbeitbar
+
+Diese Abnahme ersetzt die unzureichende Prüfung des ersten separaten Werkbank-Ablaufs. Der Nutzer verlangt ausdrücklich Bearbeitung direkt auf dem aufgenommenen Bildschirm, nachträgliche Rahmenänderung und weiter editierbare Markierungen.
+
+## Reproduzierbare Bedienfolge
+
+| Schritt | Mussverhalten |
+| --- | --- |
+| Aufnahme starten, Bereich aufziehen, Maus loslassen | Eingefrorener Bildschirm und Auswahl bleiben sichtbar. Die Werkzeugleiste erscheint am Ausschnitt; es erfolgt kein automatischer Wechsel ins Hauptfenster. |
+| Jeden der acht Rahmengriffe ziehen | Ausschnitt lässt sich auch nach dem Loslassen verkleinern und vergrößern. Die Abmessungen entsprechen dem aktuellen Rahmen. |
+| Rahmen über seine ursprünglichen Grenzen vergrößern | Zusätzliche Pixel stammen aus derselben vollständigen Bildschirmaufnahme. Die Auswahl ist nicht auf das erste Crop-Bitmap beschränkt. |
+| Leertaste gedrückt halten und Rahmen ziehen | Der Ausschnitt lässt sich innerhalb des aufgenommenen Desktops verschieben. |
+| Rechteck, Pfeil, Text und Schwärzung setzen | Objekte erscheinen unmittelbar an der gewählten Stelle im Aufnahme-Overlay. |
+| Auswahlwerkzeug: vorhandenes Objekt greifen und verschieben; anschließend skalieren | Dasselbe Objekt wird verändert. Formen haben Griffe, Text bleibt proportional skalierbar. |
+| Bestehenden Text doppelklicken; Inhalt ändern; Farbe/Strichstärke ändern | Die Markierung bleibt als eigenes Objekt bearbeitbar. TextBox-Tasten und normale Leerzeichen bleiben Texteingaben. |
+| Rahmen verkleinern und wieder vergrößern | Zuvor angelegte Objekte und ihre History bleiben erhalten, auch wenn sie zeitweise außerhalb des Ausschnitts lagen. |
+| Mehrfach Undo und Redo | Objektänderungen werden nachvollziehbar zurückgenommen und wiederhergestellt; kein stilles Rastern oder Verlust der einzelnen Objekte. |
+| Kopieren bzw. PNG speichern | Exakt der aktuelle Ausschnitt mit den aktuellen Markierungen wird ausgegeben. Maske, Rahmen, Griffe und Werkzeugleiste erscheinen nicht im Bild. Das Hauptfenster wird dadurch nicht geöffnet. |
+| Explizit OCR oder Werkbank wählen | Derselbe Editor samt Objekten, Crop und History wird übergeben. Kopieren, Speichern und OCR verwenden denselben aktuellen Crop-Export. |
+| Escape / Abbrechen | Sitzung endet ohne Ausgabe. Textbearbeitung und laufende Gesten werden nach ihrem aktuellen Kontext behandelt; keine Eingabe wird versehentlich als neuer Auswahlrahmen aufgefasst. |
+
+## Belegarten
+
+Die neuen `OverlaySelfChecks` prüfen die Zustands- und Pixelverträge ohne echte Aufnahme, Clipboard-Änderung, sichtbare Fenster oder Kontozugriff. `--render-overlay-preview` rendert die echte WPF-Oberfläche mit einem lokalen synthetischen Testbild. Beides wird nach Integration von Root ausgeführt und visuell geprüft.
+
+Die physische Computer-Use-Steuerung wurde durch Esc beendet und wird in diesem laufenden Turn nicht erneut benutzt. Die obige vollständige reale Maus-/Tastaturfolge gilt deshalb bis zu einer tatsächlichen Ausführung als **offen**, auch wenn Offline-Prüfungen und Vorschau grün sind. Mixed-DPI und echte OpenAI-OCR bleiben separate Laufzeitprüfungen.
