@@ -8,12 +8,17 @@ param(
 $ErrorActionPreference = 'Stop'
 $kairosRoot = Split-Path -Parent $PSScriptRoot
 $kairosProject = Join-Path $kairosRoot 'src\KairosCapture\KairosCapture.csproj'
-$kairosPrivateDotnet = 'C:\Users\Axel_desktop\.t3\projects\kapture\.tools\dotnet\dotnet.exe'
+$kairosPrivateDotnet = Join-Path $kairosRoot '.tools\dotnet\dotnet.exe'
+$kairosSdkHintPath = Join-Path $kairosRoot '.tools\dotnet-sdk-path.txt'
 if ($DotnetPath) {
     $kairosDotnet = (Get-Item -LiteralPath $DotnetPath -ErrorAction Stop).FullName
 }
 elseif (Test-Path -LiteralPath $kairosPrivateDotnet -PathType Leaf) {
     $kairosDotnet = $kairosPrivateDotnet
+}
+elseif ((Test-Path -LiteralPath $kairosSdkHintPath -PathType Leaf) -and
+        (Test-Path -LiteralPath (Get-Content -LiteralPath $kairosSdkHintPath -Raw).Trim() -PathType Leaf)) {
+    $kairosDotnet = (Get-Content -LiteralPath $kairosSdkHintPath -Raw).Trim()
 }
 else {
     $kairosCommand = Get-Command dotnet -CommandType Application -ErrorAction SilentlyContinue
@@ -61,7 +66,7 @@ try {
         Write-Host "Offline-Prüfungen bestanden. WPF-Vorschau: $kairosPreview"
     }
     if (-not $BuildOnly) {
-        $kairosOutput = Join-Path $kairosRoot 'artifacts\KairosCapture-win-x64'
+        $kairosOutput = Join-Path $kairosRoot 'artifacts\KairosCapture-0.2.0-win-x64'
         & $kairosDotnet publish $kairosProject -c Release -r win-x64 --self-contained false --no-restore --nologo -o $kairosOutput
         if ($LASTEXITCODE -ne 0) { throw 'Frameworkabhängiger Publish-Build fehlgeschlagen.' }
         Write-Host "Startbereit: $(Join-Path $kairosOutput 'KairosCapture.exe')"
