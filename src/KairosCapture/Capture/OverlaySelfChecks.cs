@@ -142,7 +142,8 @@ public static class OverlaySelfChecks
             editor.BeginGesture(new Point(100, 90)); editor.EndGesture();
             Require(ReferenceEquals(identity, editor.SelectedIdentity) && before.SequenceEqual(Bytes(editor.Flatten())),
                 gesture + " Escape must retain the original object and exact redo pixels.");
-            Require(overlay.HandleSessionKey(Key.Escape) && overlay.IsClosed, "The next idle Escape must cancel the session.");
+            Require(overlay.HandleSessionKey(Key.Escape) && !overlay.IsClosed && editor.SelectedIdentity == null &&
+                overlay.HandleSessionKey(Key.Escape) && overlay.IsClosed, "Idle Escape must deselect first, then cancel the session.");
         }
         var raw = new RegionOverlay(background, new DrawingRectangle(0, 0, background.PixelWidth, background.PixelHeight), editing: false);
         raw.BeginFrameGesture(new Point(30, 20)); raw.UpdateFrameGesture(new Point(200, 180));

@@ -41,6 +41,12 @@ internal static class AppDiagnostics
         if (args[0] == "--render-overlay-preview") { RenderOverlayPreview(previewPath); return 0; }
         if (args[0] == "--render-ocr-preview") { RenderOcrPreview(previewPath); return 0; }
         if (args[0] == "--render-tray-preview") { RenderTrayPreview(previewPath); return 0; }
+        if (args[0] == "--render-editor-preview")
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(previewPath)!);
+            File.WriteAllBytes(previewPath, ImageOutput.EncodePng(EditorSelfChecks.RenderPreview(CreateDemoBitmap())));
+            return 0;
+        }
         if (args[0] is not ("--self-test" or "--self-check")) return 2;
         string directory = Path.GetFullPath(args[1]);
         Directory.CreateDirectory(directory);

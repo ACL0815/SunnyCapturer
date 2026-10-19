@@ -6,6 +6,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using KairosCapture.Capture;
 
 namespace KairosCapture.Editor;
 
@@ -22,6 +23,10 @@ public static class EditorSelfChecks
             pixels[i + 3] = 128;
         }
         BitmapSource source = BitmapSource.Create(128, 96, 144, 144, PixelFormats.Bgra32, null, pixels, 128 * 4);
+        CheckDrawingToolSelection(source);
+        CheckDrawingToolHistoryAndStyle(source);
+        CheckArrowEndpoints(source);
+        CheckSelectionEscapeAndRouting(source);
         AnnotationCanvas canvas = new(source);
         Require(!source.IsFrozen, "The caller's image must not be frozen by the editor.");
         Require(canvas.Width == 128 && canvas.Height == 96 && !canvas.HasChanges && !canvas.CanUndo,
@@ -42,6 +47,7 @@ public static class EditorSelfChecks
         AnnotationCanvas layered = new(source) { Stroke = Brushes.Red };
         Draw(layered, EditorTool.Redact, new Point(10, 10), new Point(60, 60));
         Draw(layered, EditorTool.Highlight, new Point(0, 0), new Point(80, 80));
+        layered.HandleKey(Key.Escape); // Start an independent stroke inside the highlight.
         Draw(layered, EditorTool.Pen, new Point(0, 30), new Point(80, 30));
         RequireBlackArea(layered.Flatten(), new Int32Rect(10, 10, 50, 50));
         layered.Undo();
@@ -147,6 +153,177 @@ public static class EditorSelfChecks
         CheckPenAndStacking(source);
         CheckEditingBounds(source);
     }
+
+    private static void CheckDrawingToolSelection(BitmapSource source)
+    {
+        foreach (EditorTool tool in new[] { EditorTool.Rectangle, EditorTool.Ellipse, EditorTool.Highlight, EditorTool.Redact })
+        {
+            AnnotationCanvas canvas = new(source) { Stroke = Brushes.Black };
+            Draw(canvas, tool, new Point(20, 20), new Point(60, 60));
+            object? identity = canvas.SelectedIdentity;
+            Require(identity != null && canvas.Tool == tool && Near(canvas.SelectionBounds, new Rect(20, 20, 40, 40)),
+                $"{tool} must remain active with the new object selected.");
+            byte[] exported = Bytes(canvas.Flatten());
+            BitmapSource ui = Render(canvas);
+            Require(!Equal(exported, Bytes(ui)) && IsWhite(ui, 20, 20),
+                $"{tool} must immediately show white square handles in the drawing tool.");
+            Require(Equal(exported, Bytes(canvas.Flatten())), "Drawing-tool handles must never reach Flatten.");
+            Require(canvas.CursorAt(new Point(60, 60)) == Cursors.SizeNWSE &&
+                canvas.CursorAt(new Point(40, 40)) == Cursors.SizeAll && canvas.CursorAt(new Point(110, 80)) == Cursors.Cross,
+                "Drawing-tool hover must distinguish resize, move and a new drawing.");
+            canvas.BeginGesture(new Point(61, 61)); // Grab off-center without a jump.
+            canvas.UpdateGesture(new Point(71, 66));
+            canvas.UpdateGesture(new Point(81, 76));
+            canvas.EndGesture();
+            Require(ReferenceEquals(identity, canvas.SelectedIdentity) && canvas.Tool == tool &&
+                Near(canvas.SelectionBounds, new Rect(20, 20, 60, 55)), $"{tool} handle must resize the selected object.");
+            canvas.Undo();
+            Require(Equal(exported, Bytes(canvas.Flatten())) && canvas.SelectedIdentity == null,
+                "One undo must revert the entire resize and clear selection.");
+            canvas.Redo();
+            canvas.Tool = EditorTool.Select;
+            canvas.BeginGesture(new Point(40, 40)); canvas.EndGesture();
+            canvas.Tool = tool;
+            Rect beforeMove = canvas.SelectionBounds;
+            canvas.BeginGesture(new Point(40, 40));
+            canvas.UpdateGesture(new Point(45, 44));
+            canvas.UpdateGesture(new Point(50, 48));
+            canvas.EndGesture();
+            Require(Near(canvas.SelectionBounds, new Rect(beforeMove.TopLeft + new Vector(10, 8), beforeMove.Size)) &&
+                ReferenceEquals(identity, canvas.SelectedIdentity) && canvas.Tool == tool,
+                $"{tool} must move its selected object without changing the active tool.");
+            canvas.HandleKey(Key.Delete);
+            Require(canvas.SelectedIdentity == null && Equal(Bytes(new AnnotationCanvas(source).Flatten()), Bytes(canvas.Flatten())),
+                "Delete in a drawing tool must delete the selected object.");
+        }
+
+        AnnotationCanvas pen = new(source) { Stroke = Brushes.Black };
+        Draw(pen, EditorTool.Pen, new Point(20, 20), new Point(60, 50));
+        pen.BeginGesture(new Point(60, 50)); pen.UpdateGesture(new Point(70, 58)); pen.EndGesture();
+        Require(pen.Tool == EditorTool.Pen && Near(pen.SelectionBounds, new Rect(30, 28, 40, 30)),
+            "A selected pen stroke must move as a whole in its drawing tool.");
+    }
+
+    private static void CheckDrawingToolHistoryAndStyle(BitmapSource source)
+    {
+        AnnotationCanvas canvas = new(source) { Stroke = Brushes.Black };
+        Draw(canvas, EditorTool.Rectangle, new Point(20, 20), new Point(60, 60));
+        byte[] original = Bytes(canvas.Flatten());
+        canvas.BeginGesture(new Point(40, 40));
+        canvas.UpdateGesture(new Point(45, 42)); canvas.UpdateGesture(new Point(50, 45)); canvas.EndGesture();
+        byte[] moved = Bytes(canvas.Flatten());
+        canvas.BeginGesture(canvas.SelectionBounds.BottomRight);
+        canvas.UpdateGesture(new Point(80, 80)); canvas.UpdateGesture(new Point(90, 85)); canvas.EndGesture();
+        byte[] resized = Bytes(canvas.Flatten());
+        canvas.Undo(); Require(Equal(moved, Bytes(canvas.Flatten())), "Resize must be one undo step after move.");
+        canvas.Undo(); Require(Equal(original, Bytes(canvas.Flatten())), "Move must be exactly one undo step.");
+        canvas.Undo();
+        Require(!canvas.CanUndo && canvas.SelectedIdentity == null && Equal(Bytes(new AnnotationCanvas(source).Flatten()), Bytes(canvas.Flatten())),
+            "Undo drawing must remove the object and its selection.");
+        canvas.Redo(); canvas.Redo(); canvas.Redo();
+        Require(Equal(resized, Bytes(canvas.Flatten())), "Redo must preserve add/move/resize granularity.");
+
+        AnnotationCanvas next = new(source) { Stroke = Brushes.Black };
+        Draw(next, EditorTool.Rectangle, new Point(10, 10), new Point(40, 40));
+        object? first = next.SelectedIdentity;
+        Draw(next, EditorTool.Rectangle, new Point(80, 50), new Point(110, 80));
+        Require(next.SelectedIdentity != null && !ReferenceEquals(first, next.SelectedIdentity) &&
+            Near(next.SelectionBounds, new Rect(80, 50, 30, 30)), "Dragging beside selection must immediately draw a new object.");
+        // Even a hit on an unselected object begins a new draft in the drawing tool.
+        next.BeginGesture(new Point(25, 25)); next.UpdateGesture(new Point(25.2, 25.2)); next.EndGesture();
+        Require(next.SelectedIdentity == null, "A tiny click outside the selected object must only deselect.");
+        next.Undo(); next.Undo();
+        Require(!next.CanUndo && Equal(Bytes(new AnnotationCanvas(source).Flatten()), Bytes(next.Flatten())), "Tiny deselection must not introduce history.");
+
+        AnnotationCanvas style = new(source) { Stroke = Brushes.Black };
+        Draw(style, EditorTool.Rectangle, new Point(20, 20), new Point(60, 60));
+        byte[] black = Bytes(style.Flatten());
+        style.Stroke = Brushes.Red;
+        byte[] red = Bytes(style.Flatten());
+        Require(!Equal(black, red) && style.Tool == EditorTool.Rectangle, "Colour must update the selected object in its drawing tool.");
+        style.Thickness = 9;
+        byte[] thick = Bytes(style.Flatten());
+        Require(!Equal(red, thick), "Thickness must update the selected object in its drawing tool.");
+        style.Undo(); Require(Equal(red, Bytes(style.Flatten())), "Thickness must undo independently.");
+        style.Undo(); Require(Equal(black, Bytes(style.Flatten())), "Colour must undo independently.");
+        Require(((SolidColorBrush)style.Stroke).Color == Colors.Red && style.Thickness == 9,
+            "Undoing object style must retain the next object's tool defaults.");
+        Draw(style, EditorTool.Rectangle, new Point(80, 50), new Point(110, 80));
+        Require(Pixel(style.Flatten(), 95, 50)[2] == 255 && Pixel(style.Flatten(), 95, 50)[1] == 0,
+            "The next object must use the retained drawing colour.");
+    }
+
+    private static void CheckArrowEndpoints(BitmapSource source)
+    {
+        AnnotationCanvas arrow = new(source) { Stroke = Brushes.Black };
+        Draw(arrow, EditorTool.Arrow, new Point(20, 30), new Point(80, 30));
+        byte[] original = Bytes(arrow.Flatten());
+        BitmapSource ui = Render(arrow);
+        Require(arrow.Tool == EditorTool.Arrow && IsWhite(ui, 20, 30) && IsWhite(ui, 80, 30),
+            "An arrow must immediately show its two endpoint handles.");
+        arrow.BeginGesture(new Point(20, 30)); arrow.UpdateGesture(new Point(25, 45));
+        arrow.UpdateGesture(new Point(30, 60)); arrow.EndGesture();
+        byte[] changed = Bytes(arrow.Flatten());
+        Require(!Equal(original, changed) && IsWhite(Render(arrow), 30, 60) && IsWhite(Render(arrow), 80, 30),
+            "Dragging an arrow endpoint must move that endpoint and retain the opposite one.");
+        arrow.Undo(); Require(Equal(original, Bytes(arrow.Flatten())), "Arrow endpoint resize must undo in one step.");
+        arrow.Redo(); Require(Equal(changed, Bytes(arrow.Flatten())), "Arrow endpoint resize must redo exactly.");
+        arrow.Tool = EditorTool.Select;
+        arrow.BeginGesture(new Point(55, 45)); arrow.EndGesture();
+        arrow.Tool = EditorTool.Arrow;
+        arrow.BeginGesture(new Point(55, 45)); arrow.UpdateGesture(new Point(65, 50)); arrow.EndGesture();
+        Require(IsWhite(Render(arrow), 40, 65) && IsWhite(Render(arrow), 90, 35),
+            "Moving an arrow must translate both endpoint handles.");
+        arrow.BeginGesture(new Point(90, 35)); arrow.UpdateGesture(new Point(15, 70)); arrow.EndGesture();
+        Require(IsWhite(Render(arrow), 15, 70) && IsWhite(Render(arrow), 40, 65),
+            "Arrow endpoint handles must remain correct after moving and reversing direction.");
+    }
+
+    private static void CheckSelectionEscapeAndRouting(BitmapSource source)
+    {
+        var overlay = new RegionOverlay((BitmapSource)source.GetCurrentValueAsFrozen(), new System.Drawing.Rectangle(0, 0, 128, 96));
+        try
+        {
+            overlay.SetRegion(new Int32Rect(10, 10, 110, 80));
+            Draw(overlay.Editor, EditorTool.Rectangle, new Point(10, 30), new Point(50, 70));
+            byte[] before = Bytes(overlay.Editor.Flatten());
+            Require(overlay.Editor.HasAnnotationAt(new Point(7, 50)) &&
+                !overlay.BeginFrameGesture(new Point(10, 50)),
+                "An object handle overlapping a crop handle must route to the editor in a drawing tool.");
+            Require(overlay.HandleSessionKey(Key.Escape) && !overlay.IsClosed && overlay.Editor.SelectedIdentity == null &&
+                Equal(before, Bytes(overlay.Editor.Flatten())), "First idle Escape must only clear the object selection.");
+            Require(!overlay.Editor.HandleKey(Key.Escape), "The editor must leave idle Escape to the overlay.");
+            Require(overlay.HandleSessionKey(Key.Escape) && overlay.IsClosed, "Second idle Escape must close the overlay.");
+        }
+        finally { if (!overlay.IsClosed) overlay.Cancel(); }
+    }
+
+    public static BitmapSource RenderPreview(BitmapSource source)
+    {
+        AnnotationCanvas canvas = new(source) { Stroke = Brushes.MediumPurple, Thickness = 3 };
+        Draw(canvas, EditorTool.Rectangle, new Point(source.PixelWidth * .23, source.PixelHeight * .29),
+            new Point(source.PixelWidth * .93, source.PixelHeight * .62));
+        return Render(canvas);
+    }
+
+    private static BitmapSource Render(AnnotationCanvas canvas)
+    {
+        canvas.Measure(new Size(canvas.Width, canvas.Height));
+        canvas.Arrange(new Rect(0, 0, canvas.Width, canvas.Height));
+        canvas.UpdateLayout();
+        RenderTargetBitmap bitmap = new((int)canvas.Width, (int)canvas.Height, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(canvas); bitmap.Freeze();
+        return bitmap;
+    }
+
+    private static byte[] Pixel(BitmapSource image, int x, int y)
+    {
+        byte[] pixel = new byte[4];
+        image.CopyPixels(new Int32Rect(x, y, 1, 1), pixel, 4, 0);
+        return pixel;
+    }
+
+    private static bool IsWhite(BitmapSource image, int x, int y) => Pixel(image, x, y).AsSpan().SequenceEqual(new byte[] { 255, 255, 255, 255 });
 
     private static void CheckEditingBounds(BitmapSource source)
     {
@@ -264,7 +441,7 @@ public static class EditorSelfChecks
                 "Resize and add must undo independently to the baseline.");
         }
 
-        foreach (EditorTool tool in new[] { EditorTool.Arrow, EditorTool.Ellipse, EditorTool.Highlight, EditorTool.Redact })
+        foreach (EditorTool tool in new[] { EditorTool.Ellipse, EditorTool.Highlight, EditorTool.Redact })
         {
             AnnotationCanvas canvas = new(source) { Stroke = Brushes.Black };
             Draw(canvas, tool, new Point(20, 20), new Point(60, 50));
@@ -494,6 +671,7 @@ public static class EditorSelfChecks
 
         AnnotationCanvas overlap = new(source);
         Draw(overlap, EditorTool.Redact, new Point(10, 10), new Point(60, 60));
+        overlap.HandleKey(Key.Escape); // Deselect before drawing a second overlapping object.
         Draw(overlap, EditorTool.Redact, new Point(30, 30), new Point(80, 80));
         overlap.Tool = EditorTool.Select;
         byte[] both = Bytes(overlap.Flatten());
