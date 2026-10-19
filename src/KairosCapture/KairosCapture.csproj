@@ -10,9 +10,9 @@
     <AssemblyName>KairosCapture</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>KairosCapture.ico</ApplicationIcon>
-    <Version>0.2.0</Version>
+    <Version>0.3.0</Version>
     <Company>Kairos Capture</Company>
-    <Description>Screenshot-Werkbank für Windows</Description>
+    <Description>Screenshots und Texterkennung für Windows</Description>
     <Deterministic>true</Deterministic>
     <!-- WPF owns PerMonitorV2 in the manifest; WinForms is used only for tray and clipboard. -->
     <NoWarn>$(NoWarn);WFO0003</NoWarn>

@@ -8,7 +8,9 @@ using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Interop;
-using System.Windows.Markup;
+using System.Windows.Media.Effects;
+using System.Windows.Controls.Primitives;
+using System.Collections.Generic;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -20,35 +22,25 @@ namespace KairosCapture.Capture;
 /// <summary>One physical desktop raster, one live object editor, and a movable export crop.</summary>
 internal sealed class RegionOverlay : Window
 {
-    private static readonly ControlTemplate ToolbarButtonTemplate = (ControlTemplate)XamlReader.Parse("""
-        <ControlTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-            xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" TargetType="Button">
-          <Border x:Name="ButtonFrame" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
-              BorderThickness="{TemplateBinding BorderThickness}" Padding="{TemplateBinding Padding}" CornerRadius="4"
-              TextElement.Foreground="{TemplateBinding Foreground}" TextElement.FontFamily="{TemplateBinding FontFamily}"
-              TextElement.FontSize="{TemplateBinding FontSize}">
-            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True" />
-          </Border>
-          <ControlTemplate.Triggers>
-            <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.5" /></Trigger>
-            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ButtonFrame" Property="BorderBrush" Value="#D3B576" /></Trigger>
-            <Trigger Property="IsPressed" Value="True"><Setter TargetName="ButtonFrame" Property="Background" Value="#7D4BE3" /></Trigger>
-          </ControlTemplate.Triggers>
-        </ControlTemplate>
-        """);
     [Flags]
     internal enum FrameHandle { None = 0, Left = 1, Right = 2, Top = 4, Bottom = 8 }
     private enum FrameGesture { None, New, Move, Resize }
     private readonly DrawingRectangle _bounds;
     private readonly bool _editing;
-    private readonly Func<Window, Task<bool>>? _confirmHandoff;
+    private readonly BitmapSource _screenshot;
+    private readonly AppSettings _settings;
+    private readonly bool _ocrMode;
+    private readonly Image _glassImage;
+    private readonly Border _chip;
+    private readonly List<RadioButton> _toolButtons = new();
+    private string? _savedPath;
     private readonly Canvas _scene;
     private readonly FrameChrome _chrome;
     private readonly Border _toolbar;
     private readonly TextBlock _label, _error;
     private readonly Button _undo, _redo;
     private IntPtr _handle;
-    private bool _closed, _rawAccepted, _handoffPending;
+    private bool _closed, _rawAccepted, _outputPending;
     private FrameGesture _gesture;
     private FrameHandle _frameHandle;
     private Point _start;
@@ -64,7 +56,7 @@ internal sealed class RegionOverlay : Window
     internal FrameworkElement Toolbar => _toolbar;
 
     internal RegionOverlay(BitmapSource screenshot, DrawingRectangle bounds, bool editing = true,
-        Func<Window, Task<bool>>? confirmHandoff = null)
+        AppSettings? settings = null, bool ocrMode = false, AnnotationCanvas? editor = null)
     {
         ArgumentNullException.ThrowIfNull(screenshot);
         CaptureGeometry.ValidateSize(bounds.Width, bounds.Height);
@@ -72,7 +64,9 @@ internal sealed class RegionOverlay : Window
             throw new ArgumentException("Bildraster und Desktopgrenzen müssen übereinstimmen.", nameof(screenshot));
         _bounds = bounds;
         _editing = editing;
-        _confirmHandoff = confirmHandoff;
+        _screenshot = screenshot;
+        _settings = settings ?? new();
+        _ocrMode = ocrMode;
         Title = "Kairos Capture – auf dem Bildschirm bearbeiten";
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize;
@@ -95,52 +89,79 @@ internal sealed class RegionOverlay : Window
         TextElement.SetFontSize(_scene, FontSize);
         var image = new Image { Source = screenshot, Width = bounds.Width, Height = bounds.Height, Stretch = Stretch.Fill, IsHitTestVisible = false };
         _scene.Children.Add(image);
-        Editor = new AnnotationCanvas(screenshot) { IsHitTestVisible = false, Clip = new RectangleGeometry(Rect.Empty) };
+        Editor = editor ?? new AnnotationCanvas(screenshot);
+        if (Editor.Parent != null || VisualTreeHelper.GetParent(Editor) != null) throw new InvalidOperationException("Der Editor gehört noch zu einem anderen Fenster.");
+        Editor.SetEditingBounds(new Int32Rect(0, 0, bounds.Width, bounds.Height));
+        Editor.IsHitTestVisible = false;
+        Editor.Clip = new RectangleGeometry(Rect.Empty);
         _scene.Children.Add(Editor);
         _chrome = new FrameChrome(this) { Width = bounds.Width, Height = bounds.Height, IsHitTestVisible = false };
         _scene.Children.Add(_chrome);
-        _label = new TextBlock { Margin = new Thickness(6, 2, 6, 5) };
-        _error = new TextBlock { Margin = new Thickness(6), TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
+        _label = new TextBlock { FontSize = 12, FontWeight = FontWeights.SemiBold };
+        _chip = new Border { Style = (Style)FindResource("GlassPanel"), Padding = new Thickness(10, 5, 10, 5),
+            Child = _label, IsHitTestVisible = false, Visibility = Visibility.Collapsed };
+        _scene.Children.Add(_chip);
+        _error = new TextBlock { Margin = new Thickness(8, 4, 8, 2), TextWrapping = TextWrapping.Wrap,
+            Foreground = Brush("#FFE0A3"), Visibility = Visibility.Collapsed };
         var stack = new StackPanel();
-        stack.Children.Add(_label);
-        var tools = new WrapPanel();
-        (EditorTool Tool, string Label)[] choices = {
-            (EditorTool.Select, "Auswahl"), (EditorTool.Rectangle, "Rechteck"), (EditorTool.Ellipse, "Ellipse"),
-            (EditorTool.Arrow, "Pfeil"), (EditorTool.Pen, "Stift"), (EditorTool.Text, "Text"),
-            (EditorTool.Highlight, "Markieren"), (EditorTool.Redact, "Schwärzen") };
+        var tools = new WrapPanel { VerticalAlignment = VerticalAlignment.Center };
+        (EditorTool Tool, string Label, string Key)[] choices = {
+            (EditorTool.Select, "Auswahl", "V"), (EditorTool.Rectangle, "Rechteck", "R"), (EditorTool.Ellipse, "Ellipse", "E"),
+            (EditorTool.Arrow, "Pfeil", "A"), (EditorTool.Pen, "Stift", "P"), (EditorTool.Text, "Text", "T"),
+            (EditorTool.Highlight, "Markieren", "H"), (EditorTool.Redact, "Schwärzen", "B") };
+        Style toolStyle = (Style)FindResource("GlassToolToggle");
+        // The parallel resource writer may still supply the initial ToggleButton/RadioButton placeholder.
+        if (toolStyle.BasedOn != null && !toolStyle.BasedOn.TargetType.IsAssignableFrom(toolStyle.TargetType)) toolStyle = toolStyle.BasedOn;
         foreach (var choice in choices)
         {
-            var button = AddButton(tools, choice.Label, () => { Editor.Tool = choice.Tool; UpdateTools(); Editor.Focus(); });
-            button.Tag = choice.Tool;
+            var button = new RadioButton { Style = toolStyle,
+                Content = GlassWindow.Icon(this, choice.Tool.ToString()), ToolTip = choice.Label + " · " + choice.Key,
+                Tag = choice.Tool, GroupName = "OverlayTools", Focusable = false, Width = 34, Height = 34,
+                Margin = new Thickness(1), Padding = new Thickness(5) };
+            System.Windows.Automation.AutomationProperties.SetName(button, choice.Label);
+            button.Click += (_, _) => { if (_closed || _outputPending) return; Editor.Tool = choice.Tool; UpdateTools(); Editor.Focus(); };
+            _toolButtons.Add(button); tools.Children.Add(button);
         }
-        stack.Children.Add(tools);
-        var style = new WrapPanel();
+        AddDivider(tools);
         foreach (string colour in new[] { "#7D4BE3", "#B097E9", "#D3B576", "#FFFFFF", "#EF6461", "#000000" })
         {
-            var swatch = AddButton(style, "●", () => Editor.Stroke = Brush(colour));
-            swatch.Foreground = Brush(colour);
-            swatch.ToolTip = "Farbe " + colour + " · ändert auch das ausgewählte Objekt";
+            var swatch = new RadioButton { Style = (Style)FindResource("GlassSwatch"), Background = Brush(colour),
+                GroupName = "OverlayColours", ToolTip = "Farbe " + colour + " · ausgewähltes Objekt ändern",
+                Width = 24, Height = 30, Margin = new Thickness(0, 3, 0, 3), Focusable = false,
+                IsChecked = colour == "#B097E9" };
+            swatch.Click += (_, _) => { if (!_closed && !_outputPending) Editor.Stroke = Brush(colour); };
+            tools.Children.Add(swatch);
         }
-        style.Children.Add(new TextBlock { Text = "Dicke", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 4, 0) });
+        var thicknessPicker = new ComboBox { Width = 58, Height = 32, MinHeight = 32, Margin = new Thickness(5, 2, 2, 2),
+            ToolTip = "Strichdicke · ausgewähltes Objekt ändern", SelectedValuePath = "Tag" };
         foreach (double thickness in new[] { 1d, 3, 6, 12, 24 })
-            AddButton(style, thickness.ToString(CultureInfo.InvariantCulture), () => Editor.Thickness = thickness);
-        _undo = AddButton(style, "Rückgängig", Editor.Undo);
-        _redo = AddButton(style, "Wiederholen", Editor.Redo);
-        AddButton(style, "Löschen", Editor.DeleteSelected);
-        stack.Children.Add(style);
-        var outputs = new WrapPanel();
-        AddButton(outputs, "Kopieren", () => _ = CompleteAsync(CaptureCompletion.Copied));
-        AddButton(outputs, "Speichern", () => _ = CompleteAsync(CaptureCompletion.Saved));
-        AddButton(outputs, "OCR", () => _ = CompleteAsync(CaptureCompletion.Ocr));
-        AddButton(outputs, "Werkbank", () => _ = CompleteAsync(CaptureCompletion.Workbench));
-        AddButton(outputs, "Abbrechen", Cancel);
-        stack.Children.Add(outputs);
-        stack.Children.Add(_error);
-        _toolbar = new Border { Background = Brush("#12171C"), BorderBrush = Brush("#7D4BE3"),
-            BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(6),
-            Width = Math.Min(800, Math.Max(1, bounds.Width - 16)), MaxHeight = Math.Max(1, bounds.Height - 16),
-            Child = new ScrollViewer { Content = stack, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled }, Visibility = Visibility.Collapsed };
+        {
+            var dot = new System.Windows.Shapes.Ellipse { Width = Math.Min(18, thickness + 2), Height = Math.Min(18, thickness + 2),
+                Fill = Foreground, HorizontalAlignment = HorizontalAlignment.Center };
+            thicknessPicker.Items.Add(new ComboBoxItem { Content = dot, Tag = thickness, ToolTip = thickness + " px", MinHeight = 26 });
+        }
+        thicknessPicker.SelectedValue = Editor.Thickness;
+        thicknessPicker.SelectionChanged += (_, _) => { if (!_closed && !_outputPending && thicknessPicker.SelectedValue is double value) Editor.Thickness = value; };
+        tools.Children.Add(thicknessPicker);
+        AddDivider(tools);
+        _undo = AddButton(tools, "Undo", "Rückgängig · Strg+Z", Editor.Undo);
+        _redo = AddButton(tools, "Redo", "Wiederholen · Strg+Y", Editor.Redo);
+        AddButton(tools, "Delete", "Löschen · Entf", Editor.DeleteSelected);
+        AddDivider(tools);
+        AddButton(tools, "Ocr", "Text erkennen · O", () => _ = CompleteAsync(CaptureCompletion.Ocr));
+        AddButton(tools, "Copy", "Kopieren · Strg+C / Enter", () => _ = CompleteAsync(CaptureCompletion.Copied));
+        AddButton(tools, "Save", "Speichern · Strg+S", () => _ = CompleteAsync(CaptureCompletion.Saved));
+        AddButton(tools, "Close", "Schließen · Esc", Cancel);
+        stack.Children.Add(tools); stack.Children.Add(_error);
+        var grid = new Grid { ClipToBounds = true };
+        _glassImage = new Image { Stretch = Stretch.Fill, IsHitTestVisible = false,
+            Effect = new BlurEffect { Radius = 18, RenderingBias = RenderingBias.Performance }, CacheMode = new BitmapCache(1) };
+        grid.Children.Add(_glassImage);
+        var glass = new Border { Style = (Style)FindResource("GlassPanel"), Child = stack, Padding = new Thickness(8) };
+        grid.Children.Add(glass);
+        _toolbar = new Border { Child = grid, CornerRadius = new CornerRadius(24),
+            Width = Math.Min(1020, Math.Max(1, bounds.Width - 24)), MaxHeight = Math.Max(1, bounds.Height - 16),
+            Visibility = Visibility.Collapsed };
         _scene.Children.Add(_toolbar);
         RenderOptions.SetBitmapScalingMode(_scene, BitmapScalingMode.NearestNeighbor);
         Content = new Viewbox { Stretch = Stretch.Fill, Child = _scene };
@@ -152,13 +173,16 @@ internal sealed class RegionOverlay : Window
 
     private static SolidColorBrush Brush(string colour) => new((Color)ColorConverter.ConvertFromString(colour));
 
-    private Button AddButton(Panel panel, string label, Action click)
+    private void AddDivider(Panel panel) => panel.Children.Add(new Border { Width = 1, Height = 22,
+        Background = (Brush)FindResource("GlassStroke"), Margin = new Thickness(7, 7, 7, 7) });
+
+    private Button AddButton(Panel panel, string glyph, string tooltip, Action click)
     {
-        var button = new Button { Style = null, Template = ToolbarButtonTemplate, Content = label, Margin = new Thickness(2), Padding = new Thickness(8, 5, 8, 5),
-            Background = Brush("#090E13"), Foreground = Brush("#F4F2FA"), BorderBrush = Brush("#B097E9"),
-            BorderThickness = new Thickness(1), FontFamily = new FontFamily("Segoe UI"), FontSize = 13,
-            MinHeight = 30, Focusable = false };
-        button.Click += (_, _) => { if (!_closed && !_handoffPending) click(); };
+        var button = new Button { Style = (Style)FindResource("GlassIconButton"), Content = GlassWindow.Icon(this, glyph),
+            ToolTip = tooltip, Tag = glyph, Margin = new Thickness(1), Width = 34, Height = 34,
+            Padding = new Thickness(5), Focusable = false };
+        System.Windows.Automation.AutomationProperties.SetName(button, tooltip);
+        button.Click += (_, _) => { if (!_closed && !_outputPending) click(); };
         panel.Children.Add(button);
         return button;
     }
@@ -167,10 +191,7 @@ internal sealed class RegionOverlay : Window
     {
         if (_undo != null) _undo.IsEnabled = Editor.CanUndo;
         if (_redo != null) _redo.IsEnabled = Editor.CanRedo;
-        if (_toolbar?.Child is ScrollViewer { Content: StackPanel stack } && stack.Children[1] is WrapPanel tools)
-            foreach (UIElement child in tools.Children)
-                if (child is Button { Tag: EditorTool tool } button)
-                    button.Background = Brush(Editor.Tool == tool ? "#7D4BE3" : "#090E13");
+        foreach (var button in _toolButtons) button.IsChecked = Equals(button.Tag, Editor.Tool);
     }
 
     protected override void OnSourceInitialized(EventArgs e)
@@ -225,7 +246,7 @@ internal sealed class RegionOverlay : Window
     protected override void OnPreviewMouseLeftButtonDown(MouseButtonEventArgs e)
     {
         base.OnPreviewMouseLeftButtonDown(e);
-        if (_handoffPending) { e.Handled = true; return; }
+        if (_outputPending) { e.Handled = true; return; }
         if (IsControlSource(e.OriginalSource as DependencyObject)) return;
         if (!ReadCursor(out Point point)) return;
         if (!BeginFrameGesture(point, Keyboard.IsKeyDown(Key.Space))) return;
@@ -274,7 +295,7 @@ internal sealed class RegionOverlay : Window
     {
         base.OnPreviewMouseRightButtonDown(e);
         e.Handled = true;
-        if (!_handoffPending) Cancel();
+        if (!_outputPending) Cancel();
     }
 
     protected override void OnPreviewKeyDown(KeyEventArgs e)
@@ -288,7 +309,7 @@ internal sealed class RegionOverlay : Window
 
     internal bool HandleSessionKey(Key key, ModifierKeys modifiers = ModifierKeys.None)
     {
-        if (_closed || _handoffPending) return true;
+        if (_closed || _outputPending) return true;
         if (Editor.IsEditingText) return false;
         if (key == Key.Escape)
         {
@@ -303,13 +324,19 @@ internal sealed class RegionOverlay : Window
         { _ = CompleteAsync(CaptureCompletion.Copied); return true; }
         if (key == Key.S && modifiers == ModifierKeys.Control) { _ = CompleteAsync(CaptureCompletion.Saved); return true; }
         if (Editor.HandleKey(key, modifiers)) return true;
-        if (key == Key.V && modifiers == ModifierKeys.None) { Editor.Tool = EditorTool.Select; UpdateTools(); return true; }
+        if (key == Key.O && modifiers == ModifierKeys.None) { _ = CompleteAsync(CaptureCompletion.Ocr); return true; }
+        if (modifiers == ModifierKeys.None)
+        {
+            EditorTool? tool = key switch { Key.V => EditorTool.Select, Key.R => EditorTool.Rectangle, Key.E => EditorTool.Ellipse,
+                Key.A => EditorTool.Arrow, Key.P => EditorTool.Pen, Key.T => EditorTool.Text, Key.H => EditorTool.Highlight, Key.B => EditorTool.Redact, _ => null };
+            if (tool != null) { Editor.Tool = tool.Value; UpdateTools(); return true; }
+        }
         return false;
     }
 
     internal bool BeginFrameGesture(Point point, bool move = false)
     {
-        if (_closed || _handoffPending || _gesture != FrameGesture.None) return false;
+        if (_closed || _outputPending || _gesture != FrameGesture.None) return false;
         _before = Selection;
         _start = Clamp(point);
         _frameHandle = HitFrame(_start);
@@ -322,7 +349,7 @@ internal sealed class RegionOverlay : Window
         else return false;
         Editor.EndGesture();
         Editor.CommitText();
-        _toolbar.Visibility = Visibility.Collapsed;
+        _toolbar.Visibility = _chip.Visibility = Visibility.Collapsed;
         return true;
     }
 
@@ -364,13 +391,14 @@ internal sealed class RegionOverlay : Window
             return;
         }
         RefreshRegion();
+        if (_ocrMode && !cancel && !Selection.IsEmpty) _ = CompleteAsync(CaptureCompletion.Ocr);
     }
 
     private Point Clamp(Point point) => new(Math.Round(Math.Clamp(point.X, 0, _bounds.Width)), Math.Round(Math.Clamp(point.Y, 0, _bounds.Height)));
 
     internal void SetRegion(Int32Rect region)
     {
-        if (_closed || _handoffPending) return;
+        if (_closed || _outputPending) return;
         if (region.X < 0 || region.Y < 0 || region.Width < 0 || region.Height < 0 ||
             (long)region.X + region.Width > _bounds.Width || (long)region.Y + region.Height > _bounds.Height)
             throw new ArgumentOutOfRangeException(nameof(region));
@@ -384,7 +412,8 @@ internal sealed class RegionOverlay : Window
         Editor.Clip = new RectangleGeometry(ready ? new Rect(Selection.X, Selection.Y, Selection.Width, Selection.Height) : Rect.Empty);
         Editor.IsHitTestVisible = _editing && ready && _gesture == FrameGesture.None;
         _toolbar.Visibility = _editing && ready && _gesture == FrameGesture.None ? Visibility.Visible : Visibility.Collapsed;
-        _label.Text = $"{Selection.Width} × {Selection.Height} px   ·   Leertaste + Ziehen: Bereich verschieben   ·   Esc: Geste verwerfen, sonst abbrechen";
+        _label.Text = $"{Selection.Width} × {Selection.Height}";
+        _chip.Visibility = _editing && ready && _gesture == FrameGesture.None ? Visibility.Visible : Visibility.Collapsed;
         PositionToolbar();
         _chrome.InvalidateVisual();
     }
@@ -402,6 +431,18 @@ internal sealed class RegionOverlay : Window
         Canvas.SetLeft(_toolbar, x);
         Canvas.SetTop(_toolbar, y);
         ToolbarBounds = new Rect(x, y, size.Width, size.Height);
+        _toolbar.Child.Clip = new RectangleGeometry(new Rect(0, 0, size.Width, size.Height), 24, 24);
+        int left = (int)x, top = (int)y;
+        int width = Math.Min((int)Math.Ceiling(size.Width), _bounds.Width - left);
+        int height = Math.Min((int)Math.Ceiling(size.Height), _bounds.Height - top);
+        if (width > 0 && height > 0)
+        {
+            var crop = new CroppedBitmap(_screenshot, new Int32Rect(left, top, width, height)); crop.Freeze();
+            _glassImage.Source = crop;
+        }
+        _chip.Measure(new Size(_bounds.Width, _bounds.Height));
+        Canvas.SetLeft(_chip, Math.Clamp(Selection.X + 10, 0, Math.Max(0, _bounds.Width - _chip.DesiredSize.Width)));
+        Canvas.SetTop(_chip, Math.Clamp(Selection.Y - _chip.DesiredSize.Height - 10, 0, Math.Max(0, _bounds.Height - _chip.DesiredSize.Height)));
     }
 
     internal (FrameHandle Handle, Point Center)[] FrameHandles()
@@ -427,56 +468,43 @@ internal sealed class RegionOverlay : Window
         return result;
     }
 
-    internal async Task<bool> CompleteAsync(CaptureCompletion completion)
+    internal Task<bool> CompleteAsync(CaptureCompletion completion)
     {
-        if (_closed || _handoffPending || Selection.IsEmpty || completion == CaptureCompletion.Cancelled) return false;
         if (completion == CaptureCompletion.Copied)
-            return ExecuteOutput(completion, image => { ImageOutput.Copy(image); return true; });
+            return Task.FromResult(ExecuteOutput(completion, image =>
+            {
+                // Additional saving follows the same cancel/error semantics as Save.
+                if (_settings.SaveOnCopy)
+                {
+                    _savedPath = ImageOutput.Save(image, this, _settings);
+                    if (_savedPath == null) return false;
+                }
+                ImageOutput.Copy(image); return true;
+            }));
         if (completion == CaptureCompletion.Saved)
-            return ExecuteOutput(completion, image => ImageOutput.Save(image, this) != null);
-        _handoffPending = true;
-        try
-        {
-            Editor.EndGesture();
-            Editor.CommitText();
-            _scene.IsEnabled = false;
-            if (_confirmHandoff != null && !await _confirmHandoff(this)) return false;
-            // The owner/lifetime may have closed us while the shell awaited OCR or a dialog.
-            if (_closed) return false;
-            _scene.Children.Remove(Editor); // Detach only after permission; preserve objects and history.
-            Editor.Clip = null;
-            Result = new CaptureSessionResult(completion, Editor, Selection)
-                { ReplacementConfirmed = _confirmHandoff != null };
-            Close();
-            return true;
-        }
-        catch (Exception exception)
-        {
-            ShowOutputError(exception);
-            return false;
-        }
-        finally
-        {
-            _handoffPending = false;
-            _scene.IsEnabled = true;
-        }
+            return Task.FromResult(ExecuteOutput(completion, image => (_savedPath = ImageOutput.Save(image, this, _settings)) != null));
+        return Task.FromResult(completion == CaptureCompletion.Ocr && ExecuteOutput(completion, _ => true));
     }
 
     internal bool ExecuteOutput(CaptureCompletion completion, Func<BitmapSource, bool> write)
     {
-        if (_closed || _handoffPending || Selection.IsEmpty) return false;
+        if (_closed || _outputPending || Selection.IsEmpty || completion == CaptureCompletion.Cancelled) return false;
+        _outputPending = true;
         try
         {
-            if (!write(Editor.Flatten(Selection))) return false;
-            Result = new CaptureSessionResult(completion);
+            Editor.EndGesture(); Editor.CommitText();
+            if (Editor.IsMouseCaptured) Editor.ReleaseMouseCapture();
+            BitmapSource image = Editor.Flatten(Selection);
+            if (!write(image)) return false;
+            _scene.Children.Remove(Editor);
+            Editor.Clip = null;
+            Result = new CaptureSessionResult(completion, Editor, Selection)
+                { Screenshot = _screenshot, Bounds = _bounds, Image = completion == CaptureCompletion.Ocr ? image : null, SavedPath = _savedPath };
             Close();
             return true;
         }
-        catch (Exception exception)
-        {
-            ShowOutputError(exception);
-            return false;
-        }
+        catch (Exception exception) { ShowOutputError(exception); return false; }
+        finally { _outputPending = false; }
     }
 
     private void ShowOutputError(Exception exception)
@@ -500,6 +528,10 @@ internal sealed class RegionOverlay : Window
     {
         _closed = true;
         Editor.Changed -= OnEditorChanged;
+        Editor.EndGesture(); Editor.CommitText();
+        if (Editor.IsMouseCaptured) Editor.ReleaseMouseCapture();
+        _scene.Children.Remove(Editor);
+        Editor.Clip = null;
         _gesture = FrameGesture.None;
         if (!_rawAccepted && Result.Completion == CaptureCompletion.Cancelled) Selection = Int32Rect.Empty;
         if (IsMouseCaptured) ReleaseMouseCapture();

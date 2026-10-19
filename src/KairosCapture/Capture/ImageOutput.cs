@@ -58,17 +58,17 @@ public static class ImageOutput
         }
     }
 
-    public static string? Save(BitmapSource image, Window owner)
+    public static string? Save(BitmapSource image, Window owner) => Save(image, owner, new AppSettings { AskBeforeSaving = true });
+
+    internal static string? Save(BitmapSource image, Window owner, AppSettings settings)
     {
         ArgumentNullException.ThrowIfNull(image);
         ArgumentNullException.ThrowIfNull(owner);
         owner.Dispatcher.VerifyAccess();
         RequireSta();
-        string pictures = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
-        if (string.IsNullOrWhiteSpace(pictures))
-            pictures = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Pictures");
-        string directory = Path.Combine(pictures, "Kairos Capture");
+        string directory = settings.SaveFolder;
         Directory.CreateDirectory(directory);
+        if (!settings.AskBeforeSaving) return SaveDirect(image, directory, DateTime.Now);
         var dialog = new SaveFileDialog
         {
             Title = "Aufnahme speichern",
@@ -79,18 +79,36 @@ public static class ImageOutput
             CheckPathExists = true,
             RestoreDirectory = true,
             InitialDirectory = directory,
-            FileName = $"Kairos Capture {DateTime.Now:yyyy-MM-dd HH-mm-ss}.png"
+            FileName = FileName(DateTime.Now)
         };
         if (dialog.ShowDialog(owner) != true)
             return null;
 
+        return Write(image, dialog.FileName, overwrite: true);
+    }
+
+    internal static string FileName(DateTime now) => $"Kairos {now:yyyy-MM-dd HHmmss}.png";
+
+    internal static string SaveDirect(BitmapSource image, string directory, DateTime now)
+    {
+        Directory.CreateDirectory(directory);
+        string path = Path.Combine(directory, FileName(now));
+        for (int suffix = 1; ; suffix++)
+        {
+            try { return Write(image, path, overwrite: false); }
+            catch (IOException) when (File.Exists(path))
+            { path = Path.Combine(directory, Path.GetFileNameWithoutExtension(FileName(now)) + $" ({suffix}).png"); }
+        }
+    }
+
+    private static string Write(BitmapSource image, string path, bool overwrite)
+    {
         byte[] png = EncodePng(image);
-        string path = dialog.FileName;
         string temporary = Path.Combine(Path.GetDirectoryName(path)!, $".kairos-{Guid.NewGuid():N}.tmp");
         try
         {
             File.WriteAllBytes(temporary, png);
-            File.Move(temporary, path, true);
+            File.Move(temporary, path, overwrite);
             return path;
         }
         finally

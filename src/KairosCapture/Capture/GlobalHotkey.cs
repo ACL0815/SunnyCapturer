@@ -7,13 +7,14 @@ using System.Windows.Interop;
 
 namespace KairosCapture.Capture;
 
-/// <summary>Owns Ctrl+Alt+A on the owner's Dispatcher; register and dispose on that thread.</summary>
+/// <summary>Owns a configurable hotkey on the owner's Dispatcher.</summary>
 public sealed class GlobalHotkey : IDisposable
 {
     private static int _nextId;
     private readonly Window _owner;
     private readonly Action _onPressed;
-    private readonly int _id;
+    private int _id;
+    private HotkeyGesture _gesture = new(System.Windows.Input.ModifierKeys.Control | System.Windows.Input.ModifierKeys.Alt, System.Windows.Input.Key.A);
     private HwndSource? _source;
     private IntPtr _handle;
     private bool _registered;
@@ -26,11 +27,12 @@ public sealed class GlobalHotkey : IDisposable
     /// <summary>Raised on the owner's Dispatcher when a suspended hotkey cannot be restored.</summary>
     public event Action<string>? RegistrationFailed;
 
-    public GlobalHotkey(Window owner, Action onPressed)
+    public GlobalHotkey(Window owner, Action onPressed, string hotkey = "Strg+Alt+A")
     {
         ArgumentNullException.ThrowIfNull(owner);
         ArgumentNullException.ThrowIfNull(onPressed);
         owner.Dispatcher.VerifyAccess();
+        if (HotkeyGesture.TryParse(hotkey, out var gesture)) _gesture = gesture;
         _owner = owner;
         _onPressed = onPressed;
         _id = Interlocked.Increment(ref _nextId);
@@ -74,9 +76,35 @@ public sealed class GlobalHotkey : IDisposable
                 _source.RemoveHook(OnWindowMessage);
             _source = null;
             _requested = false;
-            error = LastError = $"Ctrl+Alt+A konnte nicht registriert werden: {exception.Message}";
+            error = LastError = $"{_gesture} konnte nicht registriert werden: {exception.Message}";
             return false;
         }
+    }
+
+    internal bool TryChange(HotkeyGesture gesture, out string? error)
+    {
+        _owner.Dispatcher.VerifyAccess();
+        if (_disposed) { error = "Der Hotkey wurde bereits geschlossen."; return false; }
+        if (gesture == _gesture) return Register(out error);
+        if (_source is null) Register(out _);
+        if (_source is null || !_owner.IsEnabled || !_nativeEnabled || CaptureService.IsCapturing)
+        { error = "Das Tastenkürzel kann nach der laufenden Aufnahme oder dem Dialog geändert werden."; return false; }
+        int candidate = Interlocked.Increment(ref _nextId);
+        if (candidate > 0xBFFF) { error = "Zu viele Tastenkürzeländerungen."; return false; }
+        // Reserve the new combination before releasing the old one. A conflict never
+        // interrupts the existing shortcut or steals a different application's shortcut.
+        if (!RegisterHotKey(_handle, candidate, gesture.NativeModifiers, gesture.VirtualKey))
+        {
+            error = LastError = $"{gesture} ist bereits belegt oder nicht verfügbar. " + (_registered
+                ? "Das bisherige Tastenkürzel bleibt aktiv." : "Aktuell ist kein Tastenkürzel registriert. Bitte eine andere Kombination wählen.");
+            return false;
+        }
+        ReleaseRegistration();
+        _id = candidate;
+        _gesture = gesture;
+        _registered = _requested = true;
+        error = LastError = null;
+        return true;
     }
 
     private IntPtr OnWindowMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -110,10 +138,10 @@ public sealed class GlobalHotkey : IDisposable
         }
         if (_registered)
             return true;
-        if (!RegisterHotKey(_handle, _id, 0x4003, 0x41)) // MOD_NOREPEAT | MOD_CONTROL | MOD_ALT, A
+        if (!RegisterHotKey(_handle, _id, _gesture.NativeModifiers, _gesture.VirtualKey))
         {
             int code = Marshal.GetLastWin32Error();
-            error = LastError = $"Ctrl+Alt+A konnte nicht registriert werden; die Kombination ist möglicherweise bereits belegt. " +
+            error = LastError = $"{_gesture} konnte nicht registriert werden; die Kombination ist möglicherweise bereits belegt. " +
                 $"Windows-Fehler {code}: {new Win32Exception(code).Message}";
             return false;
         }
