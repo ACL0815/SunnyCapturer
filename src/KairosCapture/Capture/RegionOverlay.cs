@@ -2,6 +2,7 @@ using System;
 using System.ComponentModel;
 using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -25,6 +26,13 @@ internal sealed class RegionOverlay : Window
     [Flags]
     internal enum FrameHandle { None = 0, Left = 1, Right = 2, Top = 4, Bottom = 8 }
     private enum FrameGesture { None, New, Move, Resize }
+    private enum OverlayEvent { Created, Activated, Deactivated, ContentRendered, GestureBegan, GestureEnded, GestureCancelled,
+        ReleasedMove, CaptureGained, CaptureLost, RegionChanged, ToolbarMeasured, PointerUpIdle, SecondPress, CursorReadFailed, Closed }
+    private enum InputSource { None, Overlay, Editor, Control, Other }
+    private static int _nextTraceId;
+    private readonly int _traceId = Interlocked.Increment(ref _nextTraceId);
+    private readonly Action<string> _logState;
+    private int _traceLines;
     private readonly DrawingRectangle _bounds;
     private readonly bool _editing;
     private readonly BitmapSource _screenshot;
@@ -60,7 +68,8 @@ internal sealed class RegionOverlay : Window
 
     internal RegionOverlay(BitmapSource screenshot, DrawingRectangle bounds, bool editing = true,
         AppSettings? settings = null, bool ocrMode = false, AnnotationCanvas? editor = null,
-        Func<BitmapSource, Window, AppSettings, string?>? saveImage = null, Action<BitmapSource>? copyImage = null)
+        Func<BitmapSource, Window, AppSettings, string?>? saveImage = null, Action<BitmapSource>? copyImage = null,
+        Action<string>? logState = null)
     {
         ArgumentNullException.ThrowIfNull(screenshot);
         CaptureGeometry.ValidateSize(bounds.Width, bounds.Height);
@@ -73,6 +82,7 @@ internal sealed class RegionOverlay : Window
         _ocrMode = ocrMode;
         _saveImage = saveImage ?? ((image, parent, preferences) => ImageOutput.Save(image, parent, preferences));
         _copyImage = copyImage ?? ImageOutput.Copy;
+        _logState = logState ?? App.LogOverlayDiagnostic;
         Title = "Kairos Capture – auf dem Bildschirm bearbeiten";
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize;
@@ -181,10 +191,12 @@ internal sealed class RegionOverlay : Window
             Width = Math.Min(1020, Math.Max(1, bounds.Width - 24)), MaxHeight = Math.Max(1, bounds.Height - 16),
             Visibility = Visibility.Collapsed };
         _scene.Children.Add(_toolbar);
+        _toolbar.SizeChanged += (_, _) => TraceState(OverlayEvent.ToolbarMeasured);
         RenderOptions.SetBitmapScalingMode(_scene, BitmapScalingMode.NearestNeighbor);
         Content = new Viewbox { Stretch = Stretch.Fill, Child = _scene };
         Editor.Changed += OnEditorChanged;
         UpdateTools();
+        TraceState(OverlayEvent.Created);
     }
 
     private void OnEditorChanged(object? sender, EventArgs e) => UpdateTools();
@@ -225,6 +237,20 @@ internal sealed class RegionOverlay : Window
         PlaceOverDesktop();
         Activate();
         Focus();
+        TraceState(OverlayEvent.ContentRendered);
+    }
+
+    protected override void OnActivated(EventArgs e)
+    {
+        base.OnActivated(e);
+        TraceState(OverlayEvent.Activated);
+    }
+
+    protected override void OnDeactivated(EventArgs e)
+    {
+        base.OnDeactivated(e);
+        TraceState(OverlayEvent.Deactivated);
+        EndFrameGesture(true);
     }
 
     protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
@@ -297,7 +323,7 @@ internal sealed class RegionOverlay : Window
     protected override void OnPreviewMouseLeftButtonUp(MouseButtonEventArgs e)
     {
         base.OnPreviewMouseLeftButtonUp(e);
-        if (_gesture == FrameGesture.None) return;
+        if (_gesture == FrameGesture.None) { TraceState(OverlayEvent.PointerUpIdle, e.OriginalSource as DependencyObject); return; }
         if (ReadCursor(out Point point)) UpdateFrameGesture(point);
         EndFrameGesture();
         if (IsMouseCaptured) ReleaseMouseCapture();
@@ -307,7 +333,14 @@ internal sealed class RegionOverlay : Window
     protected override void OnLostMouseCapture(MouseEventArgs e)
     {
         base.OnLostMouseCapture(e);
+        TraceState(OverlayEvent.CaptureLost, e.OriginalSource as DependencyObject);
         if (e.OriginalSource == this && _gesture != FrameGesture.None) EndFrameGesture(true);
+    }
+
+    protected override void OnGotMouseCapture(MouseEventArgs e)
+    {
+        base.OnGotMouseCapture(e);
+        TraceState(OverlayEvent.CaptureGained, e.OriginalSource as DependencyObject);
     }
 
     protected override void OnPreviewMouseRightButtonDown(MouseButtonEventArgs e)
@@ -358,6 +391,7 @@ internal sealed class RegionOverlay : Window
     internal bool HandlePointerDown(Point point, int clickCount = 1, bool move = false)
     {
         if (_closed || _outputPending) return true;
+        if (_gesture != FrameGesture.None) TraceState(OverlayEvent.SecondPress);
         // Only a double-click on plain selection content finishes; handles, Space-move and empty space keep their single-click gestures.
         if (clickCount >= 2 && !move && _editing && Selection.Width >= 2 && Selection.Height >= 2 &&
             new Rect(Selection.X, Selection.Y, Selection.Width, Selection.Height).Contains(point) &&
@@ -385,6 +419,7 @@ internal sealed class RegionOverlay : Window
         Editor.EndGesture();
         Editor.CommitText();
         _toolbar.Visibility = _chip.Visibility = Visibility.Collapsed;
+        TraceState(OverlayEvent.GestureBegan);
         return true;
     }
 
@@ -412,7 +447,16 @@ internal sealed class RegionOverlay : Window
         }
     }
 
-    internal void HandlePointerMove(Point point, MouseButtonState leftButton) => UpdateFrameGesture(point);
+    internal void HandlePointerMove(Point point, MouseButtonState leftButton)
+    {
+        if (_gesture == FrameGesture.None) return;
+        if (leftButton == MouseButtonState.Pressed) UpdateFrameGesture(point);
+        else
+        {
+            TraceState(OverlayEvent.ReleasedMove);
+            EndFrameGesture();
+        }
+    }
 
     internal void EndFrameGesture(bool cancel = false)
     {
@@ -427,7 +471,7 @@ internal sealed class RegionOverlay : Window
             Close();
             return;
         }
-        RefreshRegion();
+        RefreshRegion(cancel ? OverlayEvent.GestureCancelled : OverlayEvent.GestureEnded);
         if (_ocrMode && !cancel && !Selection.IsEmpty) _ = CompleteAsync(CaptureCompletion.Ocr);
     }
 
@@ -443,8 +487,9 @@ internal sealed class RegionOverlay : Window
         RefreshRegion();
     }
 
-    private void RefreshRegion()
+    private void RefreshRegion(OverlayEvent reason = OverlayEvent.RegionChanged)
     {
+        Visibility toolbarBefore = _toolbar.Visibility, chipBefore = _chip.Visibility;
         bool ready = Selection.Width >= 2 && Selection.Height >= 2;
         Editor.Clip = new RectangleGeometry(ready ? new Rect(Selection.X, Selection.Y, Selection.Width, Selection.Height) : Rect.Empty);
         Editor.IsHitTestVisible = _editing && ready && _gesture == FrameGesture.None;
@@ -453,6 +498,8 @@ internal sealed class RegionOverlay : Window
         _chip.Visibility = _editing && ready && _gesture == FrameGesture.None ? Visibility.Visible : Visibility.Collapsed;
         PositionToolbar();
         _chrome.InvalidateVisual();
+        if (toolbarBefore != _toolbar.Visibility || chipBefore != _chip.Visibility || reason != OverlayEvent.RegionChanged)
+            TraceState(reason);
     }
 
     internal Rect ToolbarBounds { get; private set; }
@@ -573,14 +620,30 @@ internal sealed class RegionOverlay : Window
         _gesture = FrameGesture.None;
         if (!_rawAccepted && Result.Completion == CaptureCompletion.Cancelled) Selection = Int32Rect.Empty;
         if (IsMouseCaptured) ReleaseMouseCapture();
+        TraceState(OverlayEvent.Closed);
         base.OnClosed(e);
+    }
+
+    private void TraceState(OverlayEvent reason, DependencyObject? source = null, int data = 0)
+    {
+        if (_traceLines >= 20 || (_traceLines >= 19 && reason != OverlayEvent.Closed)) return;
+        _traceLines++;
+        InputSource origin = source == null ? InputSource.None : source == this ? InputSource.Overlay :
+            source == Editor ? InputSource.Editor : IsControlSource(source) ? InputSource.Control : InputSource.Other;
+        _logState(string.Create(CultureInfo.InvariantCulture,
+            $"id={_traceId} event={reason} source={origin} gesture={_gesture} selection={Selection.X},{Selection.Y},{Selection.Width},{Selection.Height} " +
+            $"toolbar={_toolbar.Visibility} chip={_chip.Visibility} bounds={ToolbarBounds.X},{ToolbarBounds.Y},{ToolbarBounds.Width},{ToolbarBounds.Height} " +
+            $"actual={_toolbar.ActualWidth},{_toolbar.ActualHeight} active={Convert.ToInt32(IsActive)} capture={Convert.ToInt32(IsMouseCaptured)} " +
+            $"editorGesture={Convert.ToInt32(Editor.HasActiveGesture)} editing={Convert.ToInt32(_editing)} ocr={Convert.ToInt32(_ocrMode)} data={data}"));
     }
 
     private bool ReadCursor(out Point cursor)
     {
         if (!GetPhysicalCursorPos(out NativePoint point))
         {
-            Failure = new Win32Exception(Marshal.GetLastWin32Error(), "Die Zeigerposition konnte nicht gelesen werden.");
+            int error = Marshal.GetLastWin32Error();
+            TraceState(OverlayEvent.CursorReadFailed, data: error);
+            Failure = new Win32Exception(error, "Die Zeigerposition konnte nicht gelesen werden.");
             cursor = default;
             Cancel();
             return false;
