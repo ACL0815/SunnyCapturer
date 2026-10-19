@@ -194,8 +194,8 @@ internal static class OpenAiProtocol
         while (true)
         {
             string? line = await reader.ReadLineAsync(ct).ConfigureAwait(false);
-            if (line is null) throw new InvalidOperationException("Die OCR-Verbindung endete vor response.completed. Der Teiltext ist unvollständig.");
-            if (line.Length + data.Length > 1024 * 1024) throw new InvalidOperationException("Das OCR-Stream-Ereignis ist zu groß.");
+            if (line is null) throw new OpenAiOcrProtocolException(OpenAiOcrReason.UnexpectedEnd);
+            if (line.Length + data.Length > 1024 * 1024) throw new OpenAiOcrProtocolException(OpenAiOcrReason.EventTooLarge);
             if (line.Length != 0)
             {
                 if (line.StartsWith(':')) continue;
@@ -210,28 +210,29 @@ internal static class OpenAiProtocol
             if (data.Length == 0) { eventName = null; continue; }
             string json = data.ToString();
             data.Clear();
-            if (json.Trim() == "[DONE]") throw new InvalidOperationException("Der OCR-Stream enthält keinen bestätigten Abschluss.");
+            if (json.Trim() == "[DONE]") throw new OpenAiOcrProtocolException(OpenAiOcrReason.UnconfirmedDone);
             JsonDocument document;
             try { document = JsonDocument.Parse(json); }
-            catch (JsonException) { throw new InvalidOperationException("OpenAI hat ein ungültiges OCR-Stream-Ereignis geliefert."); }
+            catch (JsonException) { throw new OpenAiOcrProtocolException(OpenAiOcrReason.InvalidJson); }
             using (document)
             {
                 JsonElement item = document.RootElement;
-                string type = RequiredText(item, "type");
+                string type = Text(item, "type") is { Length: > 0 } value && !string.IsNullOrWhiteSpace(value) ? value :
+                    throw new OpenAiOcrProtocolException(OpenAiOcrReason.MissingType);
                 if (eventName is { Length: > 0 } && eventName != type)
-                    throw new InvalidOperationException("Widersprüchliche OCR-Stream-Ereignisse.");
+                    throw new OpenAiOcrProtocolException(OpenAiOcrReason.EventMismatch);
                 eventName = null;
                 switch (type)
                 {
                     case "response.output_text.delta":
-                        string delta = Text(item, "delta") ?? throw new InvalidOperationException("OpenAI hat einen ungültigen Textabschnitt geliefert.");
-                        if (output.Length + delta.Length > 1_000_000) throw new InvalidOperationException("Der erkannte Text ist zu groß.");
+                        string delta = Text(item, "delta") ?? throw new OpenAiOcrProtocolException(OpenAiOcrReason.InvalidDelta);
+                        if (output.Length + delta.Length > 1_000_000) throw new OpenAiOcrProtocolException(OpenAiOcrReason.TextTooLarge);
                         output.Append(delta);
                         progress?.Report(delta);
                         break;
                     case "response.completed":
                         if (!item.TryGetProperty("response", out JsonElement completed) || Text(completed, "status") != "completed")
-                            throw new InvalidOperationException("OpenAI hat keinen vollständigen OCR-Abschluss bestätigt.");
+                            throw new OpenAiOcrProtocolException(OpenAiOcrReason.InvalidCompletion);
                         return output.ToString();
                     case "response.failed":
                     case "error":
@@ -239,13 +240,13 @@ internal static class OpenAiProtocol
                         JsonElement error = source.TryGetProperty("error", out JsonElement nested) ? nested : source;
                         throw new OpenAiRequestException(null, Text(error, "code"), Text(error, "param"), Text(item, "request_id"), "SSE error");
                     case "response.incomplete":
-                        throw new InvalidOperationException("OpenAI hat die Texterkennung unvollständig beendet. Bitte einen kleineren Ausschnitt versuchen.");
+                        throw new OpenAiOcrProtocolException(OpenAiOcrReason.Incomplete);
                     case "response.cancelled":
                     case "response.canceled":
-                        throw new InvalidOperationException("OpenAI hat die Texterkennung abgebrochen. Der Teiltext ist unvollständig.");
+                        throw new OpenAiOcrProtocolException(OpenAiOcrReason.Cancelled);
                     case "response.refusal.delta":
                     case "response.refusal.done":
-                        throw new InvalidOperationException("Das gewählte Modell hat die Texterkennung abgelehnt.");
+                        throw new OpenAiOcrProtocolException(OpenAiOcrReason.Refusal);
                 }
             }
         }
