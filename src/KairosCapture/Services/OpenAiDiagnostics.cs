@@ -7,9 +7,9 @@ using System.Net.Sockets;
 
 namespace KairosCapture.Services;
 
-internal enum OpenAiStep { Unknown, Callback, Token, Jwks, Validate, Persist, Models, Discovery, Refresh, Revoke, Ocr }
-internal enum OpenAiOutcome { Started, Succeeded, Failed, Retrying, Response }
-internal enum OpenAiFailure { Unknown, Dns, Connect, Tls, Proxy, Timeout, Cancelled, Transport, Http, Permission, Validation, Protocol }
+internal enum OpenAiStep { Unknown, Callback, Token, Jwks, Validate, Persist, Models, Discovery, Refresh, Revoke, Ocr, Session }
+internal enum OpenAiOutcome { Started, Succeeded, Failed, Retrying, Response, Cancelled }
+internal enum OpenAiFailure { Unknown, Dns, Connect, Tls, Proxy, Timeout, Cancelled, Transport, Http, Permission, Validation, Protocol, Storage }
 // Provider strings are never log fields unless they match one of these fixed enum values.
 internal enum OpenAiErrorCode
 {
@@ -57,6 +57,7 @@ internal static class OpenAiDiagnostics
         {
             TimeoutException => OpenAiFailure.Timeout,
             OperationCanceledException => OpenAiFailure.Cancelled,
+            System.IO.IOException when Step(ex) == OpenAiStep.Persist => OpenAiFailure.Storage,
             OpenAiRequestException => OpenAiFailure.Http,
             OpenAiUserException { Error: OpenAiUserError.PlanPermissionMissing or OpenAiUserError.PlanPermissionRevoked } => OpenAiFailure.Permission,
             _ when Step(ex) == OpenAiStep.Validate => OpenAiFailure.Validation,
@@ -104,6 +105,8 @@ internal static class OpenAiDiagnostics
             OpenAiStep.Models => "Die OpenAI-Modellliste konnte nicht geladen werden. ",
             OpenAiStep.Callback => "Die Rückkehr vom Browser konnte nicht bestätigt werden. ",
             OpenAiStep.Persist => "Die OpenAI-Anmeldung konnte nicht lokal gespeichert werden. ",
+            OpenAiStep.Session => "Die OpenAI-Anmeldung ist noch beschäftigt. ",
+            OpenAiStep.Refresh => "Die OpenAI-Anmeldung konnte nicht erneuert werden. ",
             OpenAiStep.Ocr => "Die Texterkennung ist fehlgeschlagen. ",
             _ => ""
         };
@@ -119,7 +122,10 @@ internal static class OpenAiDiagnostics
             OpenAiFailure.Tls => "Die verschlüsselte Verbindung zu OpenAI konnte nicht hergestellt werden. Systemzeit, Zertifikate und HTTPS-Filter prüfen.",
             OpenAiFailure.Proxy => "Der konfigurierte Proxy konnte die Verbindung zu OpenAI nicht herstellen. Proxy-Einstellungen prüfen.",
             OpenAiFailure.Timeout when Step(ex) == OpenAiStep.Ocr => "OpenAI hat nicht rechtzeitig geantwortet. Bitte einen kleineren Ausschnitt versuchen.",
+            OpenAiFailure.Timeout when Step(ex) == OpenAiStep.Refresh => "Bitte erneut versuchen oder die Anmeldung erneuern.",
+            OpenAiFailure.Timeout when Step(ex) == OpenAiStep.Session => "Bitte die laufende Anmeldung abschließen und erneut versuchen.",
             OpenAiFailure.Timeout => "OpenAI hat nicht rechtzeitig geantwortet. Bitte erneut versuchen; eine Anmeldung beginnt dabei mit einem neuen Code.",
+            OpenAiFailure.Storage => "Bitte den Zugriff auf den lokalen Sitzungsspeicher prüfen und erneut versuchen.",
             OpenAiFailure.Transport => "Die Netzwerkverbindung zu OpenAI wurde unterbrochen. Bitte erneut versuchen. Technische Fehlerklasse steht im Protokoll.",
             _ => "Die OpenAI-Aktion konnte nicht abgeschlossen werden. Technischer Schritt und Fehlertyp stehen im Protokoll."
         });

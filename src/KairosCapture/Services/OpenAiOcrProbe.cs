@@ -25,7 +25,13 @@ internal sealed class OpenAiOcrTrace
 
     // Only metadata leaves this boundary. Response bodies and arbitrary text never enter Lines.
     private static string Metadata(string? value) => value is null ? "<missing>" :
-        value.Length <= 96 && value.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '-' or '/') ? value : "<redacted>";
+        value.Length is > 0 and <= 96 && value.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '-' or '/') ? value : "<redacted>";
+
+    private static string FieldName(string name) =>
+        new[] { "msg_", "resp_", "req_", "item_", "call_" }.Any(prefix => name.StartsWith(prefix, StringComparison.Ordinal)) ||
+        name.Split('.', '_', '-', '/').Any(segment =>
+            (segment.Length >= 16 && segment.All(char.IsAsciiHexDigit)) ||
+            (segment.Length >= 20 && segment.All(char.IsAsciiLetterOrDigit))) ? "<id>" : Metadata(name);
 
     internal void Body(byte[] body, string? mediaType)
     {
@@ -93,7 +99,7 @@ internal sealed class OpenAiOcrTrace
             foreach (JsonProperty field in value.EnumerateObject())
             {
                 if (paths.Count >= 256) break;
-                string path = prefix + Metadata(field.Name);
+                string path = prefix + FieldName(field.Name);
                 if (!paths.Contains(path)) paths.Add(path);
                 CollectFields(field.Value, path + ".", paths);
             }

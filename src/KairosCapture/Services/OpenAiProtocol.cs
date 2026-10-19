@@ -187,14 +187,15 @@ internal static class OpenAiProtocol
 
     internal static async Task<string> ReadSseAsync(Stream stream, IProgress<string>? progress, CancellationToken ct)
     {
-        using var reader = new StreamReader(stream, new UTF8Encoding(false, true), true, 4096, true);
+        using var reader = new StreamReader(stream, new UTF8Encoding(true, true), false, 4096, true);
         var output = new StringBuilder();
         var data = new StringBuilder();
         string? eventName = null;
+        bool hasEvents = false;
         while (true)
         {
             string? line = await reader.ReadLineAsync(ct).ConfigureAwait(false);
-            if (line is null) throw new OpenAiOcrProtocolException(OpenAiOcrReason.UnexpectedEnd);
+            if (line is null) throw new OpenAiOcrProtocolException(hasEvents ? OpenAiOcrReason.UnexpectedEnd : OpenAiOcrReason.NoEvents);
             if (line.Length + data.Length > 1024 * 1024) throw new OpenAiOcrProtocolException(OpenAiOcrReason.EventTooLarge);
             if (line.Length != 0)
             {
@@ -208,6 +209,7 @@ internal static class OpenAiProtocol
                 continue;
             }
             if (data.Length == 0) { eventName = null; continue; }
+            hasEvents = true;
             string json = data.ToString();
             data.Clear();
             if (json.Trim() == "[DONE]") throw new OpenAiOcrProtocolException(OpenAiOcrReason.UnconfirmedDone);

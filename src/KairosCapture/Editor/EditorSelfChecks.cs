@@ -748,6 +748,6 @@ public static class EditorSelfChecks
 
     private static void Require(bool condition, string message)
     {
-        if (!condition) throw new InvalidOperationException(message);
+        if (!condition) throw new SelfCheckFailure(message);
     }
 }
