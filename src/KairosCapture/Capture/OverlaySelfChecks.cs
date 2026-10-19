@@ -23,6 +23,8 @@ public static class OverlaySelfChecks
     {
         Require(Thread.CurrentThread.GetApartmentState() == ApartmentState.STA, "Overlay checks require STA.");
         BitmapSource background = Pattern(1024, 768);
+        CheckDoubleClick(background);
+        CheckToolbarLayout(background);
         CheckFrame(background);
         CheckCropAndIdentity(background);
         CheckSelectedStyle(background);
@@ -40,6 +42,123 @@ public static class OverlaySelfChecks
     private static RegionOverlay Create(BitmapSource background) => new(background,
         new DrawingRectangle(-1600, -900, background.PixelWidth, background.PixelHeight));
 
+    private static void CheckDoubleClick(BitmapSource background)
+    {
+        var crop = new Int32Rect(320, 128, 488, 212);
+        Point empty = new(600, 260);
+        foreach (EditorTool tool in new[] { EditorTool.Select, EditorTool.Rectangle, EditorTool.Ellipse,
+            EditorTool.Arrow, EditorTool.Pen, EditorTool.Highlight, EditorTool.Redact })
+        {
+            int copies = 0;
+            BitmapSource? copied = null;
+            var overlay = new RegionOverlay(background, new DrawingRectangle(-1600, -900, background.PixelWidth, background.PixelHeight),
+                copyImage: image => { copies++; copied = image; });
+            overlay.SetRegion(crop);
+            Draw(overlay.Editor, EditorTool.Rectangle, new Point(360, 160), new Point(420, 210));
+            overlay.Editor.Tool = tool;
+            byte[] expected = Bytes(overlay.Editor.Flatten(crop));
+            PointerClick(overlay, empty, 1);
+            Require(!overlay.IsClosed && overlay.Selection == crop && !overlay.Editor.HasActiveGesture,
+                "First empty click must leave a valid selection without a zero-sized draft.");
+            PointerClick(overlay, empty, 2);
+            Require(copies == 1 && overlay.IsClosed && overlay.Result.Completion == CaptureCompletion.Copied &&
+                overlay.Result.Region == crop && ReferenceEquals(overlay.Result.Editor, overlay.Editor) &&
+                copied != null && expected.SequenceEqual(Bytes(copied)) && !overlay.Editor.HasActiveGesture,
+                "Double-click must use the copy completion with the exact annotated crop and retained editor.");
+            overlay.HandlePointerDown(empty, 2);
+            Require(copies == 1, "A closed session must never copy twice.");
+        }
+        foreach (EditorTool tool in new[] { EditorTool.Select, EditorTool.Text })
+        {
+            var overlay = Create(background);
+            overlay.SetRegion(crop);
+            overlay.Editor.Tool = EditorTool.Text;
+            overlay.Editor.BeginGesture(new Point(380, 180));
+            ((TextBox)overlay.Editor.Children[0]).Text = "Text";
+            overlay.Editor.CommitText();
+            overlay.Editor.Tool = tool;
+            byte[] before = Bytes(overlay.Editor.Flatten());
+            PointerClick(overlay, new Point(390, 190), 2);
+            Require(!overlay.IsClosed && overlay.Editor.IsEditingText, "Text double-click must still edit the existing annotation.");
+            ((TextBox)overlay.Editor.Children[0]).Text = "Bearbeitet";
+            overlay.Editor.CommitText();
+            overlay.Editor.Undo();
+            Require(before.SequenceEqual(Bytes(overlay.Editor.Flatten())), "Text reedit must keep its undo history.");
+            overlay.Cancel();
+        }
+        var failed = new RegionOverlay(background, new DrawingRectangle(0, 0, background.PixelWidth, background.PixelHeight),
+            copyImage: _ => throw new InvalidOperationException("offline copy boundary"));
+        failed.SetRegion(crop);
+        PointerClick(failed, empty, 2);
+        RemeasureToolbar(failed);
+        Require(!failed.IsClosed && failed.Selection == crop && failed.ToolbarVisible && failed.ToolbarBounds.Height < 120 &&
+            failed.ToolbarBounds.Top == crop.Y + crop.Height + 12, "Failed copy must leave a usable toolbar and the original selection.");
+        failed.Cancel();
+        var initial = Create(background);
+        Require(initial.HandlePointerDown(empty, 2) && initial.Selection.IsEmpty && !initial.ToolbarVisible && !initial.IsClosed,
+            "Double-click without a selection must not begin a zero-sized frame.");
+        initial.Cancel();
+    }
+
+    private static void PointerClick(RegionOverlay overlay, Point point, int clickCount)
+    {
+        if (!overlay.HandlePointerDown(point, clickCount)) overlay.Editor.BeginGesture(point, clickCount);
+        if (overlay.IsClosed) return;
+        overlay.UpdateFrameGesture(point);
+        overlay.EndFrameGesture();
+        overlay.Editor.EndGesture();
+    }
+
+    private static void RemeasureToolbar(RegionOverlay overlay)
+    {
+        // A hidden/offscreen tree does not propagate every queued Source measure invalidation by itself.
+        // Force the same parent measure pass that a live presentation source performs.
+        ((Border)overlay.Toolbar).Child.InvalidateMeasure();
+        overlay.Toolbar.InvalidateMeasure();
+        overlay.SetRegion(overlay.Selection);
+    }
+
+    private static void CheckToolbarLayout(BitmapSource background)
+    {
+        foreach (BitmapSource source in new[] { background, BitmapSource.Create(background.PixelWidth, background.PixelHeight,
+            96, 96, PixelFormats.Bgra32, null, Bytes(background), background.PixelWidth * 4) })
+        foreach (EditorTool tool in new[] { EditorTool.Select, EditorTool.Rectangle })
+        {
+            var overlay = Create(source);
+            var crop = new Int32Rect(320, 128, 488, 212);
+            overlay.BeginFrameGesture(new Point(crop.X, crop.Y));
+            overlay.UpdateFrameGesture(new Point(crop.X + crop.Width, crop.Y + crop.Height));
+            overlay.EndFrameGesture();
+            overlay.Editor.Tool = tool;
+            double height = overlay.ToolbarBounds.Height;
+            Require(height < 100, "Initial toolbar must be sized by its controls.");
+            for (int pass = 0; pass < 4; pass++)
+            {
+                RemeasureToolbar(overlay);
+                Layout(overlay.PreviewRoot, source.PixelWidth, source.PixelHeight);
+                Require(overlay.ToolbarBounds.Height == height && overlay.Toolbar.ActualHeight == height &&
+                    overlay.ToolbarBounds.Top == crop.Y + crop.Height + 12 && overlay.WindowState == WindowState.Normal && overlay.Selection == crop,
+                    "Backdrop source remeasurement must not grow the glass or move the toolbar to the screen top.");
+                Image glass = Descendant<Image>(overlay.Toolbar)!;
+                Require(glass.Effect is System.Windows.Media.Effects.BlurEffect && glass.ActualHeight == height &&
+                    glass.Source is BitmapSource bitmap && bitmap.PixelHeight == Math.Ceiling(height) &&
+                    ((Border)overlay.Toolbar).Child.Clip is RectangleGeometry clip && clip.Rect.Size == overlay.ToolbarBounds.Size,
+                    "Blur backdrop, source crop and rounded clip must follow the measured toolbar.");
+            }
+            Rect bounds = overlay.ToolbarBounds;
+            Require(overlay.HandlePointerDown(new Point(50, 50), 2) && !overlay.IsClosed && overlay.Selection == crop &&
+                overlay.ToolbarBounds == bounds && !overlay.Editor.HasActiveGesture && !overlay.Editor.IsEditingText,
+                "Outside double-click must leave the selection and layout untouched.");
+            RemeasureToolbar(overlay);
+            BitmapSource preview = RenderScene(overlay, source);
+            Require(overlay.ToolbarBounds == bounds && Pixel(preview, 600, 260).SequenceEqual(Pixel(source, 600, 260)),
+                "Outside double-click and later layout must keep unannotated selection pixels unobscured.");
+            overlay.SetRegion(Int32Rect.Empty);
+            Require(overlay.HandlePointerDown(new Point(50, 50), 2) && !overlay.ToolbarVisible && !overlay.Editor.HasActiveGesture,
+                "Empty selection must keep the toolbar hidden after a double-click.");
+            overlay.Cancel();
+        }
+    }
     private static void CheckResume(BitmapSource background)
     {
         foreach (CaptureCompletion completion in new[] { CaptureCompletion.Copied, CaptureCompletion.Saved, CaptureCompletion.Ocr, CaptureCompletion.Pinned })

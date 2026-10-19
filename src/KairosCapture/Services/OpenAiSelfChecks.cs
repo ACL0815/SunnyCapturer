@@ -75,6 +75,7 @@ public static class OpenAiSelfChecks
         Check("Model catalog and image request contract", RequestChecks);
         Check("Translation whitelist and request body", TranslationChecks);
         Check("Transport classification and secret-free diagnostics", DiagnosticChecks);
+        Check("Outbound firewall guidance", FirewallDiagnosticChecks);
         Check("Authorization code retry boundary", TokenRetryChecks);
         Check("OCR model auto-selection", () =>
         {
@@ -262,13 +263,41 @@ public static class OpenAiSelfChecks
         Require(!OpenAiDiagnostics.Describe(new OpenAiRequestException(400, "secret_code_123", null, "secret-request", "JSON")).Contains("secret"), "Untrusted API fields leaked.");
     }
 
+    private static void FirewallDiagnosticChecks()
+    {
+        foreach (SocketError socket in new[] { SocketError.AccessDenied, SocketError.NetworkUnreachable })
+        {
+            var error = new HttpRequestException(HttpRequestError.ConnectionError, "private-code",
+                new IOException("private-token", new SocketException((int)socket)));
+            OpenAiDiagnostics.Mark(error, OpenAiStep.Token);
+            string message = OpenAiDiagnostics.UserMessage(error);
+            Require(message.Contains("Kairos darf keine Internetverbindung aufbauen") && message.Contains("KairosCapture.exe") &&
+                message.Contains("ausgehende Verbindungen") && message.Contains("Windows Firewall Control") &&
+                !message.Contains("private"), "Blocked connections must explain the executable's outbound firewall permission.");
+            string report = OpenAiDiagnostics.Describe(error);
+            Require(report.Contains("class=Connect") && report.Contains("socketError=" + socket) && !report.Contains("private"),
+                "Firewall diagnostics must retain safe socket codes only.");
+            int requests = 0;
+            using HttpClient http = Client(_ => { requests++; throw new HttpRequestException(HttpRequestError.ConnectionError,
+                "private-code", new IOException("private-token", new SocketException((int)socket))); });
+            OpenAiProbeResult probe = OpenAiService.ProbeAsync(http).GetAwaiter().GetResult();
+            Require(!probe.Passed && requests == 3 && probe.Lines.Count(line => line.StartsWith("Hinweis: ", StringComparison.Ordinal) &&
+                line.Contains("KairosCapture.exe") && line.Contains("ausgehende Verbindungen")) == 3 &&
+                probe.Lines.All(line => !line.Contains("private")), "The probe must explain every blocked step without retries or exception messages.");
+        }
+        var refused = new HttpRequestException(HttpRequestError.ConnectionError, "private",
+            new SocketException((int)SocketError.ConnectionRefused));
+        Require(!OpenAiDiagnostics.UserMessage(refused).Contains("Kairos darf"), "Other connection failures must retain general guidance.");
+    }
+
     private static void TokenRetryChecks()
     {
         Exception Dns() => new HttpRequestException(HttpRequestError.NameResolutionError, "private", new SocketException((int)SocketError.HostNotFound));
         Exception Connect(SocketError socket) => new HttpRequestException(HttpRequestError.ConnectionError, "private", new SocketException((int)socket));
         var cases = new (Exception Error, int Attempts)[]
         {
-            (Dns(), 2), (Connect(SocketError.ConnectionRefused), 2), (Connect(SocketError.NetworkUnreachable), 2),
+            (Dns(), 2), (Connect(SocketError.ConnectionRefused), 2),
+            (Connect(SocketError.AccessDenied), 1), (Connect(SocketError.NetworkUnreachable), 1),
             (Connect(SocketError.ConnectionReset), 1), (Connect(SocketError.ConnectionAborted), 1), (Connect(SocketError.TimedOut), 1),
             (new HttpRequestException(HttpRequestError.ConnectionError, "private"), 1),
             (new HttpRequestException(HttpRequestError.SecureConnectionError, "private"), 1),

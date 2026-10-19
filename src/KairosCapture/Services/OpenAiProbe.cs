@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -12,11 +13,13 @@ internal sealed record OpenAiProbeResult(bool Passed, IReadOnlyList<string> Line
 
 public sealed partial class OpenAiService
 {
-    internal static async Task<OpenAiProbeResult> ProbeAsync()
+    internal static Task<OpenAiProbeResult> ProbeAsync() => ProbeAsync(CreateHttpClient());
+
+    internal static async Task<OpenAiProbeResult> ProbeAsync(HttpClient http)
     {
         var lines = new List<string>();
         // Load() on this nonexistent path creates no file. Never read a product account/store.
-        using var service = new OpenAiService(CreateHttpClient(), new OpenAiStorage(Path.Combine(Path.GetTempPath(),
+        using var service = new OpenAiService(http, new OpenAiStorage(Path.Combine(Path.GetTempPath(),
             "KairosCapture-probe-" + Guid.NewGuid().ToString("N"))), _ => throw new InvalidOperationException(), true, lines.Add);
         bool passed = true;
         foreach (OpenAiStep step in new[] { OpenAiStep.Discovery, OpenAiStep.Jwks, OpenAiStep.Token })
@@ -59,6 +62,7 @@ public sealed partial class OpenAiService
                 passed = false;
                 OpenAiDiagnostics.Mark(ex, step);
                 lines.Add(OpenAiDiagnostics.Event(step, OpenAiOutcome.Failed, ex));
+                if (OpenAiDiagnostics.IsOutboundBlocked(ex)) lines.Add("Hinweis: " + OpenAiDiagnostics.UserMessage(ex));
             }
         }
         return new OpenAiProbeResult(passed, lines.AsReadOnly());

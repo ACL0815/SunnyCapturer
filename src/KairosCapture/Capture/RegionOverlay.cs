@@ -31,6 +31,7 @@ internal sealed class RegionOverlay : Window
     private readonly AppSettings _settings;
     private readonly bool _ocrMode;
     private readonly Func<BitmapSource, Window, AppSettings, string?> _saveImage;
+    private readonly Action<BitmapSource> _copyImage;
     private readonly Image _glassImage;
     private readonly Border _chip;
     private readonly List<RadioButton> _toolButtons = new();
@@ -58,7 +59,7 @@ internal sealed class RegionOverlay : Window
 
     internal RegionOverlay(BitmapSource screenshot, DrawingRectangle bounds, bool editing = true,
         AppSettings? settings = null, bool ocrMode = false, AnnotationCanvas? editor = null,
-        Func<BitmapSource, Window, AppSettings, string?>? saveImage = null)
+        Func<BitmapSource, Window, AppSettings, string?>? saveImage = null, Action<BitmapSource>? copyImage = null)
     {
         ArgumentNullException.ThrowIfNull(screenshot);
         CaptureGeometry.ValidateSize(bounds.Width, bounds.Height);
@@ -70,6 +71,7 @@ internal sealed class RegionOverlay : Window
         _settings = settings ?? new();
         _ocrMode = ocrMode;
         _saveImage = saveImage ?? ((image, parent, preferences) => ImageOutput.Save(image, parent, preferences));
+        _copyImage = copyImage ?? ImageOutput.Copy;
         Title = "Kairos Capture – auf dem Bildschirm bearbeiten";
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize;
@@ -169,7 +171,10 @@ internal sealed class RegionOverlay : Window
         var grid = new Grid { ClipToBounds = true };
         _glassImage = new Image { Stretch = Stretch.Fill, IsHitTestVisible = false,
             Effect = new BlurEffect { Radius = 18, RenderingBias = RenderingBias.Performance }, CacheMode = new BitmapCache(1) };
-        grid.Children.Add(_glassImage);
+        // The backdrop must never contribute its source size to the toolbar's automatic height.
+        var backdrop = new Canvas { IsHitTestVisible = false };
+        backdrop.Children.Add(_glassImage);
+        grid.Children.Add(backdrop);
         var glass = new Border { Style = (Style)FindResource("GlassPanel"), Child = stack, Padding = new Thickness(8) };
         grid.Children.Add(glass);
         _toolbar = new Border { Child = grid, CornerRadius = new CornerRadius(24),
@@ -262,8 +267,9 @@ internal sealed class RegionOverlay : Window
         if (_outputPending) { e.Handled = true; return; }
         if (IsControlSource(e.OriginalSource as DependencyObject)) return;
         if (!ReadCursor(out Point point)) return;
-        if (!BeginFrameGesture(point, Keyboard.IsKeyDown(Key.Space))) return;
+        if (!HandlePointerDown(point, e.ClickCount, Keyboard.IsKeyDown(Key.Space))) return;
         e.Handled = true;
+        if (_gesture == FrameGesture.None) return;
         Focus();
         if (!CaptureMouse()) Cancel();
     }
@@ -346,6 +352,21 @@ internal sealed class RegionOverlay : Window
             if (tool != null) { Editor.Tool = tool.Value; UpdateTools(); return true; }
         }
         return false;
+    }
+
+    // Shared by routed pointer input and offline checks; completion uses the same path as Enter/Check.
+    internal bool HandlePointerDown(Point point, int clickCount = 1, bool move = false)
+    {
+        if (_closed || _outputPending) return true;
+        if (clickCount >= 2)
+        {
+            if (!_editing || Selection.Width < 2 || Selection.Height < 2 ||
+                !new Rect(Selection.X, Selection.Y, Selection.Width, Selection.Height).Contains(point)) return true;
+            if (Editor.HasAnnotationAt(point)) return false;
+            _ = CompleteAsync(CaptureCompletion.Copied);
+            return true;
+        }
+        return BeginFrameGesture(point, move);
     }
 
     internal bool BeginFrameGesture(Point point, bool move = false)
@@ -438,6 +459,8 @@ internal sealed class RegionOverlay : Window
         if (_toolbar.Visibility != Visibility.Visible) return;
         _toolbar.Measure(new Size(_toolbar.Width, _toolbar.MaxHeight));
         Size size = _toolbar.DesiredSize;
+        _glassImage.Width = size.Width;
+        _glassImage.Height = size.Height;
         double x = Math.Clamp(Selection.X, 0, Math.Max(0, _bounds.Width - size.Width));
         double y = Selection.Y + Selection.Height + 12;
         if (y + size.Height > _bounds.Height) y = Selection.Y - size.Height - 12;
@@ -492,7 +515,7 @@ internal sealed class RegionOverlay : Window
                 {
                     _savedPath = ImageOutput.SaveDirect(image, _settings.SaveFolder, DateTime.Now);
                 }
-                ImageOutput.Copy(image); return true;
+                _copyImage(image); return true;
             }));
         if (completion == CaptureCompletion.Saved)
             return Task.FromResult(ExecuteOutput(completion, image => (_savedPath = _saveImage(image, this, _settings)) != null));

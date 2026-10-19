@@ -67,9 +67,13 @@ internal static class OpenAiDiagnostics
     // A code may have been consumed after any response, timeout, reset or TLS failure.
     // Retry only DNS failure or a socket error proving connection establishment failed.
     internal static bool MayRetryToken(Exception ex, int completedAttempts) => completedAttempts == 1 && ex is HttpRequestException http &&
+        !IsOutboundBlocked(ex) &&
         (http.HttpRequestError == HttpRequestError.NameResolutionError ||
          (http.HttpRequestError == HttpRequestError.ConnectionError && Chain(http).OfType<SocketException>().Any(s =>
-             s.SocketErrorCode is SocketError.ConnectionRefused or SocketError.HostUnreachable or SocketError.NetworkUnreachable or SocketError.NetworkDown)));
+             s.SocketErrorCode is SocketError.ConnectionRefused or SocketError.HostUnreachable or SocketError.NetworkDown)));
+
+    internal static bool IsOutboundBlocked(Exception ex) => Classify(ex) == OpenAiFailure.Connect &&
+        Chain(ex).OfType<SocketException>().Any(s => s.SocketErrorCode is SocketError.AccessDenied or SocketError.NetworkUnreachable);
 
     internal static OpenAiErrorCode Code(string? code) => code is null ? OpenAiErrorCode.None :
         Enum.TryParse(code, false, out OpenAiErrorCode known) && Enum.IsDefined(known) && known.ToString() == code ? known : OpenAiErrorCode.Unknown;
@@ -105,6 +109,7 @@ internal static class OpenAiDiagnostics
         return context + (Classify(ex) switch
         {
             OpenAiFailure.Dns => "Die OpenAI-Adresse konnte nicht aufgelöst werden. DNS und Internetverbindung prüfen und erneut versuchen.",
+            OpenAiFailure.Connect when IsOutboundBlocked(ex) => "Kairos darf keine Internetverbindung aufbauen. Bitte KairosCapture.exe in der Firewall für ausgehende Verbindungen freigeben (z. B. Windows Firewall Control).",
             OpenAiFailure.Connect => "Die Verbindung zu OpenAI konnte nicht aufgebaut werden. Netzwerk, Firewall und Proxy-Einstellungen prüfen.",
             OpenAiFailure.Tls => "Die verschlüsselte Verbindung zu OpenAI konnte nicht hergestellt werden. Systemzeit, Zertifikate und HTTPS-Filter prüfen.",
             OpenAiFailure.Proxy => "Der konfigurierte Proxy konnte die Verbindung zu OpenAI nicht herstellen. Proxy-Einstellungen prüfen.",
