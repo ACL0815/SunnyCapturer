@@ -49,6 +49,7 @@ public partial class App : Application
             }
             if (e.Args.Length > 1 || (e.Args.Length == 1 && e.Args[0] is not ("--demo" or "--settings")))
                 throw new ArgumentException("Aufruf: KairosCapture [--demo | --self-test <Ordner> | --render-preview <PNG-Datei> | --render-overlay-preview <PNG-Datei>]");
+            RefreshAutostartPath();
             var window = new MainWindow();
             MainWindow = window;
             InitializeTray(window);
@@ -70,6 +71,20 @@ public partial class App : Application
             IsExiting = true;
             Shutdown(1);
         }
+    }
+
+    private static void RefreshAutostartPath()
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true);
+            // An absent value means autostart is off. Never enable it during a path migration.
+            if (key?.GetValue("KairosCapture") is not string current || string.IsNullOrEmpty(Environment.ProcessPath)) return;
+            string command = "\"" + Environment.ProcessPath + "\"";
+            if (!string.Equals(current, command, StringComparison.OrdinalIgnoreCase))
+                key.SetValue("KairosCapture", command, Microsoft.Win32.RegistryValueKind.String);
+        }
+        catch (Exception ex) { LogException("Autostart path update", ex); }
     }
 
     private void InitializeTray(MainWindow window)

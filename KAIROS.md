@@ -6,7 +6,7 @@ Native Screenshot-Anwendung für Windows 11, geschrieben in C# mit WPF und .NET 
 
 ## Starten
 
-`artifacts\KairosCapture-0.4.0-win-x64\KairosCapture.exe` öffnen oder `.\Start-KairosCapture.ps1`. Kairos erscheint ohne Fenster im Infobereich. Voraussetzung ist die **.NET 10 Desktop Runtime** für Windows x64.
+`artifacts\KairosCapture-win-x64\KairosCapture.exe` öffnen oder `.\Start-KairosCapture.ps1`. Kairos erscheint ohne Fenster im Infobereich. Voraussetzung ist die **.NET 10 Desktop Runtime** für Windows x64. Der Publish-Ordner bleibt bei Versionswechseln gleich, damit Firewall-Regeln und Autostart ihren Programmpfad behalten. Ein bereits aktivierter Autostart wird bei jedem normalen Start auf den aktuellen Prozesspfad aktualisiert; ausgeschalteter Autostart bleibt aus.
 
 ## Tray
 
@@ -26,7 +26,7 @@ Native Screenshot-Anwendung für Windows 11, geschrieben in C# mit WPF und .NET 
 
 1. Bereich aufziehen. Der eingefrorene Bildschirm bleibt offen. Die Glasleiste enthält Werkzeuge, Farben, Strichstärke, Rückgängig/Wiederholen/Löschen und OCR. Rechts folgen **Abbrechen · Anpinnen · Speichern · Fertig (✓)**; der lavendelfarbene Haken kopiert und schließt.
 2. Den Rahmen über acht Griffe verändern. **Leertaste + Ziehen** verschiebt ihn, auch über die erste Auswahl hinaus.
-3. Mit **Auswahl** bestehende Objekte verschieben und skalieren. Ein Doppelklick bearbeitet Text erneut. Farbe und Dicke wirken auch auf das ausgewählte Objekt.
+3. Mit **Auswahl** bestehende Objekte verschieben und skalieren. Ein Doppelklick auf eine freie Stelle innerhalb des Bereichs kopiert und schließt wie **Fertig**; außerhalb des Bereichs tut er nichts. Ein Doppelklick auf Text bearbeitet ihn weiterhin erneut. Farbe und Dicke wirken auch auf das ausgewählte Objekt.
 4. **Fertig (Enter / Strg+C)** legt das Bild in die Zwischenablage. **Speichern (Strg+S)** öffnet den Windows-Dialog mit Speicherordner (Standard `Bilder\Kairos`) und `Kairos JJJJ-MM-TT HHmmss.png`. Abbrechen erhält Auswahl, Markierungen und Undo/Redo. Direktspeichern ist ein Opt-in (`SaveWithoutDialog`, Standard `false`); das alte JSON-Feld `AskBeforeSaving` wird ignoriert. „Beim Kopieren zusätzlich speichern“ legt weiterhin direkt im Ordner ab. **Esc** verwirft zuerst eine laufende Geste und beendet sonst die Sitzung.
 5. **OCR** schließt das Overlay und öffnet ein kleines Ergebnisfenster mit bearbeitbarem Text. Der Text wird standardmäßig sofort kopiert. Ohne verbundenes Konto bietet das Fenster direkt **Mit ChatGPT verbinden** und danach **Erneut versuchen**.
 6. **Anpinnen (I)** zeigt die Auswahl inklusive Markierungen als rahmenloses Bild im Vordergrund. **P** bleibt für den Stift reserviert. Links ziehen verschiebt; Ränder/Ecken skalieren mit festem Seitenverhältnis (mindestens 48 px je Seite), das Mausrad zoomt um den Cursor. Doppelklick oder Esc im fokussierten Pin schließt. Rechtsklick bietet Kopieren, Speichern… (immer mit Dialog), Originalgröße und Schließen. Mehrere Pins und „Letzte Aufnahme fortsetzen“ sind gleichzeitig möglich.
@@ -39,6 +39,8 @@ Tastenkürzel (Kombination direkt drücken; ist sie belegt, bleibt das alte akti
 
 Aufnahmen bleiben lokal. Nur eine ausdrücklich gestartete Texterkennung sendet das bearbeitete Bild an OpenAI. [Offizieller OAuth-Ablauf](https://developers.openai.com/siwc/token-sharing-open-source/sign-in), [unterstützte Bildanfragen](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations).
 
+Bei blockierten ausgehenden Verbindungen (`AccessDenied` oder `NetworkUnreachable`) nennen Anmeldung und `--openai-probe` die konkrete Abhilfe: `KairosCapture.exe` für ausgehende Verbindungen in der Firewall freigeben, z. B. in Windows Firewall Control. Diese Verbindungsfehler lösen keinen automatischen Token-POST-Retry aus. Kairos ändert keine Firewall-Regeln.
+
 ## Bauen und prüfen
 
 Voraussetzung: .NET 10 SDK. Keine zusätzliche JavaScript-Toolchain erforderlich.
@@ -47,9 +49,11 @@ Voraussetzung: .NET 10 SDK. Keine zusätzliche JavaScript-Toolchain erforderlich
 .\scripts\build.ps1
 ```
 
-Das Skript baut Release, führt neun Offline-Prüfsuiten aus und erzeugt eine kleine, frameworkabhängige Windows-x64-Ausgabe. Ergebnisse (`self-test.json`) und die tatsächlich gerenderten WPF-Ansichten (`overlay.png`, `settings-window.png`, `ocr-result.png`, `tray-menu.png`) landen in `test-results`. Der persönliche OAuth-Login und eine echte Cloud-OCR-Anfrage sind keine Offline-Prüfung und werden dadurch nicht als erfolgreich behauptet.
+Das Skript baut Release, führt neun Offline-Prüfsuiten aus und erzeugt eine kleine, frameworkabhängige Windows-x64-Ausgabe in `artifacts\KairosCapture-win-x64`. Ist die dortige EXE gesperrt, bricht das Skript vor dem Build mit „Kairos läuft noch – bitte über das Tray-Menü beenden“ ab; es beendet keinen Prozess. Ergebnisse (`self-test.json`) und die tatsächlich gerenderten WPF-Ansichten (`overlay.png`, `settings-window.png`, `ocr-result.png`, `tray-menu.png`) landen in `test-results`. Der persönliche OAuth-Login und eine echte Cloud-OCR-Anfrage sind keine Offline-Prüfung und werden dadurch nicht als erfolgreich behauptet.
 
 Die Overlay-Suite prüft außerdem die vier rechten Aktionen, Dialogabbruch, den Pin-Handoff samt Flatten-Bild und fortsetzbarer Sitzung sowie Resize-/Zoom-Verhältnis, Mindestgröße und DPI-Layout (100–300 %). Unsichtbare HWNDs prüfen die nativen Positionen und Größen bei hohen und breiten Bildern; ein 20000-px-Original prüft die Zoomrichtung oberhalb der früheren 16384-px-Grenze. Die Settings-Suite ersetzt den Speicherdialog durch eine injizierte Funktion. `KairosCapture --render-pin test-results/pin.png` rendert den echten Pin-Inhalt mit Schatten auf neutralem Hintergrund, ohne ein Fenster anzuzeigen.
+
+Doppelklick-Regressionen verwenden dieselbe Gestenroute wie der Fenster-Handler (`ClickCount=2`) und eine injizierte Kopierfunktion ohne Zugriff auf die echte Zwischenablage. Sie prüfen Copy-Completion, Textbearbeitung, Klicks außerhalb, fehlgeschlagene Ausgabe und erneute Toolbar-Vermessung mit Blur-Hintergrund. Das Hintergrundbild liegt in einem Canvas und bestimmt dadurch nicht die automatische Toolbar-Höhe.
 
 ```powershell
 # Nur bauen und prüfen

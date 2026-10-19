@@ -8,6 +8,18 @@ param(
 $ErrorActionPreference = 'Stop'
 $kairosRoot = Split-Path -Parent $PSScriptRoot
 $kairosProject = Join-Path $kairosRoot 'src\KairosCapture\KairosCapture.csproj'
+$kairosOutput = Join-Path $kairosRoot 'artifacts\KairosCapture-win-x64'
+$kairosPublishExecutable = Join-Path $kairosOutput 'KairosCapture.exe'
+function Assert-KairosPublishAvailable {
+    if (-not (Test-Path -LiteralPath $kairosPublishExecutable -PathType Leaf)) { return }
+    try {
+        $kairosPublishLock = [IO.File]::Open($kairosPublishExecutable, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+        $kairosPublishLock.Dispose()
+    }
+    catch [IO.IOException] { throw 'Kairos läuft noch – bitte über das Tray-Menü beenden und den Build erneut starten.' }
+    catch [UnauthorizedAccessException] { throw 'Die Publish-Zieldatei KairosCapture.exe ist nicht beschreibbar. Bitte die Zugriffsrechte im artifacts-Ordner prüfen.' }
+}
+if (-not $BuildOnly) { Assert-KairosPublishAvailable }
 $kairosPrivateDotnet = Join-Path $kairosRoot '.tools\dotnet\dotnet.exe'
 $kairosSdkHintPath = Join-Path $kairosRoot '.tools\dotnet-sdk-path.txt'
 # Git worktrees share the repository's already installed private SDK/cache.
@@ -83,7 +95,7 @@ try {
         Write-Host "Offline-Prüfungen bestanden. Aufnahme-Overlay: $kairosOverlayPreview"
     }
     if (-not $BuildOnly) {
-        $kairosOutput = Join-Path $kairosRoot 'artifacts\KairosCapture-0.4.0-win-x64'
+        Assert-KairosPublishAvailable
         & $kairosDotnet publish $kairosProject -c Release -r win-x64 --self-contained false --no-restore --nologo -o $kairosOutput
         if ($LASTEXITCODE -ne 0) { throw 'Frameworkabhängiger Publish-Build fehlgeschlagen.' }
         Write-Host "Startbereit: $(Join-Path $kairosOutput 'KairosCapture.exe')"
