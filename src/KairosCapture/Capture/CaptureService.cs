@@ -39,7 +39,7 @@ public static class CaptureService
 
     internal static void Remember(CaptureSessionResult result)
     {
-        if (result.Completion is CaptureCompletion.Copied or CaptureCompletion.Saved or CaptureCompletion.Ocr && result.Editor != null)
+        if (result.Completion is CaptureCompletion.Copied or CaptureCompletion.Saved or CaptureCompletion.Ocr or CaptureCompletion.Pinned && result.Editor != null)
             LastSession = result;
     }
 
@@ -55,6 +55,7 @@ public static class CaptureService
         Visibility visibility = owner.Visibility;
         WindowState state = owner.WindowState;
         bool ownerClosed = false;
+        IntPtr previousForeground = GetForegroundWindow();
         RegionOverlay? overlay = null;
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         void OnOwnerClosed(object? sender, EventArgs args)
@@ -131,7 +132,7 @@ public static class CaptureService
                 if (!ownerClosed)
                 {
                     owner.WindowState = state;
-                    if (editing && overlay?.Result.Completion is CaptureCompletion.Copied or CaptureCompletion.Saved or CaptureCompletion.Ocr)
+                    if (editing && overlay?.Result.Completion is CaptureCompletion.Copied or CaptureCompletion.Saved or CaptureCompletion.Ocr or CaptureCompletion.Pinned)
                     {
                         owner.Hide();
                     }
@@ -145,6 +146,9 @@ public static class CaptureService
                         owner.Visibility = visibility;
                     }
                 }
+                // The overlay activated itself. Return the user's focus before showing a nonactivating pin.
+                if (overlay?.Result.Completion == CaptureCompletion.Pinned && previousForeground != IntPtr.Zero && IsWindow(previousForeground))
+                    SetForegroundWindow(previousForeground);
             }
             finally
             {
@@ -192,6 +196,17 @@ public static class CaptureService
 
     // Deliberately separate from Run(): only a caller explicitly requesting a real capture uses this.
     internal static BitmapSource CaptureDesktopForCheck() => CaptureDesktop(GetVirtualBounds());
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(IntPtr window);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindow(IntPtr window);
 
     [DllImport("user32.dll")]
     private static extern int GetSystemMetrics(int index);

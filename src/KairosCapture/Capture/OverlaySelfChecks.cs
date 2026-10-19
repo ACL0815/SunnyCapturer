@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -27,6 +28,9 @@ public static class OverlaySelfChecks
         CheckSelectedStyle(background);
         CheckRoutesAndText(background);
         CheckCompletion(background);
+        CheckSaveDialog(background);
+        CheckPins(background);
+        CheckNativePinBounds();
         CheckResume(background);
         CheckOcrMode(background);
         CheckGestureEscape(background);
@@ -38,7 +42,7 @@ public static class OverlaySelfChecks
 
     private static void CheckResume(BitmapSource background)
     {
-        foreach (CaptureCompletion completion in new[] { CaptureCompletion.Copied, CaptureCompletion.Saved, CaptureCompletion.Ocr })
+        foreach (CaptureCompletion completion in new[] { CaptureCompletion.Copied, CaptureCompletion.Saved, CaptureCompletion.Ocr, CaptureCompletion.Pinned })
         {
             var overlay = Create(background);
             Int32Rect crop = new(30, 20, 700, 430); overlay.SetRegion(crop);
@@ -293,6 +297,9 @@ public static class OverlaySelfChecks
         var overlay = Create(background);
         overlay.SetRegion(new Int32Rect(80, 70, 760, 410));
         Layout(overlay.PreviewRoot, background.PixelWidth, background.PixelHeight);
+        string[] actions = Buttons(overlay.Toolbar).Select(b => b.Tag).OfType<string>().ToArray();
+        Require(actions.TakeLast(4).SequenceEqual(new[] { "Close", "Pin", "Save", "Check" }) && !actions.Contains("Copy"),
+            "Right action group must end with Close, Pin, Save, Check and contain no Copy button.");
         ButtonBase rectangle = Buttons(overlay.Toolbar).Single(b => Equals(b.Tag, EditorTool.Rectangle));
         rectangle.ApplyTemplate();
         DependencyObject source = (DependencyObject?)Descendant<TextBlock>(rectangle) ?? rectangle;
@@ -366,20 +373,21 @@ public static class OverlaySelfChecks
             "Copy/save must export the current crop without handles and close only after success.");
         Require(overlay.Result.Completion == CaptureCompletion.Copied && ReferenceEquals(overlay.Result.Editor, overlay.Editor),
             "Completed copy must retain the live session for resume.");
-        foreach (CaptureCompletion completion in new[] { CaptureCompletion.Ocr })
+        foreach (CaptureCompletion completion in new[] { CaptureCompletion.Ocr, CaptureCompletion.Pinned })
         {
             var handoff = Create(background);
             handoff.SetRegion(crop);
             AnnotationCanvas editor = handoff.Editor;
             Draw(editor, EditorTool.Rectangle, new Point(80, 70), new Point(120, 110));
             byte[] edited = Bytes(editor.Flatten(crop));
-            var button = Buttons(handoff.Toolbar).Single(b => Equals(b.Tag, "Ocr"));
+            var button = Buttons(handoff.Toolbar).Single(b => Equals(b.Tag, completion == CaptureCompletion.Ocr ? "Ocr" : "Pin"));
             button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             Require(handoff.IsClosed && handoff.Result.Completion == completion && ReferenceEquals(handoff.Result.Editor, editor) && handoff.Result.Region == crop,
                 "Explicit OCR must return the same live editor and physical crop.");
             Require(VisualTreeHelper.GetParent(editor) == null && editor.Parent == null && editor.Clip == null,
                 "The editor must be detached from the overlay before handoff.");
             Require(edited.SequenceEqual(Bytes(editor.Flatten(crop))) && editor.CanUndo, "Completed session must preserve exact output and history.");
+            Require(handoff.Result.Image != null && edited.SequenceEqual(Bytes(handoff.Result.Image)), "OCR and pin must receive the exact flattened crop.");
             editor.Undo(); editor.Redo();
             Require(edited.SequenceEqual(Bytes(editor.Flatten(crop))), "Completed history must remain live.");
         }
@@ -392,6 +400,162 @@ public static class OverlaySelfChecks
             { RoutedEvent = UIElement.PreviewMouseRightButtonDownEvent });
         Require(right.IsClosed && right.Result.Completion == CaptureCompletion.Cancelled, "Right-click route must cancel.");
     }
+
+    private static void CheckSaveDialog(BitmapSource background)
+    {
+        string directory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "kairos-overlay-save-" + Guid.NewGuid().ToString("N"));
+        int prompts = 0;
+        bool accept = false;
+        var settings = new AppSettings { SaveFolder = directory };
+        var overlay = new RegionOverlay(background, new DrawingRectangle(-1600, -900, background.PixelWidth, background.PixelHeight), settings: settings,
+            saveImage: (image, owner, preferences) => ImageOutput.Save(image, owner, preferences, (dialog, _) =>
+            { prompts++; dialog.FileName = System.IO.Path.Combine(directory, "selection.png"); return accept; }));
+        try
+        {
+            var region = new Int32Rect(30, 20, 700, 430);
+            overlay.SetRegion(region);
+            Draw(overlay.Editor, EditorTool.Rectangle, new Point(80, 70), new Point(150, 130));
+            object? identity = overlay.Editor.SelectedIdentity;
+            byte[] expected = Bytes(overlay.Editor.Flatten(region));
+            Buttons(overlay.Toolbar).Single(b => Equals(b.Tag, "Save")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Require(prompts == 1 && !overlay.IsClosed && overlay.Selection == region && overlay.Editor.CanUndo &&
+                ReferenceEquals(identity, overlay.Editor.SelectedIdentity) && expected.SequenceEqual(Bytes(overlay.Editor.Flatten(region))),
+                "Save button must invoke dialog and cancellation must preserve crop, annotations, selection and history.");
+            Require(overlay.HandleSessionKey(Key.S, ModifierKeys.Control) && prompts == 2 && !overlay.IsClosed,
+                "Ctrl+S must use the same cancellable dialog path.");
+            accept = true;
+            Require(overlay.HandleSessionKey(Key.S, ModifierKeys.Control) && prompts == 3 && overlay.IsClosed &&
+                overlay.Result.Completion == CaptureCompletion.Saved && expected.SequenceEqual(Bytes(ImageOutput.Load(overlay.Result.SavedPath!))),
+                "Confirmed save dialog must write the flattened image and finish the session.");
+        }
+        finally
+        {
+            overlay.Cancel();
+            if (System.IO.Directory.Exists(directory)) System.IO.Directory.Delete(directory, true);
+        }
+    }
+
+    private static void CheckPins(BitmapSource background)
+    {
+        var overlay = Create(background);
+        var region = new Int32Rect(30, 20, 700, 430);
+        overlay.SetRegion(region);
+        Require(overlay.HandleSessionKey(Key.P) && overlay.Editor.Tool == EditorTool.Pen && !overlay.IsClosed, "P must remain the pen tool.");
+        Draw(overlay.Editor, EditorTool.Redact, new Point(80, 70), new Point(150, 130));
+        byte[] expected = Bytes(overlay.Editor.Flatten(region));
+        Require(overlay.HandleSessionKey(Key.I) && overlay.IsClosed && overlay.Result.Completion == CaptureCompletion.Pinned, "Free shortcut I must pin the crop.");
+        CaptureSessionResult result = overlay.Result;
+        var pin = new PinWindow(result.Image!, result.Bounds, result.Region, new AppSettings());
+        var second = new PinWindow(result.Image!, result.Bounds, result.Region, new AppSettings());
+        try
+        {
+            Require(pin.ImageBounds == new Rect(-1570, -880, 700, 430) && ReferenceEquals(pin.ImageSource, result.Image) &&
+                expected.SequenceEqual(Bytes(pin.ImageSource!)), "Pin position, size and source must exactly match the selected flattened physical crop.");
+            Require(pin.Topmost && !pin.ShowActivated && !pin.ShowInTaskbar && pin.WindowStyle == WindowStyle.None && pin.ResizeMode == ResizeMode.NoResize,
+                "Pin must be a nonactivating topmost borderless image window.");
+            Require(pin.ContextMenu.Items.OfType<MenuItem>().Select(i => i.Header).SequenceEqual(new[] { "Kopieren", "Speichern…", "Originalgröße", "Schließen" }),
+                "Pin context menu must expose all four glass actions.");
+            var image = ((Canvas)pin.PreviewRoot).Children.OfType<Image>().Single();
+            Require(image.Effect == null && RenderOptions.GetBitmapScalingMode(image) == BitmapScalingMode.NearestNeighbor,
+                "Original image pixels must bypass the shadow effect and resampling.");
+            foreach (double dpi in new[] { 1d, 1.25, 1.5, 2, 3 })
+            {
+                var view = (FrameworkElement)pin.Content;
+                double width = (region.Width + 2 * PinWindow.ShadowPixels) / dpi, height = (region.Height + 2 * PinWindow.ShadowPixels) / dpi;
+                view.Measure(new Size(width, height)); view.Arrange(new Rect(0, 0, width, height)); view.UpdateLayout();
+                Rect placed = image.TransformToAncestor(view).TransformBounds(new Rect(0, 0, image.ActualWidth, image.ActualHeight));
+                Require(Math.Abs(placed.Width * dpi - region.Width) < .00001 && Math.Abs(placed.Height * dpi - region.Height) < .00001 &&
+                    Math.Abs(placed.Left * dpi - PinWindow.ShadowPixels) < .00001, "Viewbox must retain a physical 1:1 raster and outside shadow at every tested DPI.");
+            }
+            Point cursor = pin.ImageBounds.TopLeft + new Vector(200, 100);
+            pin.ZoomAt(cursor, 1.5);
+            Require(Math.Abs(pin.ImageBounds.Width / pin.ImageBounds.Height - 700d / 430) < .00001 &&
+                RenderOptions.GetBitmapScalingMode(image) == BitmapScalingMode.HighQuality && second.ImageBounds.Width == 700,
+                "Zoom must preserve aspect and use high quality without changing another pin.");
+            pin.ResetSize();
+            Require(pin.ImageBounds.Size == new Size(700, 430), "Original size must restore physical source pixels.");
+            Require(!pin.IsVisible && new System.Windows.Interop.WindowInteropHelper(pin).Handle == IntPtr.Zero, "Pin checks must never show a native window.");
+        }
+        finally { pin.Close(); second.Close(); }
+        Require(pin.ImageSource == null && second.ImageSource == null, "Closed pins must release their display sources.");
+
+        foreach (Rect start in new[] { new Rect(-1600, -900, 700, 430), new Rect(10, 20, 120, 600), new Rect(0, 0, 300, 300) })
+        {
+            double aspect = start.Width / start.Height;
+            foreach (var edges in new[] { RegionOverlay.FrameHandle.Left, RegionOverlay.FrameHandle.Right, RegionOverlay.FrameHandle.Top, RegionOverlay.FrameHandle.Bottom,
+                RegionOverlay.FrameHandle.Left | RegionOverlay.FrameHandle.Top, RegionOverlay.FrameHandle.Right | RegionOverlay.FrameHandle.Top,
+                RegionOverlay.FrameHandle.Left | RegionOverlay.FrameHandle.Bottom, RegionOverlay.FrameHandle.Right | RegionOverlay.FrameHandle.Bottom })
+            foreach (Vector delta in new[] { new Vector(45, 31), new Vector(-9000, -9000), new Vector(9000, 9000) })
+            {
+                Rect resized = PinGeometry.Resize(start, edges, delta);
+                Require(Math.Abs(resized.Width / resized.Height - aspect) < .00001 && resized.Width >= 48 - .00001 && resized.Height >= 48 - .00001,
+                    "Every edge/corner resize must retain aspect ratio and the 48px minimum.");
+                if (edges.HasFlag(RegionOverlay.FrameHandle.Left)) Require(Math.Abs(resized.Right - start.Right) < .00001, "Left resize must anchor the right edge.");
+                if (edges.HasFlag(RegionOverlay.FrameHandle.Right)) Require(Math.Abs(resized.Left - start.Left) < .00001, "Right resize must anchor the left edge.");
+                if (edges.HasFlag(RegionOverlay.FrameHandle.Top)) Require(Math.Abs(resized.Bottom - start.Bottom) < .00001, "Top resize must anchor the bottom edge.");
+                if (edges.HasFlag(RegionOverlay.FrameHandle.Bottom)) Require(Math.Abs(resized.Top - start.Top) < .00001, "Bottom resize must anchor the top edge.");
+            }
+            Point cursor = start.TopLeft + new Vector(start.Width * .3, start.Height * .7);
+            foreach (double factor in new[] { .00001, .5, 1.5, 1000 })
+            {
+                Rect zoomed = PinGeometry.Zoom(start, cursor, factor);
+                Require(Math.Abs(zoomed.Width / zoomed.Height - aspect) < .00001 && zoomed.Width >= 48 - .00001 && zoomed.Height >= 48 - .00001 &&
+                    Math.Abs((cursor.X - zoomed.Left) / zoomed.Width - .3) < .00001 && Math.Abs((cursor.Y - zoomed.Top) / zoomed.Height - .7) < .00001,
+                    "Zoom must preserve aspect, minimum size and the image pixel underneath the cursor, including clamping.");
+            }
+        }
+    }
+
+    private static void CheckNativePinBounds()
+    {
+        // EnsureHandle creates only hidden, app-owned HWNDs; no Show, focus change or desktop input.
+        foreach (Size size in new[] { new Size(1000, 1600), new Size(16000, 1000) })
+        {
+            int width = (int)size.Width, height = (int)size.Height;
+            var source = BitmapSource.Create(width, height, 96, 96, PixelFormats.Bgra32, null, new byte[width * height * 4], width * 4);
+            source.Freeze();
+            var pin = new PinWindow(source, new DrawingRectangle(-20000, -20000, width, height), new Int32Rect(0, 0, width, height), new AppSettings());
+            try
+            {
+                IntPtr handle = new System.Windows.Interop.WindowInteropHelper(pin).EnsureHandle();
+                var origin = new NativePoint();
+                Require(!IsWindowVisible(handle) && GetClientRect(handle, out NativeRect client) && ClientToScreen(handle, ref origin) &&
+                    client.Right == width + 2 * PinWindow.ShadowPixels && client.Bottom == height + 2 * PinWindow.ShadowPixels &&
+                    origin.X == -20000 - PinWindow.ShadowPixels && origin.Y == -20000 - PinWindow.ShadowPixels,
+                    "Hidden native pin bounds must match large/tall source pixels plus outside shadow without desktop MaxTrack clipping.");
+                DpiScale dpi = VisualTreeHelper.GetDpi(pin);
+                var view = (FrameworkElement)pin.Content;
+                var layout = new Size((width + 2 * PinWindow.ShadowPixels) / dpi.DpiScaleX, (height + 2 * PinWindow.ShadowPixels) / dpi.DpiScaleY);
+                pin.Measure(layout); pin.Arrange(new Rect(layout)); pin.UpdateLayout();
+                view.Measure(layout); view.Arrange(new Rect(layout)); view.UpdateLayout();
+                var image = ((Canvas)pin.PreviewRoot).Children.OfType<Image>().Single();
+                Rect drawn = image.TransformToAncestor(view).TransformBounds(new Rect(image.RenderSize));
+                Require(Math.Abs(drawn.Width * dpi.DpiScaleX - width) < .00001 && Math.Abs(drawn.Height * dpi.DpiScaleY - height) < .00001 &&
+                    !pin.IsVisible && !IsWindowVisible(handle), "Native pin layout must retain 1:1 source dimensions without WPF MaxTrack clipping or showing the HWND.");
+                pin.ZoomAt(pin.ImageBounds.TopLeft + new Vector(width / 2d, height / 2d), 1.12);
+                Require(GetClientRect(handle, out client) && client.Right == Math.Round(pin.ImageBounds.Width) + 2 * PinWindow.ShadowPixels &&
+                    client.Bottom == Math.Round(pin.ImageBounds.Height) + 2 * PinWindow.ShadowPixels,
+                    "Native resized pin client bounds must remain synchronized with zoom geometry.");
+            }
+            finally { pin.Close(); }
+        }
+        var wide = new Rect(0, 0, 20000, 1000);
+        Rect larger = PinGeometry.Zoom(wide, new Point(10000, 500), 1.12);
+        Require(larger.Width > wide.Width && Math.Abs(larger.Width - 22400) < .00001 && Math.Abs(larger.Height - 1120) < .00001,
+            "Zoom in must enlarge valid originals wider than 16384px instead of shrinking them.");
+        var maximum = new Rect(0, 0, PinGeometry.MaximumPixels, 1000);
+        Require(PinGeometry.Zoom(maximum, maximum.TopLeft, 1.12).Width == maximum.Width,
+            "Zoom at the supported maximum may stay fixed but must never reverse direction.");
+    }
+
+    [StructLayout(LayoutKind.Sequential)] private struct NativePoint { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)] private struct NativeRect { public int Left, Top, Right, Bottom; }
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetClientRect(IntPtr handle, out NativeRect rectangle);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ClientToScreen(IntPtr handle, ref NativePoint point);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindowVisible(IntPtr handle);
 
     private static void CheckRendering(BitmapSource background)
     {
