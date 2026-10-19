@@ -153,9 +153,8 @@ internal sealed class RegionOverlay : Window
         _undo = AddButton(tools, "Undo", "Rückgängig · Strg+Z", Editor.Undo);
         _redo = AddButton(tools, "Redo", "Wiederholen · Strg+Y", Editor.Redo);
         AddButton(tools, "Delete", "Löschen · Entf", Editor.DeleteSelected);
-        AddDivider(tools);
-        AddButton(tools, "Ocr", "Text erkennen · O", () => _ = CompleteAsync(CaptureCompletion.Ocr));
         var actions = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        AddButton(actions, "Ocr", "Text erkennen · O", () => _ = CompleteAsync(CaptureCompletion.Ocr));
         AddDivider(actions);
         AddButton(actions, "Close", "Abbrechen · Esc", Cancel);
         AddButton(actions, "Pin", "Anpinnen · I", () => _ = CompleteAsync(CaptureCompletion.Pinned));

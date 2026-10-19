@@ -437,8 +437,13 @@ public static class OverlaySelfChecks
         overlay.SetRegion(new Int32Rect(80, 70, 760, 410));
         Layout(overlay.PreviewRoot, background.PixelWidth, background.PixelHeight);
         string[] actions = Buttons(overlay.Toolbar).Select(b => b.Tag).OfType<string>().ToArray();
-        Require(actions.TakeLast(4).SequenceEqual(new[] { "Close", "Pin", "Save", "Check" }) && !actions.Contains("Copy"),
-            "Right action group must end with Close, Pin, Save, Check and contain no Copy button.");
+        Require(actions.TakeLast(5).SequenceEqual(new[] { "Ocr", "Close", "Pin", "Save", "Check" }) && !actions.Contains("Copy"),
+            "Right action group must be Ocr, then Close, Pin, Save, Check, and contain no Copy button.");
+        ButtonBase ocr = Buttons(overlay.Toolbar).Single(b => Equals(b.Tag, "Ocr"));
+        ButtonBase close = Buttons(overlay.Toolbar).Single(b => Equals(b.Tag, "Close"));
+        ButtonBase delete = Buttons(overlay.Toolbar).Single(b => Equals(b.Tag, "Delete"));
+        Require(ReferenceEquals(ocr.Parent, close.Parent) && !ReferenceEquals(ocr.Parent, delete.Parent),
+            "Text recognition must sit in the right action group, not beside the editing tools.");
         ButtonBase rectangle = Buttons(overlay.Toolbar).Single(b => Equals(b.Tag, EditorTool.Rectangle));
         rectangle.ApplyTemplate();
         DependencyObject source = (DependencyObject?)Descendant<TextBlock>(rectangle) ?? rectangle;

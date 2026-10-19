@@ -95,8 +95,11 @@ internal static class AppDiagnostics
         catch (Exception exception)
         {
             Exception cause = exception is TargetInvocationException { InnerException: { } inner } ? inner : exception;
+            // Assertion texts thrown by the checks themselves are fixed strings; everything else stays redacted.
+            bool ownAssertion = cause.TargetSite?.DeclaringType?.Name is { } site &&
+                (site.EndsWith("SelfChecks", StringComparison.Ordinal) || site == nameof(AppDiagnostics));
             results.Add(new CheckResult(name, "failed", watch.ElapsedMilliseconds,
-                new[] { OpenAiDiagnostics.Describe(cause) }));
+                new[] { ownAssertion ? cause.Message : OpenAiDiagnostics.Describe(cause) }));
         }
     }
 
