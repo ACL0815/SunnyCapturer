@@ -1,0 +1,31 @@
+<!-- CONTRACT (Lead): keys are fixed; geometry content is owned by the icon writer.
+     Glyph.*: stroke line icons in a 24x24 box, drawn with Style "GlassIcon" (Stroke = Foreground, round caps).
+     AppIcon: full-colour Liquid-Glass app icon as DrawingImage, design box 0,0,256,256. -->
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Geometry x:Key="Glyph.Capture">M4,4 L20,4 L20,20 L4,20 Z</Geometry>
+  <Geometry x:Key="Glyph.Fullscreen">M4,4 L20,4 L20,20 L4,20 Z</Geometry>
+  <Geometry x:Key="Glyph.Timer">M4,4 L20,4 L20,20 L4,20 Z</Geometry>
+  <Geometry x:Key="Glyph.Ocr">M4,4 L20,4 L20,20 L4,20 Z</Geometry>
+  <Geometry x:Key="Glyph.Select">M4,4 L20,4 L20,20 L4,20 Z</Geometry>
+  <Geometry x:Key="Glyph.Rectangle">M4,4 L20,4 L20,20 L4,20 Z</Geometry>
+  <Geometry x:Key="Glyph.Ellipse">M4,4 L20,4 L20,20 L4,20 Z</Geometry>
+  <Geometry x:Key="Glyph.Arrow">M4,4 L20,4 L20,20 L4,20 Z</Geometry>
+  <Geometry x:Key="Glyph.Pen">M4,4 L20,4 L20,20 L4,20 Z</Geometry>
+  <Geometry x:Key="Glyph.Text">M4,4 L20,4 L20,20 L4,20 Z</Geometry>
+  <Geometry x:Key="Glyph.Highlight">M4,4 L20,4 L20,20 L4,20 Z</Geometry>
+  <Geometry x:Key="Glyph.Redact">M4,4 L20,4 L20,20 L4,20 Z</Geometry>
+  <Geometry x:Key="Glyph.Undo">M4,4 L20,4 L20,20 L4,20 Z</Geometry>
+  <Geometry x:Key="Glyph.Redo">M4,4 L20,4 L20,20 L4,20 Z</Geometry>
+  <Geometry x:Key="Glyph.Delete">M4,4 L20,4 L20,20 L4,20 Z</Geometry>
+  <Geometry x:Key="Glyph.Copy">M4,4 L20,4 L20,20 L4,20 Z</Geometry>
+  <Geometry x:Key="Glyph.Save">M4,4 L20,4 L20,20 L4,20 Z</Geometry>
+  <Geometry x:Key="Glyph.Close">M4,4 L20,4 L20,20 L4,20 Z</Geometry>
+  <Geometry x:Key="Glyph.Settings">M4,4 L20,4 L20,20 L4,20 Z</Geometry>
+  <Geometry x:Key="Glyph.Folder">M4,4 L20,4 L20,20 L4,20 Z</Geometry>
+  <Geometry x:Key="Glyph.History">M4,4 L20,4 L20,20 L4,20 Z</Geometry>
+  <Geometry x:Key="Glyph.Exit">M4,4 L20,4 L20,20 L4,20 Z</Geometry>
+  <Geometry x:Key="Glyph.Account">M4,4 L20,4 L20,20 L4,20 Z</Geometry>
+  <Geometry x:Key="Glyph.Check">M4,4 L20,4 L20,20 L4,20 Z</Geometry>
+  <Geometry x:Key="Glyph.Keyboard">M4,4 L20,4 L20,20 L4,20 Z</Geometry>
+  <DrawingImage x:Key="AppIcon"><DrawingImage.Drawing><GeometryDrawing Brush="#7D4BE3" Geometry="M0,0 H256 V256 H0 Z" /></DrawingImage.Drawing></DrawingImage>
+</ResourceDictionary>
