@@ -20,9 +20,11 @@ using KairosCapture.Services;
 
 namespace KairosCapture;
 
+internal sealed class SelfCheckFailure(string message) : Exception(message);
+
 internal static class AppDiagnostics
 {
-    private sealed record CheckResult(string Name, string Status, long DurationMs, IReadOnlyList<string> Errors);
+    internal sealed record CheckResult(string Name, string Status, long DurationMs, IReadOnlyList<string> Errors);
     private sealed class OfflineHandler : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
@@ -104,7 +106,7 @@ internal static class AppDiagnostics
         return passed ? 0 : 1;
     }
 
-    private static void RunCheck(List<CheckResult> results, string name, Func<IReadOnlyList<string>> check)
+    internal static void RunCheck(List<CheckResult> results, string name, Func<IReadOnlyList<string>> check)
     {
         Stopwatch watch = Stopwatch.StartNew();
         try
@@ -115,11 +117,8 @@ internal static class AppDiagnostics
         catch (Exception exception)
         {
             Exception cause = exception is TargetInvocationException { InnerException: { } inner } ? inner : exception;
-            // Assertion texts thrown by the checks themselves are fixed strings; everything else stays redacted.
-            bool ownAssertion = cause.TargetSite?.DeclaringType?.Name is { } site &&
-                (site.EndsWith("SelfChecks", StringComparison.Ordinal) || site == nameof(AppDiagnostics));
             results.Add(new CheckResult(name, "failed", watch.ElapsedMilliseconds,
-                new[] { ownAssertion ? cause.Message : OpenAiDiagnostics.Describe(cause) }));
+                new[] { cause is SelfCheckFailure ? cause.Message : OpenAiDiagnostics.Describe(cause) }));
         }
     }
 
@@ -294,7 +293,7 @@ internal static class AppDiagnostics
 
     private static void Require(bool condition, string message)
     {
-        if (!condition) throw new InvalidOperationException(message);
+        if (!condition) throw new SelfCheckFailure(message);
     }
 
     private static void RenderOverlayPreview(string path)

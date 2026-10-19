@@ -129,6 +129,6 @@ public static class CaptureSelfChecks
     private static void Check(bool condition, string name)
     {
         if (!condition)
-            throw new InvalidOperationException($"CaptureSelfChecks: {name} fehlgeschlagen.");
+            throw new SelfCheckFailure($"CaptureSelfChecks: {name} fehlgeschlagen.");
     }
 }
