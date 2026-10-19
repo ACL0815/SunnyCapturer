@@ -1,31 +1,39 @@
 # Kairos Capture
 
-> Stand 18.10.2026, Version 0.2.0: Die Aufnahme bleibt nach der Auswahl zum direkten Bearbeiten im Bildschirm-Overlay offen. Rahmen und Markierungen lassen sich anschließend weiter verändern. Der erste Stand mit automatischem Wechsel ins Hauptfenster verfehlte diesen Kern und wurde ersetzt. Der korrigierte Gesamtbuild, sechs Offline-Prüfsuiten und beide WPF-Vorschauen sind von Root geprüft; die reale Maus-/Tastaturfolge und Mixed-DPI sind noch offen. Siehe [Kernabnahme](docs/kairos/OVERLAY-ABNAHME.md) und [Untersuchungsbericht](docs/kairos/reverse/README.md).
+> Stand 19.10.2026, Version 0.3.0: Kairos läuft nur noch im Infobereich. Die frühere Werkbank ist entfallen; das Fenster dient nur noch den Einstellungen. Overlay, Tray-Menü und Icons haben einen Liquid-Glass-Look. Build, neun Offline-Prüfsuiten und alle WPF-Vorschauen sind geprüft. Echte Maus-/Tastaturbedienung, Mixed-DPI und echter OpenAI-Zugriff sind weiterhin offen. Siehe [Kernabnahme](docs/kairos/OVERLAY-ABNAHME.md), [Icons](docs/kairos/ICONS.md).
 
-Native Screenshot-Anwendung für Windows 11, geschrieben in C# mit WPF und .NET 10. Die Oberfläche übernimmt die dunkle Violett-/Lavendel-/Gold-Palette der Nutzervorlage. Die ursprünglichen SunnyCapturer-Dokumente und historischen Quellen bleiben im Repository verfügbar.
+Native Screenshot-Anwendung für Windows 11, geschrieben in C# mit WPF und .NET 10, in der dunklen Violett-/Lavendel-/Gold-Palette der Nutzervorlage.
 
 ## Starten
 
-`artifacts\KairosCapture-0.2.0-win-x64\KairosCapture.exe` öffnen. Alternativ:
+`artifacts\KairosCapture-0.3.0-win-x64\KairosCapture.exe` öffnen oder `.\Start-KairosCapture.ps1`. Kairos erscheint ohne Fenster im Infobereich. Voraussetzung ist die **.NET 10 Desktop Runtime** für Windows x64.
 
-```powershell
-.\Start-KairosCapture.ps1
-```
+## Tray
 
-Die Anwendung benötigt die **.NET 10 Desktop Runtime** für Windows x64. Auf dem Entwicklungsrechner ist sie bereits vorhanden. Das SDK wird nur zum Bauen benötigt.
+- **Linksklick:** Bereich aufnehmen (wie das Tastenkürzel, Standard **Strg+Alt+A**).
+- **Rechtsklick:**
+  - Vollbild aufnehmen (Monitor unter dem Mauszeiger vorausgewählt)
+  - Verzögert aufnehmen (3/5/10 s; ein Linksklick bricht den Countdown ab)
+  - Text erkennen… (die Erkennung startet direkt nach dem Aufziehen)
+  - Letzte Aufnahme fortsetzen (derselbe eingefrorene Bildschirm samt Rahmen, Objekten und Undo/Redo)
+  - Zuletzt gespeichert
+  - OCR-Kontostatus
+  - Einstellungen
+  - Beenden
 
-## Arbeiten
+## Arbeiten im Overlay
 
-1. **Bereich aufnehmen** anklicken oder **Strg+Alt+A** drücken. Bereich aufziehen und die Maus loslassen: Der eingefrorene Bildschirm bleibt mit Rahmen und schwebender Werkzeugleiste offen.
-2. Den Rahmen an seinen **acht Griffen** verändern. **Leertaste + Ziehen** verschiebt den Ausschnitt; mit dem Auswahlwerkzeug geht das auch auf freier Bildfläche. Er lässt sich über die erste Auswahl hinaus vergrößern, weil die vollständige Bildschirmaufnahme erhalten bleibt.
-3. Direkt im Overlay zeichnen, markieren oder Text einsetzen. **Auswahl** aktiviert bestehende Objekte zum Verschieben und Skalieren. Doppelklick öffnet vorhandenen Text erneut; Farbe und Dicke ändern auch ein ausgewähltes Objekt. Undo/Redo bleibt bei Rahmenänderungen erhalten.
-4. **Kopieren** oder **Speichern** gibt den aktuellen Ausschnitt samt Markierungen ohne Griffe oder Werkzeugleiste aus. Die Sitzung endet erst nach erfolgreicher Ausgabe. Ein abgebrochener Speicherdialog lässt sie offen. **Esc** verwirft zuerst eine laufende Text-, Zeichen- oder Rahmengeste; ohne aktive Geste beendet es die Sitzung. Rechtsklick oder **Abbrechen** beendet sie ohne Ausgabe.
-5. **Werkbank** oder **OCR** öffnet ausdrücklich das Hauptfenster und übernimmt denselben Editor samt Ausschnitt, Objekten und History. Muss vorher ein altes Dokument gesichert werden, bleibt bei abgebrochener Rückfrage die neue Aufnahme im Overlay erhalten. In der Werkbank bleiben neue Gesten im sichtbaren Ausschnitt. Vorhandene Bilder lassen sich dort auch öffnen, hineinziehen oder aus der Zwischenablage einfügen.
-6. Für OCR **Weiter mit ChatGPT** wählen und im Browser anmelden. Ein verfügbares Modell wählen und **Text erkennen** starten. Der erkannte Text bleibt bearbeitbar und kann separat kopiert oder gespeichert werden. Der OCR-Knopf im Overlay startet die Erkennung bei bereits verfügbarem Konto und Modell direkt nach der Übergabe; andernfalls zeigt die Werkbank den nötigen nächsten Schritt.
+1. Bereich aufziehen. Der eingefrorene Bildschirm bleibt offen. Eine schwebende Glasleiste enthält Werkzeuge, Farben, Strichstärke, Rückgängig/Wiederholen/Löschen, OCR, Kopieren, Speichern und Schließen.
+2. Den Rahmen über acht Griffe verändern. **Leertaste + Ziehen** verschiebt ihn, auch über die erste Auswahl hinaus.
+3. Mit **Auswahl** bestehende Objekte verschieben und skalieren. Ein Doppelklick bearbeitet Text erneut. Farbe und Dicke wirken auch auf das ausgewählte Objekt.
+4. **Kopieren** legt das Bild in die Zwischenablage. **Speichern** legt `Kairos JJJJ-MM-TT HHmmss.png` direkt im Speicherordner ab (Standard `Bilder\Kairos`). Den Dialog kannst du in den Einstellungen wieder einschalten. **Esc** verwirft zuerst eine laufende Geste und beendet sonst die Sitzung.
+5. **OCR** schließt das Overlay und öffnet ein kleines Ergebnisfenster mit bearbeitbarem Text. Der Text wird standardmäßig sofort kopiert. Ohne verbundenes Konto bietet das Fenster direkt **Mit ChatGPT verbinden** und danach **Erneut versuchen**.
 
-Aufnahmen und Bearbeitung bleiben lokal. Nur der ausdrücklich gestartete OCR-Vorgang sendet das bearbeitete Bild an OpenAI. Konto-Verfügbarkeit und Nutzungsgrenzen richten sich nach dem verbundenen ChatGPT-Konto. [Offizieller OAuth-Ablauf](https://developers.openai.com/siwc/token-sharing-open-source/sign-in), [unterstützte Bildanfragen](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations).
+## Einstellungen
 
-Das Schließen des Fensters lässt Kairos für den Hotkey im Infobereich weiterlaufen. Über das Tray-Menü **Beenden** wird es vollständig beendet. Ist Strg+Alt+A bereits vergeben, bleibt die Aufnahme über die Oberfläche möglich.
+Tastenkürzel (Kombination direkt drücken; ist sie belegt, bleibt das alte aktiv), Speicherordner, „Beim Speichern jedes Mal fragen“, „Beim Kopieren zusätzlich speichern“, ChatGPT-Konten und OCR-Modell, „Erkannten Text automatisch kopieren“, „Mit Windows starten“. Änderungen gelten sofort und landen in `%LOCALAPPDATA%\KairosCapture\settings.json`.
+
+Aufnahmen bleiben lokal. Nur eine ausdrücklich gestartete Texterkennung sendet das bearbeitete Bild an OpenAI. [Offizieller OAuth-Ablauf](https://developers.openai.com/siwc/token-sharing-open-source/sign-in), [unterstützte Bildanfragen](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations).
 
 ## Bauen und prüfen
 
@@ -35,13 +43,13 @@ Voraussetzung: .NET 10 SDK. Keine zusätzliche JavaScript-Toolchain erforderlich
 .\scripts\build.ps1
 ```
 
-Das Skript baut Release, führt sechs Offline-Prüfsuiten aus und erzeugt eine kleine, frameworkabhängige Windows-x64-Ausgabe. Ergebnisse (`self-test.json`) und die tatsächlich gerenderten WPF-Ansichten (`overlay.png`, `main-window.png`) landen in `test-results`. Der persönliche OAuth-Login und eine echte Cloud-OCR-Anfrage sind keine Offline-Prüfung und werden dadurch nicht als erfolgreich behauptet.
+Das Skript baut Release, führt neun Offline-Prüfsuiten aus und erzeugt eine kleine, frameworkabhängige Windows-x64-Ausgabe. Ergebnisse (`self-test.json`) und die tatsächlich gerenderten WPF-Ansichten (`overlay.png`, `settings-window.png`, `ocr-result.png`, `tray-menu.png`) landen in `test-results`. Der persönliche OAuth-Login und eine echte Cloud-OCR-Anfrage sind keine Offline-Prüfung und werden dadurch nicht als erfolgreich behauptet.
 
 ```powershell
 # Nur bauen und prüfen
 .\scripts\build.ps1 -BuildOnly
 
-# Beispieldokument für die visuelle Prüfung
+# Mit geöffneten Einstellungen starten
 .\Start-KairosCapture.ps1 -Demo
 ```
 

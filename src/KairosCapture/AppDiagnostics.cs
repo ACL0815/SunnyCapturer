@@ -224,7 +224,7 @@ internal static class AppDiagnostics
     internal static void RenderPreview(string path)
     {
         var window = new MainWindow(diagnosticsMode: true);
-        try { RenderWindow(window, path, 560, 700); }
+        try { RenderWindow(window, path, 560, 760); }
         finally { window.Close(); }
     }
     private static void RenderOcrPreview(string path)
