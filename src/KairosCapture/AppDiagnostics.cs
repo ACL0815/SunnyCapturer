@@ -108,6 +108,15 @@ internal static class AppDiagnostics
             !App.IsStableInstall(@"C:\x\bin\Release\net10.0-windows\win-x64\KairosCapture.exe") &&
             !App.IsStableInstall(@"C:\Program Files\dotnet\dotnet.exe") && !App.IsStableInstall(null),
             "Only the stable publish folder may take over autostart.");
+        string worktree = Path.Combine(Path.GetTempPath(), "kairos-worktree-check-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(worktree);
+            File.WriteAllText(Path.Combine(worktree, ".git"), "gitdir: elsewhere");
+            Require(!App.IsStableInstall(Path.Combine(worktree, "artifacts", "KairosCapture-win-x64", "KairosCapture.exe")),
+                "A publish folder inside a linked git worktree must not take over autostart.");
+        }
+        finally { Directory.Delete(worktree, true); }
         var window = new MainWindow(diagnosticsMode: true);
         try
         {

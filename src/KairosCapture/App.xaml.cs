@@ -88,10 +88,16 @@ public partial class App : Application
     }
 
     // Debug builds, worktrees and old versioned folders must not take over autostart.
-    internal static bool IsStableInstall(string? processPath) =>
-        processPath is not null &&
-        string.Equals(Path.GetFileName(processPath), "KairosCapture.exe", StringComparison.OrdinalIgnoreCase) &&
-        string.Equals(Path.GetFileName(Path.GetDirectoryName(processPath)), "KairosCapture-win-x64", StringComparison.OrdinalIgnoreCase);
+    internal static bool IsStableInstall(string? processPath)
+    {
+        if (processPath is null ||
+            !string.Equals(Path.GetFileName(processPath), "KairosCapture.exe", StringComparison.OrdinalIgnoreCase)) return false;
+        string? folder = Path.GetDirectoryName(processPath);
+        if (!string.Equals(Path.GetFileName(folder), "KairosCapture-win-x64", StringComparison.OrdinalIgnoreCase)) return false;
+        // A linked git worktree has a .git file at its root; its publish folder is temporary.
+        string? root = Path.GetDirectoryName(Path.GetDirectoryName(folder));
+        return root is null || !File.Exists(Path.Combine(root, ".git"));
+    }
 
     private void InitializeTray(MainWindow window)
     {

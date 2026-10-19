@@ -271,7 +271,7 @@ public static class OpenAiSelfChecks
                 new IOException("private-token", new SocketException((int)socket)));
             OpenAiDiagnostics.Mark(error, OpenAiStep.Token);
             string message = OpenAiDiagnostics.UserMessage(error);
-            Require(message.Contains("Kairos darf keine Internetverbindung aufbauen") && message.Contains("KairosCapture.exe") &&
+            Require(message.Contains("Kairos darf keine Internetverbindung aufbauen") && message.Contains("„" + System.IO.Path.Combine(AppContext.BaseDirectory, "KairosCapture.exe") + "“") &&
                 message.Contains("ausgehende Verbindungen") && message.Contains("Windows Firewall Control") &&
                 !message.Contains("private"), "Blocked connections must explain the executable's outbound firewall permission.");
             string report = OpenAiDiagnostics.Describe(error);
@@ -282,7 +282,7 @@ public static class OpenAiSelfChecks
                 "private-code", new IOException("private-token", new SocketException((int)socket))); });
             OpenAiProbeResult probe = OpenAiService.ProbeAsync(http).GetAwaiter().GetResult();
             Require(!probe.Passed && requests == 3 && probe.Lines.Count(line => line.StartsWith("Hinweis: ", StringComparison.Ordinal) &&
-                line.Contains("KairosCapture.exe") && line.Contains("ausgehende Verbindungen")) == 3 &&
+                line.Contains(System.IO.Path.Combine(AppContext.BaseDirectory, "KairosCapture.exe")) && line.Contains("ausgehende Verbindungen")) == 3 &&
                 probe.Lines.All(line => !line.Contains("private")), "The probe must explain every blocked step without retries or exception messages.");
         }
         var refused = new HttpRequestException(HttpRequestError.ConnectionError, "private",

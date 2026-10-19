@@ -109,7 +109,7 @@ internal static class OpenAiDiagnostics
         return context + (Classify(ex) switch
         {
             OpenAiFailure.Dns => "Die OpenAI-Adresse konnte nicht aufgelöst werden. DNS und Internetverbindung prüfen und erneut versuchen.",
-            // Firewall rules are per path; name the app host even when the process runs under dotnet.exe.
+            // Firewall rules are per path; name the app host the user starts, not the process image of a test run.
             OpenAiFailure.Connect when IsOutboundBlocked(ex) => "Kairos darf keine Internetverbindung aufbauen. Bitte „" +
                 System.IO.Path.Combine(AppContext.BaseDirectory, "KairosCapture.exe") +
                 "“ in der Firewall für ausgehende Verbindungen freigeben (z. B. Windows Firewall Control).",
