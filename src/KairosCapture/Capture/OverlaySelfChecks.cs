@@ -243,7 +243,7 @@ public static class OverlaySelfChecks
                 .All(field => line.Contains(field, StringComparison.Ordinal))), "Overlay trace must include gesture, capture, activation, visibility reason, end reason, pointer and chip geometry.");
             for (int i = 0; i < 30; i++)
             {
-                overlay.HandlePointerDown(new Point(500, 400));
+                overlay.HandlePointerDown(overlay.FrameHandles()[2].Center);
                 overlay.EndFrameGesture();
             }
         }
