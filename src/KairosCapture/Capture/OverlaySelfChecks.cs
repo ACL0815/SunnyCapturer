@@ -23,7 +23,6 @@ public static class OverlaySelfChecks
     {
         Require(Thread.CurrentThread.GetApartmentState() == ApartmentState.STA, "Overlay checks require STA.");
         BitmapSource background = Pattern(1024, 768);
-        CheckFrameReleasePosition(background);
         CheckDoubleClick(background);
         CheckToolbarLayout(background);
         CheckFrame(background);
@@ -38,8 +37,13 @@ public static class OverlaySelfChecks
         CheckOcrMode(background);
         CheckGestureEscape(background);
         CheckRendering(background);
-        CheckFrameInputRecovery();
-        CheckOverlayTrace(background);
+        var failures = new List<string>();
+        foreach (Action check in new Action[] { () => CheckFrameReleasePosition(background), CheckFrameInputRecovery, () => CheckOverlayTrace(background) })
+        {
+            try { check(); }
+            catch (InvalidOperationException error) { failures.Add(error.Message); }
+        }
+        Require(failures.Count == 0, string.Join(Environment.NewLine, failures));
     }
 
     private static RegionOverlay Create(BitmapSource background) => new(background,
@@ -50,20 +54,50 @@ public static class OverlaySelfChecks
 
     private static void CheckFrameReleasePosition(BitmapSource background)
     {
-        var overlay = Create(background);
-        try
+        var failures = new List<string>();
+        foreach (FrameFixture fixture in Enum.GetValues<FrameFixture>())
+        foreach (bool pressedMove in new[] { false, true })
         {
-            overlay.HandlePointerDown(new Point(100, 100));
-            overlay.HandlePointerMove(new Point(200, 180), MouseButtonState.Pressed);
-            overlay.HandlePointerMove(new Point(240, 210), MouseButtonState.Released);
-            overlay.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left)
-                { RoutedEvent = UIElement.PreviewMouseLeftButtonUpEvent });
-            Require(!overlay.IsFrameGestureActive && FrameControlsVisible(overlay, background),
-                "A released move preceding MouseUp must leave all frame controls visible.");
-            Require(overlay.Selection == new Int32Rect(100, 100, 140, 110),
-                "A released move preceding MouseUp must retain the release position, not the previous pressed position.");
+            var original = new Int32Rect(100, 100, 400, 300);
+            RegionOverlay overlay = Create(background);
+            if (fixture != FrameFixture.New) overlay.SetRegion(original);
+            if (fixture == FrameFixture.ResumedMove)
+            {
+                overlay.ExecuteOutput(CaptureCompletion.Copied, _ => true);
+                CaptureSessionResult session = overlay.Result;
+                overlay = new RegionOverlay(session.Screenshot!, session.Bounds, editor: session.Editor);
+                overlay.SetRegion(session.Region);
+            }
+            try
+            {
+                Point start = fixture switch {
+                    FrameFixture.New => new Point(100, 100),
+                    FrameFixture.Resize => new Point(500, 400),
+                    _ => new Point(300, 250) };
+                overlay.HandlePointerDown(start);
+                if (pressedMove) overlay.HandlePointerMove(start + new Vector(100, 80), MouseButtonState.Pressed);
+                overlay.HandlePointerMove(start + new Vector(140, 110), MouseButtonState.Released);
+                Int32Rect expected = fixture switch {
+                    FrameFixture.New => new Int32Rect(100, 100, 140, 110),
+                    FrameFixture.Resize => new Int32Rect(100, 100, 540, 410),
+                    _ => new Int32Rect(240, 210, 400, 300) };
+                if (overlay.Selection != expected || overlay.IsFrameGestureActive || !FrameControlsVisible(overlay, background))
+                    failures.Add($"{fixture}/pressedMove={pressedMove}: actual={overlay.Selection}, expected={expected}, toolbar={overlay.ToolbarVisible}");
+                Int32Rect finished = overlay.Selection;
+                overlay.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left)
+                    { RoutedEvent = UIElement.PreviewMouseLeftButtonUpEvent });
+                overlay.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0)
+                    { RoutedEvent = Mouse.LostMouseCaptureEvent, Source = overlay });
+                typeof(Window).GetMethod("OnDeactivated", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                    .Invoke(overlay, new object[] { EventArgs.Empty });
+                overlay.HandlePointerMove(start + new Vector(200, 160), MouseButtonState.Released);
+                overlay.EndFrameGesture();
+                Require(overlay.Selection == finished,
+                    "Late MouseUp, capture loss, deactivation and released moves must not finish the same gesture twice.");
+            }
+            finally { overlay.Cancel(); }
         }
-        finally { overlay.Cancel(); }
+        Require(failures.Count == 0, "Released moves must apply their position before finishing and keep all frame controls visible: " + string.Join("; ", failures));
     }
 
     private static void CheckFrameInputRecovery()
@@ -131,7 +165,7 @@ public static class OverlaySelfChecks
                         overlay.EndFrameGesture();
                         break;
                     case FrameInput.ReleasedMove:
-                        overlay.HandlePointerMove(end + new Vector(100, 80), MouseButtonState.Released);
+                        overlay.HandlePointerMove(end, MouseButtonState.Released);
                         break;
                 }
                 if (overlay.IsFrameGestureActive)
@@ -164,9 +198,10 @@ public static class OverlaySelfChecks
     private static bool ChipVisible(RegionOverlay overlay) => ((Canvas)overlay.PreviewRoot).Children.OfType<Border>()
         .Single(border => border.Child is TextBlock).Visibility == Visibility.Visible;
 
+    // The size chip shadow can tint a handle without hiding it.
     private static bool GoldHandlesVisible(RegionOverlay overlay, BitmapSource scene) => overlay.FrameHandles().All(handle =>
         Pixel(scene, Math.Clamp((int)handle.Center.X, 0, scene.PixelWidth - 1), Math.Clamp((int)handle.Center.Y, 0, scene.PixelHeight - 1))
-            .SequenceEqual(new byte[] { 0x76, 0xB5, 0xD3, 0xFF }));
+            .Zip(new byte[] { 0x76, 0xB5, 0xD3, 0xFF }).All(channel => Math.Abs(channel.First - channel.Second) <= 8));
 
     private static bool FrameControlsVisible(RegionOverlay overlay, BitmapSource background)
     {
@@ -204,6 +239,8 @@ public static class OverlaySelfChecks
             foreach (string expected in new[] { "Created", "GestureBegan", "CaptureGained", "Deactivated", "GestureCancelled",
                 "RegionChanged", "ReleasedMove", "GestureEnded", "CaptureLost", "PointerUpIdle" })
                 Require(entries.Any(line => line.Contains("event=" + expected + " ", StringComparison.Ordinal)), "Overlay trace must include " + expected);
+            Require(entries.All(line => new[] { " gesture=", " capture=", " active=", " toolbar=", " chip=", " chrome=", " end=", " point=", " promoted=", " chipBounds=" }
+                .All(field => line.Contains(field, StringComparison.Ordinal))), "Overlay trace must include gesture, capture, activation, visibility reason, end reason, pointer and chip geometry.");
             for (int i = 0; i < 30; i++)
             {
                 overlay.HandlePointerDown(new Point(500, 400));
