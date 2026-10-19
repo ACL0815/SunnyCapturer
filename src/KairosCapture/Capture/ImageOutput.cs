@@ -58,9 +58,10 @@ public static class ImageOutput
         }
     }
 
-    public static string? Save(BitmapSource image, Window owner) => Save(image, owner, new AppSettings { AskBeforeSaving = true });
+    public static string? Save(BitmapSource image, Window owner) => Save(image, owner, new AppSettings());
 
-    internal static string? Save(BitmapSource image, Window owner, AppSettings settings)
+    internal static string? Save(BitmapSource image, Window owner, AppSettings settings,
+        Func<SaveFileDialog, Window, bool?>? showDialog = null)
     {
         ArgumentNullException.ThrowIfNull(image);
         ArgumentNullException.ThrowIfNull(owner);
@@ -68,7 +69,7 @@ public static class ImageOutput
         RequireSta();
         string directory = settings.SaveFolder;
         Directory.CreateDirectory(directory);
-        if (!settings.AskBeforeSaving) return SaveDirect(image, directory, DateTime.Now);
+        if (settings.SaveWithoutDialog) return SaveDirect(image, directory, DateTime.Now);
         var dialog = new SaveFileDialog
         {
             Title = "Aufnahme speichern",
@@ -81,7 +82,7 @@ public static class ImageOutput
             InitialDirectory = directory,
             FileName = FileName(DateTime.Now)
         };
-        if (dialog.ShowDialog(owner) != true)
+        if ((showDialog ?? ((prompt, parent) => prompt.ShowDialog(parent)))(dialog, owner) != true)
             return null;
 
         return Write(image, dialog.FileName, overwrite: true);

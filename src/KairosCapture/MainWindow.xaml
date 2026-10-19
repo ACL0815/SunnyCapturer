@@ -33,7 +33,7 @@
     <Button Grid.Column="1" Content="Ändern…" Click="Folder_Click" Style="{StaticResource SmallButton}" Margin="8,0,4,0"/>
     <Button Grid.Column="2" Click="OpenFolder_Click" Style="{StaticResource GlassIconButton}" ToolTip="Speicherordner öffnen"><Path Data="{StaticResource Glyph.Folder}" Style="{StaticResource GlassIcon}"/></Button>
    </Grid>
-   <CheckBox Foreground="{StaticResource TextBrush}" x:Name="AskSave" Content="Beim Speichern jedes Mal fragen" Margin="0,4" Click="Settings_Click"/>
+   <CheckBox Foreground="{StaticResource TextBrush}" x:Name="AskSave" Content="Ohne Nachfrage direkt im Ordner speichern" Margin="0,4" Click="Settings_Click"/>
    <CheckBox Foreground="{StaticResource TextBrush}" x:Name="SaveCopy" Content="Beim Kopieren zusätzlich speichern" Margin="0,4" Click="Settings_Click"/>
   </StackPanel></Border>
   <Border Style="{StaticResource GlassPanel}" Padding="16" Margin="0,0,0,12"><StackPanel>

@@ -37,7 +37,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         HotkeyBox.Text = Settings.Hotkey;
         FolderText.Text = Settings.SaveFolder;
-        AskSave.IsChecked = Settings.AskBeforeSaving;
+        AskSave.IsChecked = Settings.SaveWithoutDialog;
         SaveCopy.IsChecked = Settings.SaveOnCopy;
         AutoCopy.IsChecked = Settings.AutoCopyOcr;
         try
@@ -77,7 +77,7 @@ public partial class MainWindow : Window
 
     private void Settings_Click(object sender, RoutedEventArgs e)
     {
-        Settings.AskBeforeSaving = AskSave.IsChecked == true;
+        Settings.SaveWithoutDialog = AskSave.IsChecked == true;
         Settings.SaveOnCopy = SaveCopy.IsChecked == true;
         Settings.AutoCopyOcr = AutoCopy.IsChecked == true;
         SaveSettings();
@@ -223,10 +223,13 @@ public partial class MainWindow : Window
             if (_closed) return;
             if (result.SavedPath is { } path)
             {
-                Settings.RecentFiles = new[] { path }.Concat(Settings.RecentFiles).Distinct(StringComparer.OrdinalIgnoreCase).Take(5).ToArray();
-                SaveSettings();
+                RememberSavedFile(path);
             }
-            if (result.Completion == CaptureCompletion.Ocr && result.Image != null)
+            if (result.Completion == CaptureCompletion.Pinned && result.Image != null)
+            {
+                ((App)Application.Current).ShowPin(result, Settings);
+            }
+            else if (result.Completion == CaptureCompletion.Ocr && result.Image != null)
             {
                 var window = new OcrResultWindow(this, result.Image, result.Bounds, result.Region);
                 window.Show();
@@ -237,6 +240,12 @@ public partial class MainWindow : Window
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { ShowFromTray(); ReportError("Aufnahme fehlgeschlagen", ex); }
+    }
+
+    internal void RememberSavedFile(string path)
+    {
+        Settings.RecentFiles = new[] { path }.Concat(Settings.RecentFiles).Distinct(StringComparer.OrdinalIgnoreCase).Take(5).ToArray();
+        SaveSettings();
     }
 
     public void ShowFromTray()

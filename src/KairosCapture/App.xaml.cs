@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
@@ -18,6 +19,8 @@ public partial class App : Application
     private int _remaining;
     private string? _balloonFolder;
     private bool _diagnostics;
+    private readonly List<Capture.PinWindow> _pins = new();
+    internal int PinCount => _pins.Count;
     public bool IsExiting { get; private set; }
 
     protected override void OnStartup(StartupEventArgs e)
@@ -110,6 +113,25 @@ public partial class App : Application
         if (_tray != null && _countdown?.IsEnabled != true) _tray.Text = "Kairos Capture · " + window.Settings.Hotkey;
     }
 
+    internal void ShowPin(Capture.CaptureSessionResult result, AppSettings settings)
+    {
+        var pin = new Capture.PinWindow(result.Image!, result.Bounds, result.Region, settings);
+        _pins.Add(pin);
+        pin.Closed += (_, _) => { _pins.Remove(pin); if (MainWindow is MainWindow main) RefreshTray(main); };
+        pin.ImageSaved += path =>
+        {
+            if (MainWindow is MainWindow main) main.RememberSavedFile(path);
+        };
+        try { pin.Show(); }
+        catch { pin.Close(); _pins.Remove(pin); throw; }
+        if (MainWindow is MainWindow window) RefreshTray(window);
+    }
+
+    internal void ClosePins()
+    {
+        foreach (var pin in _pins.ToArray()) pin.Close();
+    }
+
     private void ToggleCountdown(MainWindow window, int seconds)
     {
         if (_countdown?.IsEnabled == true) { CancelCountdown(window); return; }
@@ -164,6 +186,7 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         IsExiting = true;
+        ClosePins();
         _countdown?.Stop();
         if (_tray is not null)
         {

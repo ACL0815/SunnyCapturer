@@ -21,7 +21,7 @@ internal sealed class AppSettings
 
     public string Hotkey { get; set; } = "Strg+Alt+A";
     public string SaveFolder { get; set; } = DefaultSaveFolder;
-    public bool AskBeforeSaving { get; set; }
+    public bool SaveWithoutDialog { get; set; }
     public bool SaveOnCopy { get; set; }
     public bool AutoCopyOcr { get; set; } = true;
     public string Model { get; set; } = "";

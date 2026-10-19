@@ -30,6 +30,7 @@ internal sealed class RegionOverlay : Window
     private readonly BitmapSource _screenshot;
     private readonly AppSettings _settings;
     private readonly bool _ocrMode;
+    private readonly Func<BitmapSource, Window, AppSettings, string?> _saveImage;
     private readonly Image _glassImage;
     private readonly Border _chip;
     private readonly List<RadioButton> _toolButtons = new();
@@ -56,7 +57,8 @@ internal sealed class RegionOverlay : Window
     internal FrameworkElement Toolbar => _toolbar;
 
     internal RegionOverlay(BitmapSource screenshot, DrawingRectangle bounds, bool editing = true,
-        AppSettings? settings = null, bool ocrMode = false, AnnotationCanvas? editor = null)
+        AppSettings? settings = null, bool ocrMode = false, AnnotationCanvas? editor = null,
+        Func<BitmapSource, Window, AppSettings, string?>? saveImage = null)
     {
         ArgumentNullException.ThrowIfNull(screenshot);
         CaptureGeometry.ValidateSize(bounds.Width, bounds.Height);
@@ -67,6 +69,7 @@ internal sealed class RegionOverlay : Window
         _screenshot = screenshot;
         _settings = settings ?? new();
         _ocrMode = ocrMode;
+        _saveImage = saveImage ?? ((image, parent, preferences) => ImageOutput.Save(image, parent, preferences));
         Title = "Kairos Capture – auf dem Bildschirm bearbeiten";
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize;
@@ -149,10 +152,20 @@ internal sealed class RegionOverlay : Window
         AddButton(tools, "Delete", "Löschen · Entf", Editor.DeleteSelected);
         AddDivider(tools);
         AddButton(tools, "Ocr", "Text erkennen · O", () => _ = CompleteAsync(CaptureCompletion.Ocr));
-        AddButton(tools, "Copy", "Kopieren · Strg+C / Enter", () => _ = CompleteAsync(CaptureCompletion.Copied));
-        AddButton(tools, "Save", "Speichern · Strg+S", () => _ = CompleteAsync(CaptureCompletion.Saved));
-        AddButton(tools, "Close", "Schließen · Esc", Cancel);
-        stack.Children.Add(tools); stack.Children.Add(_error);
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        AddDivider(actions);
+        AddButton(actions, "Close", "Abbrechen · Esc", Cancel);
+        AddButton(actions, "Pin", "Anpinnen · I", () => _ = CompleteAsync(CaptureCompletion.Pinned));
+        Button save = AddButton(actions, "Download", "Speichern · Strg+S", () => _ = CompleteAsync(CaptureCompletion.Saved));
+        save.Tag = "Save";
+        Button check = AddButton(actions, "Check", "Fertig · Bild kopieren und schließen · Enter / Strg+C", () => _ = CompleteAsync(CaptureCompletion.Copied));
+        check.Style = (Style)FindResource("GlassConfirmButton");
+        var toolbarRow = new Grid();
+        toolbarRow.ColumnDefinitions.Add(new ColumnDefinition());
+        toolbarRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        toolbarRow.Children.Add(tools);
+        Grid.SetColumn(actions, 1); toolbarRow.Children.Add(actions);
+        stack.Children.Add(toolbarRow); stack.Children.Add(_error);
         var grid = new Grid { ClipToBounds = true };
         _glassImage = new Image { Stretch = Stretch.Fill, IsHitTestVisible = false,
             Effect = new BlurEffect { Radius = 18, RenderingBias = RenderingBias.Performance }, CacheMode = new BitmapCache(1) };
@@ -325,6 +338,8 @@ internal sealed class RegionOverlay : Window
         if (key == Key.S && modifiers == ModifierKeys.Control) { _ = CompleteAsync(CaptureCompletion.Saved); return true; }
         if (Editor.HandleKey(key, modifiers)) return true;
         if (key == Key.O && modifiers == ModifierKeys.None) { _ = CompleteAsync(CaptureCompletion.Ocr); return true; }
+        // P belongs to Stift; I (pInnen) is the free pin shortcut.
+        if (key == Key.I && modifiers == ModifierKeys.None) { _ = CompleteAsync(CaptureCompletion.Pinned); return true; }
         if (modifiers == ModifierKeys.None)
         {
             EditorTool? tool = key switch { Key.V => EditorTool.Select, Key.R => EditorTool.Rectangle, Key.E => EditorTool.Ellipse,
@@ -473,17 +488,16 @@ internal sealed class RegionOverlay : Window
         if (completion == CaptureCompletion.Copied)
             return Task.FromResult(ExecuteOutput(completion, image =>
             {
-                // Additional saving follows the same cancel/error semantics as Save.
+                // SaveOnCopy remains a direct file drop, independent of the explicit Save preference.
                 if (_settings.SaveOnCopy)
                 {
-                    _savedPath = ImageOutput.Save(image, this, _settings);
-                    if (_savedPath == null) return false;
+                    _savedPath = ImageOutput.SaveDirect(image, _settings.SaveFolder, DateTime.Now);
                 }
                 ImageOutput.Copy(image); return true;
             }));
         if (completion == CaptureCompletion.Saved)
-            return Task.FromResult(ExecuteOutput(completion, image => (_savedPath = ImageOutput.Save(image, this, _settings)) != null));
-        return Task.FromResult(completion == CaptureCompletion.Ocr && ExecuteOutput(completion, _ => true));
+            return Task.FromResult(ExecuteOutput(completion, image => (_savedPath = _saveImage(image, this, _settings)) != null));
+        return Task.FromResult(completion is CaptureCompletion.Ocr or CaptureCompletion.Pinned && ExecuteOutput(completion, _ => true));
     }
 
     internal bool ExecuteOutput(CaptureCompletion completion, Func<BitmapSource, bool> write)
@@ -499,7 +513,7 @@ internal sealed class RegionOverlay : Window
             _scene.Children.Remove(Editor);
             Editor.Clip = null;
             Result = new CaptureSessionResult(completion, Editor, Selection)
-                { Screenshot = _screenshot, Bounds = _bounds, Image = completion == CaptureCompletion.Ocr ? image : null, SavedPath = _savedPath };
+                { Screenshot = _screenshot, Bounds = _bounds, Image = completion is CaptureCompletion.Ocr or CaptureCompletion.Pinned ? image : null, SavedPath = _savedPath };
             Close();
             return true;
         }

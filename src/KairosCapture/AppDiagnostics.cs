@@ -39,6 +39,7 @@ internal static class AppDiagnostics
         string previewPath = Path.GetFullPath(args[1]);
         if (args[0] is "--render-preview" or "--render-settings-preview") { RenderPreview(previewPath); return 0; }
         if (args[0] == "--render-overlay-preview") { RenderOverlayPreview(previewPath); return 0; }
+        if (args[0] == "--render-pin") { RenderPinPreview(previewPath); return 0; }
         if (args[0] == "--render-ocr-preview") { RenderOcrPreview(previewPath); return 0; }
         if (args[0] == "--render-tray-preview") { RenderTrayPreview(previewPath); return 0; }
         if (args[0] is not ("--self-test" or "--self-check")) return 2;
@@ -120,15 +121,20 @@ internal static class AppDiagnostics
         try
         {
             var defaults = AppSettings.Load(file);
-            Require(defaults.Hotkey == "Strg+Alt+A" && defaults.AutoCopyOcr && !defaults.AskBeforeSaving && !defaults.SaveOnCopy &&
+            Require(defaults.Hotkey == "Strg+Alt+A" && defaults.AutoCopyOcr && !defaults.SaveWithoutDialog && !defaults.SaveOnCopy &&
                 defaults.SaveFolder == AppSettings.DefaultSaveFolder, "Missing settings must produce expected defaults.");
-            var settings = new AppSettings { SaveFolder = Path.Combine(directory, "Bilder"), Hotkey = "Strg+Umschalt+F8", AskBeforeSaving = true,
+            var settings = new AppSettings { SaveFolder = Path.Combine(directory, "Bilder"), Hotkey = "Strg+Umschalt+F8", SaveWithoutDialog = true,
                 SaveOnCopy = true, AutoCopyOcr = false, Model = "test-model", AccountKey = "test-account", WelcomeShown = true, RecentFiles = new[] { "test.png" } };
             settings.Save(file); var loaded = AppSettings.Load(file);
-            Require(loaded.SaveFolder == settings.SaveFolder && loaded.Hotkey == settings.Hotkey && loaded.AskBeforeSaving && loaded.SaveOnCopy && !loaded.AutoCopyOcr &&
+            Require(loaded.SaveFolder == settings.SaveFolder && loaded.Hotkey == settings.Hotkey && loaded.SaveWithoutDialog && loaded.SaveOnCopy && !loaded.AutoCopyOcr &&
                 loaded.Model == "test-model" && loaded.AccountKey == "test-account" && loaded.WelcomeShown && loaded.RecentFiles.SequenceEqual(settings.RecentFiles), "Settings must roundtrip every preference.");
             settings.Save(file);
             Require(Directory.GetFiles(directory, "*.tmp").Length == 0, "Atomic settings writes must leave no temporary files.");
+            File.WriteAllText(file, "{\"AskBeforeSaving\":false,\"Hotkey\":\"Strg+Alt+F8\"}");
+            var legacy = AppSettings.Load(file);
+            Require(!legacy.SaveWithoutDialog && legacy.Hotkey == "Strg+Alt+F8",
+                "Legacy AskBeforeSaving false must be ignored while keeping save dialog enabled and other preferences intact.");
+            Require(!JsonSerializer.Serialize(legacy).Contains("AskBeforeSaving", StringComparison.Ordinal), "Legacy field must not be persisted again.");
             foreach (string corrupt in new[] { "{broken", "null", "[]", "{\"Hotkey\":null,\"SaveFolder\":null,\"Model\":null,\"RecentFiles\":null}" })
             {
                 File.WriteAllText(file, corrupt); var recovered = AppSettings.Load(file);
@@ -136,6 +142,31 @@ internal static class AppDiagnostics
                     "Broken or partial settings must fall back safely.");
             }
             BitmapSource image = BitmapSource.Create(2, 2, 96, 96, PixelFormats.Bgra32, null, new byte[16], 8);
+            var dialogSettings = new AppSettings { SaveFolder = Path.Combine(directory, "Dialog") };
+            var owner = new Window();
+            int prompts = 0;
+            try
+            {
+                string? cancelled = ImageOutput.Save(image, owner, dialogSettings, (dialog, parent) =>
+                {
+                    prompts++;
+                    Require(ReferenceEquals(parent, owner) && dialog.InitialDirectory == dialogSettings.SaveFolder && Directory.Exists(dialogSettings.SaveFolder),
+                        "Save dialog must receive the owner and the created configured folder.");
+                    Require(DateTime.TryParseExact(dialog.FileName, "'Kairos 'yyyy-MM-dd HHmmss'.png'", CultureInfo.InvariantCulture, DateTimeStyles.None, out _) &&
+                        dialog.DefaultExt == "png" && dialog.OverwritePrompt, "Save dialog must suggest the timestamped PNG filename and confirm overwrites.");
+                    return false;
+                });
+                Require(prompts == 1 && cancelled == null && Directory.GetFiles(dialogSettings.SaveFolder).Length == 0,
+                    "Default save must ask and cancellation must not create an image.");
+                string chosen = Path.Combine(dialogSettings.SaveFolder, "Ausgewählt.png");
+                Require(ImageOutput.Save(image, owner, dialogSettings, (dialog, _) => { prompts++; dialog.FileName = chosen; return true; }) == chosen && File.Exists(chosen),
+                    "Confirmed dialog must write the selected filename.");
+                dialogSettings.SaveWithoutDialog = true;
+                Require(ImageOutput.Save(image, owner, dialogSettings, (_, _) => throw new InvalidOperationException("Opt-in direct save must bypass dialog.")) != null && prompts == 2,
+                    "Only SaveWithoutDialog true may bypass the dialog.");
+                Require(!owner.IsVisible && new WindowInteropHelper(owner).Handle == IntPtr.Zero, "Dialog injection must not show a native window.");
+            }
+            finally { owner.Close(); }
             var now = new DateTime(2026, 10, 19, 14, 5, 9);
             string saved = ImageOutput.SaveDirect(image, settings.SaveFolder, now);
             Require(saved == Path.Combine(settings.SaveFolder, "Kairos 2026-10-19 140509.png") && File.Exists(saved), "Direct save must create configured directory and exact filename.");
@@ -192,9 +223,12 @@ internal static class AppDiagnostics
         try
         {
             var entries = tray.Menu.Items.OfType<System.Windows.Forms.ToolStripMenuItem>().ToArray();
-            Require(entries.Length == 9 && entries[0].Text!.StartsWith("Bereich aufnehmen", StringComparison.Ordinal) && entries[1].Text == "Vollbild aufnehmen" &&
+            Require(entries.Length == 10 && entries[0].Text!.StartsWith("Bereich aufnehmen", StringComparison.Ordinal) && entries[1].Text == "Vollbild aufnehmen" &&
                 entries[2].DropDownItems.Count == 3 && entries[3].Text == "Text erkennen…" && entries[4].Text == "Letzte Aufnahme fortsetzen" &&
-                entries[5].Text == "Zuletzt gespeichert" && entries[6].Text!.StartsWith("OCR:", StringComparison.Ordinal) && entries[7].Text == "Einstellungen…" && entries[8].Text == "Beenden", "Tray menu must expose all requested actions in order.");
+                Equals(entries[5].Tag, "Pin") && entries[6].Text == "Zuletzt gespeichert" && entries[7].Text!.StartsWith("OCR:", StringComparison.Ordinal) && entries[8].Text == "Einstellungen…" && entries[9].Text == "Beenden", "Tray menu must expose all requested actions in order.");
+            Require(!entries[5].Available, "Close pins entry must be hidden with no pins.");
+            tray.Refresh(false, true, 2);
+            Require(entries[5].Available && entries[5].Text == "Angepinnte Bilder schließen (2)", "Close pins entry must appear with the live count.");
             tray.Refresh(false, false); Require(!entries[4].Enabled && entries.Take(4).All(i => i.Enabled), "Resume must be disabled without a session.");
             tray.Refresh(true, true); Require(entries.Take(5).All(i => !i.Enabled) && entries.Skip(5).All(i => i.Enabled), "Capture entries must disable during active capture.");
             tray.Refresh(false, true); Require(entries.Take(5).All(i => i.Enabled) && entries.All(i => i.Image != null), "Idle tray must expose resumed session and glyph icons.");
@@ -219,6 +253,31 @@ internal static class AppDiagnostics
         WriteJson(Path.ChangeExtension(path, ".json"), new { schemaVersion = 1, rendered = true,
             width = bitmap.PixelWidth, height = bitmap.PixelHeight,
             mode = "WPF live overlay / synthetic local image / offscreen only / no desktop capture" });
+    }
+
+    private static void RenderPinPreview(string path)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        BitmapSource demo = CreateDemoBitmap();
+        var editor = new AnnotationCanvas(demo) { Tool = EditorTool.Rectangle, Stroke = Brushes.MediumPurple };
+        editor.BeginGesture(new Point(300, 250)); editor.UpdateGesture(new Point(1010, 395)); editor.EndGesture();
+        var region = new Int32Rect(280, 235, 800, 280);
+        var pin = new PinWindow(editor.Flatten(region), default, region, new AppSettings());
+        try
+        {
+            var canvas = new Canvas { Width = 980, Height = 460, Background = Brush("#DAD9DF") };
+            FrameworkElement content = (FrameworkElement)pin.Content;
+            pin.Content = null;
+            content.Width = region.Width + 2 * PinWindow.ShadowPixels; content.Height = region.Height + 2 * PinWindow.ShadowPixels;
+            Canvas.SetLeft(content, 78); Canvas.SetTop(content, 78); canvas.Children.Add(content);
+            canvas.Measure(new Size(980, 460)); canvas.Arrange(new Rect(0, 0, 980, 460)); canvas.UpdateLayout();
+            var bitmap = new RenderTargetBitmap(980, 460, 96, 96, PixelFormats.Pbgra32);
+            bitmap.Render(canvas);
+            File.WriteAllBytes(path, ImageOutput.EncodePng(bitmap));
+            WriteJson(Path.ChangeExtension(path, ".json"), new { rendered = true, width = 980, height = 460,
+                mode = "WPF pin with separate shadow / flattened synthetic crop / offscreen only" });
+        }
+        finally { pin.Close(); }
     }
 
     internal static void RenderPreview(string path)

@@ -18,7 +18,7 @@ $kairosPreviewPath = Join-Path $kairosRoot 'test-results/icons-preview.png'
 $kairosIcons = [Windows.Markup.XamlReader]::Parse([IO.File]::ReadAllText($kairosIconPath))
 $kairosGlass = [Windows.Markup.XamlReader]::Parse([IO.File]::ReadAllText($kairosGlassPath))
 $kairosSizes = @(16,20,24,32,40,48,64,256)
-$kairosNames = @('Capture','Fullscreen','Timer','Ocr','Select','Rectangle','Ellipse','Arrow','Pen','Text','Highlight','Redact','Undo','Redo','Delete','Copy','Save','Close','Settings','Folder','History','Exit','Account','Check','Keyboard')
+$kairosNames = @('Capture','Fullscreen','Timer','Ocr','Select','Rectangle','Ellipse','Arrow','Pen','Text','Highlight','Redact','Undo','Redo','Delete','Copy','Save','Close','Settings','Folder','History','Exit','Account','Check','Keyboard','Pin','Download')
 
 function Brush([string]$Color) { return [Windows.Media.BrushConverter]::new().ConvertFromInvariantString($Color) }
 function Rect([double]$X,[double]$Y,[double]$Width,[double]$Height) { return [Windows.Rect]::new($X,$Y,$Width,$Height) }
@@ -100,7 +100,7 @@ foreach ($name in $kairosNames) {
     $bounds = $geometry.GetRenderBounds([Windows.Media.Pen]::new([Windows.Media.Brushes]::White,1.75))
     if ($bounds.Left -lt 0 -or $bounds.Top -lt 0 -or $bounds.Right -gt 24 -or $bounds.Bottom -gt 24) { throw "Stroke outside viewport: Glyph.$name" }
 }
-if (@($kairosIcons.Keys | Where-Object { $_ -like 'Glyph.*' }).Count -ne 25) { throw 'Expected exactly 25 Glyph.* keys.' }
+if (@($kairosIcons.Keys | Where-Object { $_ -like 'Glyph.*' }).Count -ne 27) { throw 'Expected exactly 27 Glyph.* keys.' }
 foreach ($key in @('AppIcon','AppIconSmall')) {
     if ($kairosIcons[$key].Drawing.Bounds -ne (Rect 0 0 256 256)) { throw "Invalid drawing box: $key" }
 }
@@ -110,7 +110,7 @@ foreach ($key in @('GlassFill','GlassStroke','GlassHighlight','GlassPanel','Glas
 $kairosProbe = [Windows.Shapes.Path]::new()
 $kairosProbe.Style = $kairosGlass['GlassIcon']
 if ($null -ne $kairosProbe.Fill -or $kairosProbe.StrokeThickness -ne 1.75) { throw 'GlassIcon must be stroke-only at 1.75 DIP.' }
-Write-Host 'Contracts: 25 glyphs, 8 glass keys, 24x24 bounds, 256x256 drawing boxes, stroke-only 1.75 DIP: PASS'
+Write-Host 'Contracts: 27 glyphs, 8 glass keys, 24x24 bounds, 256x256 drawing boxes, stroke-only 1.75 DIP: PASS'
 
 $kairosBitmaps = @{}
 $kairosPayloads = foreach ($size in $kairosSizes) {
@@ -233,9 +233,9 @@ function Style-Sample([bool]$Light) {
 }
 
 $kairosContact = [Windows.Media.DrawingVisual]::new(); $kairosDc=$kairosContact.RenderOpen()
-$kairosDc.DrawRectangle((Brush '#090E13'),$null,(Rect 0 0 1280 1660))
+$kairosDc.DrawRectangle((Brush '#090E13'),$null,(Rect 0 0 1280 1792))
 Text $kairosDc 'Kairos Capture / Glass & Icons' 32 22 27
-Text $kairosDc '25 Originalglyphen · Stroke 1.75 DIP · je 16 / 24 / 32 px · dunkles Glas und Glas auf hellem Grund' 32 62 14 '#BFAEDB'
+Text $kairosDc '27 Originalglyphen · Stroke 1.75 DIP · je 16 / 24 / 32 px · dunkles Glas und Glas auf hellem Grund' 32 62 14 '#BFAEDB'
 for ($i=0; $i -lt $kairosNames.Count; $i++) {
     $x=32+($i%5)*244; $y=104+[Math]::Floor($i/5)*132
     Text $kairosDc $kairosNames[$i] ($x+2) $y 14
@@ -251,24 +251,24 @@ for ($i=0; $i -lt $kairosNames.Count; $i++) {
         }
     }
 }
-Text $kairosDc 'App-Icon / native Pixelgrößen' 32 786 21
+Text $kairosDc 'App-Icon / native Pixelgrößen' 32 918 21
 $kairosPositions=@(48,136,224,312,412,524,652,912)
 for ($i=0; $i -lt $kairosSizes.Count; $i++) {
     $size=$kairosSizes[$i]; $x=$kairosPositions[$i]
-    $y=if ($size -eq 256) { 824 } else { 908+(64-$size)/2 }
+    $y=if ($size -eq 256) { 956 } else { 1040+(64-$size)/2 }
     $kairosDc.DrawImage($kairosBitmaps[$size],(Rect $x $y $size $size))
-    Text $kairosDc ([string]$size) $x $(if ($size -eq 256) { 1088 } else { 984 }) 13 '#C8B6E3'
+    Text $kairosDc ([string]$size) $x $(if ($size -eq 256) { 1220 } else { 1116 }) 13 '#C8B6E3'
 }
-Text $kairosDc 'AppIconSmall: 16 · 20 · 24 · 32' 48 1036 14 '#D3B576'
-Text $kairosDc 'AppIcon: 40 · 48 · 64 · 256  /  256 als PNG, übrige Frames als 32-bit DIB' 48 1062 13 '#BFAEDB'
-Text $kairosDc 'Material & Zustände / echte WPF-Templates' 32 1130 21
-$kairosDc.DrawImage((Style-Sample $false),(Rect 32 1172 592 452))
-$kairosDc.DrawImage((Style-Sample $true),(Rect 656 1172 592 452))
-Text $kairosDc '* Hover, Pressed und Fokusring statisch simuliert. Checked und Disabled sind echte Control-Zustände. Hintergrund: synthetische Screenshot-Fixture.' 32 1633 11 '#BFAEDB'
+Text $kairosDc 'AppIconSmall: 16 · 20 · 24 · 32' 48 1168 14 '#D3B576'
+Text $kairosDc 'AppIcon: 40 · 48 · 64 · 256  /  256 als PNG, übrige Frames als 32-bit DIB' 48 1194 13 '#BFAEDB'
+Text $kairosDc 'Material & Zustände / echte WPF-Templates' 32 1262 21
+$kairosDc.DrawImage((Style-Sample $false),(Rect 32 1304 592 452))
+$kairosDc.DrawImage((Style-Sample $true),(Rect 656 1304 592 452))
+Text $kairosDc '* Hover, Pressed und Fokusring statisch simuliert. Checked und Disabled sind echte Control-Zustände. Hintergrund: synthetische Screenshot-Fixture.' 32 1765 11 '#BFAEDB'
 $kairosDc.Close()
-$kairosPreview=Render-Visual $kairosContact 1280 1660
+$kairosPreview=Render-Visual $kairosContact 1280 1792
 $null=[IO.Directory]::CreateDirectory((Split-Path -Parent $kairosPreviewPath))
 [IO.File]::WriteAllBytes($kairosPreviewPath,(Png-Bytes $kairosPreview))
 Write-Host 'Style samples: Button, RadioButton, ToggleButton, checked, disabled, swatch ring: PASS'
-Write-Host "Contact sheet: $kairosPreviewPath (1280x1660)"
+Write-Host "Contact sheet: $kairosPreviewPath (1280x1792)"
 Write-Host "Icon: $kairosIcoPath"

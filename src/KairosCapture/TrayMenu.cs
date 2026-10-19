@@ -20,7 +20,7 @@ internal sealed class TrayMenu : IDisposable
     private readonly MainWindow _window;
     private readonly Action<int> _delay;
     private readonly List<Forms.ToolStripMenuItem> _captureItems = new();
-    private readonly Forms.ToolStripMenuItem _region, _resume, _recent, _ocrStatus;
+    private readonly Forms.ToolStripMenuItem _region, _resume, _recent, _ocrStatus, _closePins;
     private readonly List<Image> _images = new();
     private bool _imagesQueued;
 
@@ -41,6 +41,8 @@ internal sealed class TrayMenu : IDisposable
         _captureItems.Add(delayed);
         Capture("Text erkennen…", "Ocr", CaptureMode.Ocr);
         _resume = Capture("Letzte Aufnahme fortsetzen", "History", CaptureMode.Resume);
+        _closePins = Item("Angepinnte Bilder schließen (0)", "Pin");
+        _closePins.Click += (_, _) => ((App)Application.Current).ClosePins();
         Menu.Items.Add(new Forms.ToolStripSeparator());
         _recent = Item("Zuletzt gespeichert", "Save");
         _ocrStatus = Item("OCR: nicht verbunden", "Account");
@@ -68,11 +70,14 @@ internal sealed class TrayMenu : IDisposable
         item.Click += async (_, _) => await _window.CaptureAsync(mode);
         return item;
     }
-    internal void Refresh(bool capturing, bool hasSession)
+    internal void Refresh(bool capturing, bool hasSession, int? pinCount = null)
     {
         _region.Text = "Bereich aufnehmen · " + _window.Settings.Hotkey;
         foreach (var item in _captureItems) item.Enabled = !capturing;
         _resume.Enabled = !capturing && hasSession;
+        int count = pinCount ?? ((App)Application.Current).PinCount;
+        _closePins.Visible = count > 0;
+        _closePins.Text = $"Angepinnte Bilder schließen ({count})";
         _ocrStatus.Text = _window.OcrStatus;
         var old = _recent.DropDownItems.Cast<Forms.ToolStripItem>().ToArray();
         _recent.DropDownItems.Clear(); foreach (var item in old) item.Dispose();
