@@ -315,8 +315,7 @@ internal sealed class RegionOverlay : Window
         {
             if (!_editing) Cancel();
             else if (_gesture != FrameGesture.None) EndFrameGesture(true);
-            else if (Editor.HasActiveGesture) Editor.HandleKey(Key.Escape);
-            else Cancel();
+            else if (!Editor.HandleKey(Key.Escape)) Cancel();
             return true;
         }
         if (Selection.IsEmpty) return false;
@@ -342,7 +341,7 @@ internal sealed class RegionOverlay : Window
         _frameHandle = HitFrame(_start);
         if (Selection.IsEmpty) _gesture = FrameGesture.New;
         else if (move && _editing) _gesture = FrameGesture.Move;
-        else if (_frameHandle != FrameHandle.None && _editing) _gesture = FrameGesture.Resize;
+        else if (_frameHandle != FrameHandle.None && _editing && !Editor.HasAnnotationAt(_start)) _gesture = FrameGesture.Resize;
         else if (_editing && Editor.Tool == EditorTool.Select &&
             new Rect(Selection.X, Selection.Y, Selection.Width, Selection.Height).Contains(_start) && !Editor.HasAnnotationAt(_start))
             _gesture = FrameGesture.Move;
