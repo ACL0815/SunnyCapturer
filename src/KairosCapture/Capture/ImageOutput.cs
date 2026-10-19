@@ -58,8 +58,6 @@ public static class ImageOutput
         }
     }
 
-    public static string? Save(BitmapSource image, Window owner) => Save(image, owner, new AppSettings());
-
     internal static string? Save(BitmapSource image, Window owner, AppSettings settings,
         Func<SaveFileDialog, Window, bool?>? showDialog = null)
     {

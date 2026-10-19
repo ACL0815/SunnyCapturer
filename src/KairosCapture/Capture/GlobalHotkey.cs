@@ -22,8 +22,6 @@ public sealed class GlobalHotkey : IDisposable
     private bool _nativeEnabled = true;
     private bool _disposed;
 
-    public string? LastError { get; private set; }
-
     /// <summary>Raised on the owner's Dispatcher when a suspended hotkey cannot be restored.</summary>
     public event Action<string>? RegistrationFailed;
 
@@ -46,10 +44,10 @@ public sealed class GlobalHotkey : IDisposable
     public bool Register(out string? error)
     {
         _owner.Dispatcher.VerifyAccess();
-        error = LastError = null;
+        error = null;
         if (_disposed)
         {
-            error = LastError = "Das Hotkey-Objekt oder sein Fenster wurde bereits geschlossen.";
+            error = "Das Hotkey-Objekt oder sein Fenster wurde bereits geschlossen.";
             return false;
         }
         if (_registered)
@@ -76,7 +74,7 @@ public sealed class GlobalHotkey : IDisposable
                 _source.RemoveHook(OnWindowMessage);
             _source = null;
             _requested = false;
-            error = LastError = $"{_gesture} konnte nicht registriert werden: {exception.Message}";
+            error = $"{_gesture} konnte nicht registriert werden: {exception.Message}";
             return false;
         }
     }
@@ -95,7 +93,7 @@ public sealed class GlobalHotkey : IDisposable
         // interrupts the existing shortcut or steals a different application's shortcut.
         if (!RegisterHotKey(_handle, candidate, gesture.NativeModifiers, gesture.VirtualKey))
         {
-            error = LastError = $"{gesture} ist bereits belegt oder nicht verfügbar. " + (_registered
+            error = $"{gesture} ist bereits belegt oder nicht verfügbar. " + (_registered
                 ? "Das bisherige Tastenkürzel bleibt aktiv." : "Aktuell ist kein Tastenkürzel registriert. Bitte eine andere Kombination wählen.");
             return false;
         }
@@ -103,7 +101,7 @@ public sealed class GlobalHotkey : IDisposable
         _id = candidate;
         _gesture = gesture;
         _registered = _requested = true;
-        error = LastError = null;
+        error = null;
         return true;
     }
 
@@ -141,11 +139,10 @@ public sealed class GlobalHotkey : IDisposable
         if (!RegisterHotKey(_handle, _id, _gesture.NativeModifiers, _gesture.VirtualKey))
         {
             int code = Marshal.GetLastWin32Error();
-            error = LastError = $"{_gesture} konnte nicht registriert werden; die Kombination ist möglicherweise bereits belegt. " +
+            error = $"{_gesture} konnte nicht registriert werden; die Kombination ist möglicherweise bereits belegt. " +
                 $"Windows-Fehler {code}: {new Win32Exception(code).Message}";
             return false;
         }
-        LastError = null;
         _registered = true;
         return true;
     }
@@ -188,7 +185,6 @@ public sealed class GlobalHotkey : IDisposable
         ReleaseRegistration();
         if (_source is not null && !_source.IsDisposed)
             _source.RemoveHook(OnWindowMessage);
-        _registered = false;
         _source = null;
         _handle = IntPtr.Zero;
     }

@@ -1,4 +1,4 @@
-<!-- CONTRACT (Lead): keys are fixed; geometry content is owned by the icon writer.
+<!-- Shared vector resources for app windows, tray glyphs and the icon renderer.
      Glyph.*: stroke line icons in a 24x24 box, drawn with Style "GlassIcon" (Stroke = Foreground, round caps).
      AppIcon: full-colour Liquid-Glass app icon as DrawingImage, design box 0,0,256,256.
      Each glyph viewport contributes exact 0..24 bounds without painting: its segment is

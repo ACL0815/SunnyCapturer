@@ -64,13 +64,7 @@ internal static class AppDiagnostics
         RunCheck(results, "capture", () => { CaptureSelfChecks.Run(); return Array.Empty<string>(); });
         RunCheck(results, "editor", () => { EditorSelfChecks.Run(); return Array.Empty<string>(); });
         RunCheck(results, "overlay", () => { OverlaySelfChecks.Run(); return Array.Empty<string>(); });
-        Type? oauth = typeof(App).Assembly.GetType("KairosCapture.Services.OpenAiSelfChecks");
-        MethodInfo? run = oauth?.GetMethod("Run", BindingFlags.Public | BindingFlags.Static, Type.EmptyTypes);
-        if (run is null)
-            results.Add(new CheckResult("openai", "missing", 0, new[] { "OpenAiSelfChecks.Run is not present; OAuth was not checked." }));
-        else
-            RunCheck(results, "openai", () => run.Invoke(null, null) is IReadOnlyList<string> errors ? errors :
-                new[] { "OpenAiSelfChecks.Run must return IReadOnlyList<string> (errors only)." });
+        RunCheck(results, "openai", OpenAiSelfChecks.Run);
         RunCheck(results, "shell", CheckShell);
         RunCheck(results, "settings", CheckSettings);
         RunCheck(results, "hotkey", CheckHotkey);

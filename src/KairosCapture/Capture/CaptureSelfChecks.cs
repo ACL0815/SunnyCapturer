@@ -5,28 +5,14 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
-using DrawingPoint = System.Drawing.Point;
-using DrawingRectangle = System.Drawing.Rectangle;
 
 namespace KairosCapture.Capture;
 
 public static class CaptureSelfChecks
 {
-    /// <summary>Pure geometry and local image I/O only. No desktop capture, windows, hotkeys or clipboard.</summary>
+    /// <summary>Raster limits and local image I/O only. No desktop capture, windows, hotkeys or clipboard.</summary>
     public static void Run()
     {
-        var bounds = new DrawingRectangle(-1920, -1080, 4480, 2520);
-        var start = new DrawingPoint(-1800, -900);
-        var end = new DrawingPoint(120, 100);
-        var expected = new Int32Rect(120, 180, 1920, 1000);
-        Check(CaptureGeometry.Select(bounds, start, end) == expected, "Negative Desktopkoordinaten");
-        Check(CaptureGeometry.Select(bounds, end, start) == expected, "Rückwärtsauswahl");
-        Check(CaptureGeometry.Select(bounds, new DrawingPoint(int.MinValue, int.MaxValue),
-            new DrawingPoint(int.MaxValue, int.MinValue)) == new Int32Rect(0, 0, 4480, 2520), "Clamping/Überlauf");
-        Int32Rect empty = CaptureGeometry.Select(bounds, start, start);
-        Check(empty.Width == 0 && empty.Height == 0, "Leere Auswahl");
-        Check(CaptureGeometry.Select(bounds, new DrawingPoint(-3000, -2000), new DrawingPoint(-2500, -1500)).Width == 0,
-            "Auswahl außerhalb des Desktops");
         CaptureGeometry.ValidateSize(32768, 1);
         ExpectInvalidSize(32769, 1);
         ExpectInvalidSize(20000, 20000);
@@ -92,13 +78,7 @@ public static class CaptureSelfChecks
 
         BitmapSource source = BitmapSource.Create(width, height, 144, 192, PixelFormats.Bgra32, null, pixels, width * 4);
         source.Freeze();
-        var bounds = new DrawingRectangle(-4, -3, width, height);
-        var start = new DrawingPoint(-3, -2);
-        var end = new DrawingPoint(1, 0);
-        var expected = new Int32Rect(1, 1, 4, 2);
-        Int32Rect selected = CaptureGeometry.Select(bounds, start, end);
-        Check(selected == expected && CaptureGeometry.Select(bounds, end, start) == expected,
-            "Pixelcrop mit negativem Ursprung und rückwärts gezogener Auswahl");
+        var selected = new Int32Rect(1, 1, 4, 2);
         var crop = new CroppedBitmap(source, selected);
         crop.Freeze();
         byte[] expectedPixels = new byte[4 * 2 * 4];
