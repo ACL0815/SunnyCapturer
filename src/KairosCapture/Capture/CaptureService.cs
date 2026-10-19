@@ -7,7 +7,6 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
-using DrawingPoint = System.Drawing.Point;
 
 namespace KairosCapture.Capture;
 
@@ -18,24 +17,7 @@ public static class CaptureService
     internal static bool IsCapturing => Volatile.Read(ref _capturing) != 0;
     internal static event EventHandler? CaptureStateChanged;
 
-    public static Task<BitmapSource?> CaptureRegionAsync(Window owner) => CaptureRegionAsync(owner, CancellationToken.None);
-
-    public static Task<BitmapSource?> CaptureScreenAsync(Window owner) => CaptureScreenAsync(owner, CancellationToken.None);
-
-    public static async Task<BitmapSource?> CaptureRegionAsync(Window owner, CancellationToken cancellationToken) =>
-        (await CaptureAsync(owner, true, false, cancellationToken)).Raw;
-
-    public static async Task<BitmapSource?> CaptureScreenAsync(Window owner, CancellationToken cancellationToken) =>
-        (await CaptureAsync(owner, false, false, cancellationToken)).Raw;
-
     internal static CaptureSessionResult? LastSession { get; private set; }
-
-    public static Task<CaptureSessionResult> CaptureEditedRegionAsync(Window owner, CancellationToken cancellationToken = default) =>
-        CaptureEditedAsync(owner, new AppSettings(), CaptureMode.Region, cancellationToken);
-
-    internal static async Task<CaptureSessionResult> CaptureEditedAsync(Window owner, AppSettings settings, CaptureMode mode,
-        CancellationToken cancellationToken = default) =>
-        (await CaptureAsync(owner, true, true, cancellationToken, settings, mode)).Edited;
 
     internal static void Remember(CaptureSessionResult result)
     {
@@ -43,14 +25,14 @@ public static class CaptureService
             LastSession = result;
     }
 
-    private static async Task<(BitmapSource? Raw, CaptureSessionResult Edited)> CaptureAsync(Window owner, bool region, bool editing,
-        CancellationToken cancellationToken, AppSettings? settings = null, CaptureMode mode = CaptureMode.Region)
+    internal static async Task<CaptureSessionResult> CaptureEditedAsync(Window owner, AppSettings settings, CaptureMode mode,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(owner);
         owner.Dispatcher.VerifyAccess();
         cancellationToken.ThrowIfCancellationRequested();
         if (Interlocked.CompareExchange(ref _capturing, 1, 0) != 0)
-            return (null, new(CaptureCompletion.Cancelled));
+            return new(CaptureCompletion.Cancelled);
 
         Visibility visibility = owner.Visibility;
         WindowState state = owner.WindowState;
@@ -71,7 +53,7 @@ public static class CaptureService
             owner.Hide();
             if (visibility == Visibility.Visible) await Task.Delay(100, lifetime.Token);
             if (ownerClosed)
-                return (null, new(CaptureCompletion.Cancelled));
+                return new(CaptureCompletion.Cancelled);
 
             lifetime.Token.ThrowIfCancellationRequested();
             // A tray action may have shown the owner during the delay. Hide again without
@@ -79,14 +61,11 @@ public static class CaptureService
             owner.Hide();
             Marshal.ThrowExceptionForHR(DwmFlush());
             CaptureSessionResult? previous = mode == CaptureMode.Resume ? LastSession : null;
-            if (mode == CaptureMode.Resume && previous == null) return (null, new(CaptureCompletion.Cancelled));
+            if (mode == CaptureMode.Resume && previous == null) return new(CaptureCompletion.Cancelled);
             Rectangle bounds = previous?.Bounds ?? GetVirtualBounds();
             BitmapSource screenshot = previous?.Screenshot ?? CaptureDesktop(bounds);
             lifetime.Token.ThrowIfCancellationRequested();
-            if (!region)
-                return (screenshot, new(CaptureCompletion.Cancelled));
-
-            overlay = new RegionOverlay(screenshot, bounds, editing, settings, mode == CaptureMode.Ocr, previous?.Editor) { Owner = owner };
+            overlay = new RegionOverlay(screenshot, bounds, settings: settings, ocrMode: mode == CaptureMode.Ocr, editor: previous?.Editor) { Owner = owner };
             if (previous != null) overlay.SetRegion(previous.Region);
             else if (mode == CaptureMode.Fullscreen)
             {
@@ -103,25 +82,15 @@ public static class CaptureService
             overlay.ShowDialog();
             lifetime.Token.ThrowIfCancellationRequested();
             if (ownerClosed)
-                return (null, new(CaptureCompletion.Cancelled));
+                return new(CaptureCompletion.Cancelled);
             if (overlay.Failure is not null)
                 throw overlay.Failure;
-            if (editing)
-            {
-                Remember(overlay.Result);
-                return (null, overlay.Result);
-            }
-            Int32Rect selection = overlay.Selection;
-            if (selection.Width == 0 || selection.Height == 0)
-                return (null, new(CaptureCompletion.Cancelled));
-
-            var cropped = new CroppedBitmap(screenshot, selection);
-            cropped.Freeze();
-            return (cropped, new(CaptureCompletion.Cancelled));
+            Remember(overlay.Result);
+            return overlay.Result;
         }
         catch (OperationCanceledException) when (ownerClosed && !cancellationToken.IsCancellationRequested)
         {
-            return (null, new(CaptureCompletion.Cancelled));
+            return new(CaptureCompletion.Cancelled);
         }
         finally
         {
@@ -132,7 +101,7 @@ public static class CaptureService
                 if (!ownerClosed)
                 {
                     owner.WindowState = state;
-                    if (editing && overlay?.Result.Completion is CaptureCompletion.Copied or CaptureCompletion.Saved or CaptureCompletion.Ocr or CaptureCompletion.Pinned)
+                    if (overlay?.Result.Completion is CaptureCompletion.Copied or CaptureCompletion.Saved or CaptureCompletion.Ocr or CaptureCompletion.Pinned)
                     {
                         owner.Hide();
                     }
@@ -194,9 +163,6 @@ public static class CaptureService
         }
     }
 
-    // Deliberately separate from Run(): only a caller explicitly requesting a real capture uses this.
-    internal static BitmapSource CaptureDesktopForCheck() => CaptureDesktop(GetVirtualBounds());
-
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
 
@@ -229,14 +195,5 @@ internal static class CaptureGeometry
         if (width <= 0 || height <= 0 || width > 32768 || height > 32768 || (long)width * height > 64L * 1024 * 1024)
             throw new InvalidOperationException($"Das Bildraster ({width} × {height}) ist ungültig oder zu groß. " +
                 "Unterstützt werden maximal 32768 Pixel pro Seite und insgesamt 64 Megapixel (67108864 Pixel).");
-    }
-
-    internal static Int32Rect Select(Rectangle bounds, DrawingPoint start, DrawingPoint end)
-    {
-        int x1 = (int)Math.Clamp((long)start.X - bounds.X, 0, bounds.Width);
-        int y1 = (int)Math.Clamp((long)start.Y - bounds.Y, 0, bounds.Height);
-        int x2 = (int)Math.Clamp((long)end.X - bounds.X, 0, bounds.Width);
-        int y2 = (int)Math.Clamp((long)end.Y - bounds.Y, 0, bounds.Height);
-        return new Int32Rect(Math.Min(x1, x2), Math.Min(y1, y2), Math.Abs(x2 - x1), Math.Abs(y2 - y1));
     }
 }

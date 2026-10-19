@@ -223,8 +223,7 @@ public partial class MainWindow : Window
         if (!_refreshing && ModelPicker.SelectedItem is OpenAiModel model) { Settings.Model = model.Slug; SaveSettings(); }
     }
 
-    internal Task CaptureAsync(CaptureMode mode = CaptureMode.Region) => CaptureCoreAsync(mode);
-    private async Task CaptureCoreAsync(CaptureMode mode)
+    internal async Task CaptureAsync(CaptureMode mode = CaptureMode.Region)
     {
         if (_closed || _diagnosticsMode || CaptureService.IsCapturing) return;
         try

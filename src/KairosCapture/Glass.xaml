@@ -1,4 +1,4 @@
-<!-- CONTRACT (Lead): keys are fixed; visual content is owned by the icon/glass writer.
+<!-- Shared glass resources for app windows, overlay controls and the icon renderer.
      GlassFill / GlassStroke / GlassHighlight: brushes for translucent surfaces.
      GlassPanel (Border): floating glass surface. GlassIcon (Path): Data = {StaticResource Glyph.X}, 24x24 box, Stroke = inherited Foreground.
      GlassIconButton (Button): round/squircle icon button, Content is a Path with GlassIcon style.
