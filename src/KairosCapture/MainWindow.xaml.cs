@@ -28,7 +28,7 @@ public partial class MainWindow : Window
     internal event Action? SettingsChanged;
     internal event Action<CaptureCompletion, string?>? CaptureCompleted;
     internal string OcrStatus => OpenAi?.ActiveAccount is { IsSignedIn: true } account
-        ? $"OCR: {(account.Email.Length > 0 ? account.Email : account.Label)} · {(Settings.Model.Length > 0 ? Settings.Model : "Modell wählen")}" : "OCR: nicht verbunden";
+        ? $"OCR: {(account.Email.Length > 0 ? account.Email : account.Label)} · {(!OpenAi.CanUsePlan ? "Planfreigabe fehlt" : Settings.Model.Length > 0 ? Settings.Model : "Modell fehlt")}" : "OCR: nicht verbunden";
 
     public MainWindow(bool diagnosticsMode = false)
     {
@@ -135,7 +135,8 @@ public partial class MainWindow : Window
         AccountPicker.ItemsSource = OpenAi?.Accounts;
         AccountPicker.SelectedItem = OpenAi?.Accounts.FirstOrDefault(a => a.Key == OpenAi.ActiveAccount?.Key);
         AccountStatus.Text = OpenAi is null ? "OpenAI ist derzeit nicht verfügbar. Aufnahme und Bearbeitung bleiben verfügbar." :
-            OpenAi.ActiveAccount?.IsSignedIn == true ? "Mit ChatGPT verbunden" : "Mit ChatGPT verbinden, um Text aus Aufnahmen zu erkennen.";
+            OpenAi.ActiveAccount?.IsSignedIn == true ? (OpenAi.CanUsePlan ? "Mit ChatGPT verbunden" : "Mit ChatGPT verbunden · Freigabe zur Nutzung des Plans fehlt") :
+                "Mit ChatGPT verbinden, um Text aus Aufnahmen zu erkennen.";
         _refreshing = false;
         SettingsChanged?.Invoke();
     }
@@ -159,7 +160,7 @@ public partial class MainWindow : Window
         CancelLoginButton.Visibility = Visibility.Visible;
         try { await action(operation.Token); }
         catch (OperationCanceledException) { if (!_closed) SetStatus("Vorgang abgebrochen."); }
-        catch (Exception ex) { if (!_closed) ReportError("OpenAI", ex); }
+        catch (Exception ex) { App.LogException("OpenAI", ex); if (!_closed) SetStatus(OpenAiDiagnostics.UserMessage(ex)); }
         finally
         {
             _accountCts = null;
@@ -177,12 +178,20 @@ public partial class MainWindow : Window
         await RunAccountActionAsync(async ct =>
         {
             SetStatus("Anmeldung im Browser abschließen…");
-            await OpenAi.SignInAsync(addAccount ? null : OpenAi.ActiveAccount?.Key, ct);
+            try { await OpenAi.SignInAsync(addAccount ? null : OpenAi.ActiveAccount?.Key, ct); }
+            finally
+            {
+                // Identity-only consent also creates a valid, active account before reporting its missing plan permission.
+                if (!_closed)
+                {
+                    Settings.AccountKey = OpenAi.ActiveAccount?.Key ?? "";
+                    _models = Array.Empty<OpenAiModel>(); ModelPicker.ItemsSource = _models;
+                    SaveSettings(); RefreshAccounts();
+                }
+            }
             if (_closed) return;
-            Settings.AccountKey = OpenAi.ActiveAccount?.Key ?? "";
-            SaveSettings();
             await LoadModelsAsync(ct);
-            SetStatus("Mit ChatGPT verbunden.");
+            if (_models.Count > 0) SetStatus("Mit ChatGPT verbunden · Texterkennung ist bereit.");
         });
     }
     private async void Login_Click(object sender, RoutedEventArgs e) => await ConnectAsync();
@@ -203,9 +212,10 @@ public partial class MainWindow : Window
         _models = models;
         _refreshing = true;
         ModelPicker.ItemsSource = models;
-        ModelPicker.SelectedItem = models.FirstOrDefault(m => m.Slug == Settings.Model) ?? models.FirstOrDefault();
+        ModelPicker.SelectedItem = OpenAiService.SelectOcrModel(models, Settings.Model);
         _refreshing = false;
         if (ModelPicker.SelectedItem is OpenAiModel model) { Settings.Model = model.Slug; SaveSettings(); }
+        else if (Settings.Model.Length > 0) { Settings.Model = ""; SaveSettings(); }
         if (models.Count == 0) SetStatus("Dieses Konto stellt derzeit kein OCR-Modell bereit. Konto und Freigaben in ChatGPT prüfen.");
     }
     private void Model_Changed(object sender, SelectionChangedEventArgs e)

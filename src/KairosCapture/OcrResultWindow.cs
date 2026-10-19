@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -12,6 +13,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using KairosCapture.Capture;
+using KairosCapture.Services;
 using Microsoft.Win32;
 using DrawingRectangle = System.Drawing.Rectangle;
 
@@ -21,6 +23,9 @@ internal sealed class OcrResultWindow : Window
 {
     private readonly MainWindow _settings;
     private BitmapSource? _image;
+    private byte[]? _png;
+    private readonly Dictionary<string, string> _translations = new(StringComparer.Ordinal);
+    private readonly ComboBox _translation;
     private readonly TextBlock _status;
     private readonly TextBox _text;
     private readonly ProgressBar _progress;
@@ -30,6 +35,7 @@ internal sealed class OcrResultWindow : Window
     internal bool HasImage => _image != null;
     internal TextBox ResultText => _text;
     internal string Status => _status.Text;
+    internal ComboBox TranslationPicker => _translation;
 
     internal OcrResultWindow(MainWindow settings, BitmapSource image, DrawingRectangle bounds, Int32Rect region, bool diagnostics = false)
     {
@@ -47,6 +53,13 @@ internal sealed class OcrResultWindow : Window
         var header = new StackPanel();
         var title = new ContentControl { Content = GlassWindow.Caption(this, "Ocr", "Text aus deiner Aufnahme"), FontSize = 17, FontWeight = FontWeights.SemiBold, Foreground = (Brush)FindResource("TextBrush") };
         header.Children.Add(title);
+        var translationRow = new DockPanel { Margin = new Thickness(0, 10, 0, 0) };
+        translationRow.Children.Add(new TextBlock { Text = "Übersetzen", VerticalAlignment = VerticalAlignment.Center,
+            Foreground = (Brush)FindResource("LavenderBrush"), Margin = new Thickness(0, 0, 10, 0) });
+        _translation = new ComboBox { ItemsSource = OpenAiOcr.Translations, DisplayMemberPath = "Label", SelectedIndex = 0,
+            IsEditable = false, Background = (Brush)FindResource("GlassFill"), BorderBrush = (Brush)FindResource("GlassStroke"),
+            Foreground = (Brush)FindResource("TextBrush"), ToolTip = "Erkannten Text in diese Sprache übersetzen" };
+        translationRow.Children.Add(_translation); header.Children.Add(translationRow);
         _status = new TextBlock { Text = "Texterkennung wird vorbereitet…", TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 10, 0, 9), FontSize = 12, Foreground = (Brush)FindResource("LavenderBrush") };
         header.Children.Add(_status); grid.Children.Add(header);
@@ -68,6 +81,12 @@ internal sealed class OcrResultWindow : Window
         Add(actions, "Schließen", "Close", () => { Close(); return Task.CompletedTask; });
         Grid.SetRow(actions, 3); grid.Children.Add(actions); root.Child = grid; Content = root;
         SetActions(false, false);
+        _translation.SelectionChanged += async (_, _) =>
+        {
+            _operation?.Cancel();
+            _operation = null;
+            await RecognizeAsync();
+        };
         PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { e.Handled = true; Close(); } };
         SourceInitialized += (_, _) =>
         {
@@ -80,7 +99,7 @@ internal sealed class OcrResultWindow : Window
     private Button Add(Panel panel, string text, string glyph, Func<Task> action)
     {
         var button = new Button { Content = GlassWindow.Caption(this, glyph, text), Style = (Style)FindResource("SmallButton"), Margin = new Thickness(0, 0, 5, 5) };
-        button.Click += async (_, _) => { try { await action(); } catch (Exception ex) { if (!_closed) ShowFailure(ex.Message); App.LogException("OCR result action", ex); } };
+        button.Click += async (_, _) => { try { await action(); } catch (Exception ex) { if (!_closed) ShowFailure(OpenAiDiagnostics.UserMessage(ex)); App.LogException("OCR result action", ex); } };
         panel.Children.Add(button); return button;
     }
     private void SetActions(bool running, bool result)
@@ -95,32 +114,53 @@ internal sealed class OcrResultWindow : Window
     internal async Task RecognizeAsync()
     {
         if (_closed || _operation != null || _image == null) return;
+        string? language = (_translation.SelectedItem as OpenAiTranslation)?.Language;
+        string cacheKey = language ?? "";
+        if (_translations.TryGetValue(cacheKey, out string? cached)) { ShowResult(cached, language); return; }
         if (_settings.OpenAi?.ActiveAccount?.IsSignedIn != true)
         { ShowFailure("Mit ChatGPT verbinden, dann erneut versuchen. Deine Aufnahme bleibt hier erhalten."); return; }
         using var operation = new CancellationTokenSource(); _operation = operation;
-        SetActions(true, false); _text.Clear(); _status.Text = "Text wird erkannt…";
+        bool Current() => !_closed && ReferenceEquals(_operation, operation) && !operation.IsCancellationRequested;
+        SetActions(true, false); _text.Clear(); _status.Text = language is null ? "Text wird erkannt…" : "Text wird erkannt und übersetzt…";
         try
         {
             var models = await _settings.OpenAi.GetModelsAsync(operation.Token);
-            if (_closed) return;
-            var model = models.FirstOrDefault(m => m.Slug == _settings.Settings.Model) ?? models.FirstOrDefault();
+            if (!Current()) return;
+            var model = OpenAiService.SelectOcrModel(models, _settings.Settings.Model);
             if (model == null) { ShowFailure("Kein Modell verfügbar. Konto und Freigaben in den Einstellungen prüfen, dann erneut versuchen."); return; }
             _settings.Settings.Model = model.Slug; _settings.SaveSettings();
-            byte[] png = ImageOutput.EncodePng(_image);
-            var progress = new Progress<string>(part => { if (!_closed && !operation.IsCancellationRequested) _text.AppendText(part); });
-            string text = await _settings.OpenAi.ExtractTextAsync(png, model.Slug, progress, operation.Token);
-            if (_closed || operation.IsCancellationRequested) return;
-            _text.Text = text; SetActions(false, true);
-            _status.Text = text.Length == 0 ? "Kein Text gefunden. Du kannst den Text hier selbst ergänzen." : "Erkannt · du kannst den Text direkt bearbeiten.";
-            if (_settings.Settings.AutoCopyOcr && text.Length > 0)
+            _png ??= ImageOutput.EncodePng(_image);
+            var progress = new Progress<string>(part => { if (Current()) _text.AppendText(part); });
+            string text = await _settings.OpenAi.ExtractTextAsync(_png, model.Slug, progress, operation.Token, language);
+            if (!Current()) return;
+            _translations[cacheKey] = text;
+            ShowResult(text, language);
+        }
+        catch (OperationCanceledException) { if (!_closed && ReferenceEquals(_operation, operation)) ShowFailure("Texterkennung abgebrochen. Deine Aufnahme bleibt für einen neuen Versuch erhalten."); }
+        catch (Exception ex)
+        {
+            if (Current()) ShowFailure(OpenAiDiagnostics.UserMessage(ex));
+            App.LogException("OCR", ex);
+        }
+        finally
+        {
+            if (ReferenceEquals(_operation, operation))
             {
-                try { Clipboard.SetText(text); _status.Text = "Erkannt · automatisch in die Zwischenablage kopiert."; }
-                catch (ExternalException) { _status.Text = "Erkannt · Zwischenablage belegt. Bitte „Kopieren“ erneut wählen."; }
+                _operation = null;
+                if (!_closed) _progress.Visibility = _cancel.Visibility = Visibility.Collapsed;
             }
         }
-        catch (OperationCanceledException) { if (!_closed) ShowFailure("Texterkennung abgebrochen. Deine Aufnahme bleibt für einen neuen Versuch erhalten."); }
-        catch (Exception ex) { if (!_closed) ShowFailure(ex.Message + " · Einstellungen prüfen oder erneut versuchen."); App.LogException("OCR", ex); }
-        finally { _operation = null; if (!_closed) _progress.Visibility = _cancel.Visibility = Visibility.Collapsed; }
+    }
+    private void ShowResult(string text, string? language)
+    {
+        _text.Text = text; SetActions(false, true);
+        string result = language is null ? "Erkannt" : "Übersetzt";
+        _status.Text = text.Length == 0 ? "Kein Text gefunden. Du kannst den Text hier selbst ergänzen." : result + " · du kannst den Text direkt bearbeiten.";
+        if (_settings.Settings.AutoCopyOcr && text.Length > 0)
+        {
+            try { Clipboard.SetText(text); _status.Text = result + " · automatisch in die Zwischenablage kopiert."; }
+            catch (ExternalException) { _status.Text = result + " · Zwischenablage belegt. Bitte „Kopieren“ erneut wählen."; }
+        }
     }
     private void ShowFailure(string message) { _status.Text = message; SetActions(false, false); }
     private void CopyText()
@@ -141,7 +181,7 @@ internal sealed class OcrResultWindow : Window
     }
     protected override void OnClosed(EventArgs e)
     {
-        _closed = true; _operation?.Cancel(); _image = null; base.OnClosed(e);
+        _closed = true; _operation?.Cancel(); _image = null; _png = null; _translations.Clear(); base.OnClosed(e);
     }
     internal static DrawingRectangle ResultBounds(DrawingRectangle desktop, Int32Rect region, DrawingRectangle work, double scale)
     {

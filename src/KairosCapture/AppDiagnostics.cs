@@ -35,11 +35,20 @@ internal static class AppDiagnostics
 
     internal static int Run(string[] args)
     {
+        if (args.Length is 1 or 2 && args[0] == "--openai-probe")
+        {
+            OpenAiProbeResult probe = Task.Run(OpenAiService.ProbeAsync).GetAwaiter().GetResult();
+            string path = Path.GetFullPath(args.Length == 2 ? args[1] : Path.Combine("test-results", "openai-probe.txt"));
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllLines(path, probe.Lines);
+            foreach (string line in probe.Lines) Console.WriteLine(line);
+            return probe.Passed ? 0 : 1;
+        }
         if (args.Length != 2 || string.IsNullOrWhiteSpace(args[1])) return 2;
         string previewPath = Path.GetFullPath(args[1]);
         if (args[0] is "--render-preview" or "--render-settings-preview") { RenderPreview(previewPath); return 0; }
         if (args[0] == "--render-overlay-preview") { RenderOverlayPreview(previewPath); return 0; }
-        if (args[0] == "--render-ocr-preview") { RenderOcrPreview(previewPath); return 0; }
+        if (args[0] is "--render-ocr-preview" or "--render-ocr-result") { RenderOcrPreview(previewPath); return 0; }
         if (args[0] == "--render-tray-preview") { RenderTrayPreview(previewPath); return 0; }
         if (args[0] is not ("--self-test" or "--self-check")) return 2;
         string directory = Path.GetFullPath(args[1]);
@@ -86,7 +95,7 @@ internal static class AppDiagnostics
         {
             Exception cause = exception is TargetInvocationException { InnerException: { } inner } ? inner : exception;
             results.Add(new CheckResult(name, "failed", watch.ElapsedMilliseconds,
-                new[] { cause.GetType().Name + ": " + cause.Message }));
+                new[] { OpenAiDiagnostics.Describe(cause) }));
         }
     }
 
@@ -164,6 +173,9 @@ internal static class AppDiagnostics
         var window = new OcrResultWindow(settings, CreateDemoBitmap(), default, default, diagnostics: true);
         try
         {
+            Require(!window.TranslationPicker.IsEditable && window.TranslationPicker.Items.Count == 9 &&
+                window.TranslationPicker.SelectedItem is OpenAiTranslation { Language: null }, "OCR must default to transcription with a closed translation whitelist.");
+            Require(window.TranslationPicker.SelectedItem.ToString() == "Nicht übersetzen", "Translation selection must display its German label.");
             Task operation = window.RecognizeAsync();
             Require(operation.IsCompletedSuccessfully && window.HasImage && window.Status.Contains("ChatGPT", StringComparison.Ordinal), "Missing account must explain next action and retain image without network.");
             var desktop = new System.Drawing.Rectangle(-1920, -1080, 4480, 2520);

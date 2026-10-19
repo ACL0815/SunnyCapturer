@@ -94,7 +94,7 @@ internal static class OpenAiProtocol
         }
         catch (Exception ex) when (ex is FormatException or JsonException or InvalidOperationException)
         {
-            throw new InvalidOperationException("Das OpenAI-ID-Token hat keinen unterstützten RS256-Signaturkopf.");
+            throw new InvalidOperationException("Das OpenAI-ID-Token hat keinen unterstützten RS256-Signaturkopf.", ex);
         }
     }
 
@@ -133,7 +133,7 @@ internal static class OpenAiProtocol
             };
             var handler = new JsonWebTokenHandler { MapInboundClaims = false, MaximumTokenSizeInBytes = 65536 };
             TokenValidationResult result = handler.ValidateTokenAsync(jwt, validation).ConfigureAwait(false).GetAwaiter().GetResult();
-            if (!result.IsValid) throw new InvalidOperationException();
+            if (!result.IsValid) throw new InvalidOperationException("ID token validation failed.", result.Exception);
 
             // Consume identity claims only after the maintained library verifies the signature and issuer.
             JsonElement claims = payload.RootElement;
@@ -160,7 +160,7 @@ internal static class OpenAiProtocol
         catch (Exception ex) when (ex is SecurityTokenException or FormatException or JsonException or CryptographicException or
             InvalidOperationException or KeyNotFoundException or ArgumentException or OverflowException)
         {
-            throw new InvalidOperationException("Das OpenAI-ID-Token konnte nicht sicher bestätigt werden (Signatur, Konto, Zeit, Audience oder Nonce).");
+            throw new InvalidOperationException("Das OpenAI-ID-Token konnte nicht sicher bestätigt werden (Signatur, Konto, Zeit, Audience oder Nonce).", ex);
         }
     }
 

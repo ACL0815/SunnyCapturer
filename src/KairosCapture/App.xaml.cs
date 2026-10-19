@@ -5,6 +5,7 @@ using System.IO;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
+using KairosCapture.Services;
 using Forms = System.Windows.Forms;
 
 namespace KairosCapture;
@@ -23,7 +24,7 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-        _diagnostics = e.Args.Length > 0 && (e.Args[0] is "--self-test" or "--self-check" || e.Args[0].StartsWith("--render-", StringComparison.Ordinal));
+        _diagnostics = e.Args.Length > 0 && (e.Args[0] is "--self-test" or "--self-check" or "--openai-probe" || e.Args[0].StartsWith("--render-", StringComparison.Ordinal));
         DispatcherUnhandledException += OnDispatcherException;
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
         {
@@ -176,6 +177,11 @@ public partial class App : Application
     }
 
     internal static void LogException(string action, Exception exception)
+        => AppendLog($"{action}: {OpenAiDiagnostics.Describe(exception)}{Environment.NewLine}{new StackTrace(exception, false)}");
+
+    internal static void LogOpenAiDiagnostic(string diagnostic) => AppendLog("OpenAI: " + diagnostic);
+
+    private static void AppendLog(string diagnostic)
     {
         try
         {
@@ -184,7 +190,7 @@ public partial class App : Application
             Directory.CreateDirectory(directory);
             string path = Path.Combine(directory, "application.log");
             if (File.Exists(path) && new FileInfo(path).Length > 256 * 1024) File.Move(path, path + ".previous", true);
-            File.AppendAllText(path, $"{DateTimeOffset.UtcNow:O} {action}: {exception.GetType().FullName}{Environment.NewLine}{new StackTrace(exception, false)}{Environment.NewLine}");
+            File.AppendAllText(path, $"{DateTimeOffset.UtcNow:O} {diagnostic}{Environment.NewLine}");
         }
         catch (Exception) { /* Diagnostics must never stop capture or error recovery. */ }
     }
