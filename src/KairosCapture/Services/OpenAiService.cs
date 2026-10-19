@@ -313,6 +313,7 @@ public sealed partial class OpenAiService : IDisposable
         if (string.IsNullOrWhiteSpace(model) || model.Length > 256 || model.Any(char.IsControl))
             throw new ArgumentException("Bitte ein Modell aus der OpenAI-Modellliste wählen.", nameof(model));
         using CancellationTokenSource operation = Operation(ct, TimeSpan.FromMinutes(2), out string key, out CancellationToken session);
+        int? status = null;
         try
         {
             string access = await AccessTokenAsync(key, operation.Token).ConfigureAwait(false);
@@ -329,6 +330,7 @@ public sealed partial class OpenAiService : IDisposable
                 } } }
             }), Encoding.UTF8, "application/json");
             using HttpResponseMessage response = await SendAsync(request, operation.Token).ConfigureAwait(false);
+            status = (int)response.StatusCode;
             byte[]? captured = null;
             if (trace is not null)
             {
@@ -337,14 +339,27 @@ public sealed partial class OpenAiService : IDisposable
                 trace.Body(captured, response.Content.Headers.ContentType?.MediaType);
             }
             if (!response.IsSuccessStatusCode) throw await ErrorAsync(response, operation.Token, captured).ConfigureAwait(false);
-            if (response.Content.Headers.ContentType?.MediaType != "text/event-stream")
+            if (response.Content.Headers.ContentType?.MediaType is { } mediaType &&
+                !mediaType.Equals("text/event-stream", StringComparison.OrdinalIgnoreCase))
                 throw new OpenAiOcrProtocolException(OpenAiOcrReason.ContentType);
             await using Stream stream = captured is null ? await response.Content.ReadAsStreamAsync(operation.Token).ConfigureAwait(false) : new MemoryStream(captured);
             return await OpenAiProtocol.ReadSseAsync(stream, progress, operation.Token).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested && !_lifetime.IsCancellationRequested && !session.IsCancellationRequested)
-        { throw new TimeoutException("Die Texterkennung hat das Zeitlimit von zwei Minuten überschritten. Bitte einen kleineren Ausschnitt versuchen."); }
-        catch (IOException) { throw new InvalidOperationException("Die OCR-Verbindung wurde unterbrochen. Der Teiltext ist unvollständig."); }
+        catch (Exception ex)
+        {
+            Exception failure = ex switch
+            {
+                OperationCanceledException when !ct.IsCancellationRequested && !_lifetime.IsCancellationRequested && !session.IsCancellationRequested =>
+                    new TimeoutException("Die Texterkennung hat das Zeitlimit von zwei Minuten überschritten. Bitte einen kleineren Ausschnitt versuchen.", ex),
+                IOException => new OpenAiOcrProtocolException(OpenAiOcrReason.ConnectionInterrupted, ex),
+                DecoderFallbackException => new OpenAiOcrProtocolException(OpenAiOcrReason.InvalidEncoding, ex),
+                _ => ex
+            };
+            OpenAiDiagnostics.Mark(failure, OpenAiStep.Ocr, status);
+            Report(OpenAiStep.Ocr, OpenAiOutcome.Failed, failure);
+            if (ReferenceEquals(failure, ex)) throw;
+            throw failure;
+        }
     }
 
     private CancellationTokenSource Operation(CancellationToken ct, TimeSpan timeout, out string key, out CancellationToken session)

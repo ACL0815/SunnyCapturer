@@ -1,6 +1,6 @@
 # Kairos Capture: OpenAI OAuth und OCR
 
-Stand: 18.10.2026. Grundlage sind der lokale [Implementierungsvertrag](reverse/OPENAI-OAUTH-VERTRAG.md), die vollständig geprüften eigenen Service-Entwürfe und die unten verlinkten offiziellen OpenAI-Seiten. Es wurde kein SunnyCapturer-Quellcode übernommen. Echter Login, reale Inferenz, Refresh und Widerruf mit einem Nutzerkonto sind **nicht abgenommen**.
+Stand: 19.10.2026. Grundlage sind der lokale [Implementierungsvertrag](reverse/OPENAI-OAUTH-VERTRAG.md), die vollständig geprüften eigenen Service-Entwürfe und die unten verlinkten offiziellen OpenAI-Seiten. Es wurde kein SunnyCapturer-Quellcode übernommen. Eine echte OCR-Anfrage mit synthetischem Bild und vorhandener Nutzersitzung ist bestanden. Ein neuer echter Login, reale Tokenrotation und Widerruf wurden in dieser Prüfung nicht durchgeführt.
 
 ## Anmeldung und Identität
 
@@ -30,7 +30,7 @@ Nur `response.completed` mit `response.status=completed` liefert ein erfolgreich
 
 `OpenAiRequestException` bildet Auth-, Scope-, Konto-/Workspace-, Guthaben-, Raten-, App-Limit-, Routing- und temporäre Fehler getrennt ab. HTTP-Status, begrenzte sichere Codes/Parameter, Request-ID und Antwortform bleiben erhalten; rohe Providertexte oder Tokenwerte werden nicht angezeigt. Eine `detail`-Antwort ist kein stabiler Fehlercode. Grundlage: [Fehler und Wiederherstellung](https://developers.openai.com/siwc/token-sharing-open-source/errors-and-recovery).
 
-Der interne `OpenAiUserException` ist der zusätzliche UI-Vertrag für bekannte lokale Zustände. Sein Konstruktor akzeptiert ausschließlich `OpenAiUserError`, keine freie Meldung. Die UI darf dessen feste App-Meldungen sowie `OpenAiRequestException.Message` anzeigen. Unbekannte Library-, IO- und Protokollausnahmen erhalten weiterhin eine allgemeine Meldung. Öffentliche Account-, Model- und Service-Signaturen bleiben erhalten.
+Der interne `OpenAiUserException` ist der zusätzliche UI-Vertrag für bekannte lokale Zustände. Sein Konstruktor akzeptiert ausschließlich `OpenAiUserError`, keine freie Meldung. Die UI darf dessen feste App-Meldungen sowie `OpenAiRequestException.Message` anzeigen. Für OCR-Protokollfehler enthält `OpenAiOcrProtocolException` ausschließlich einen festen `OpenAiOcrReason` und dessen deutsche App-Meldung. Unbekannte Library-Ausnahmen erhalten weiterhin eine allgemeine Meldung. Öffentliche Account-, Model- und Service-Signaturen bleiben erhalten.
 
 ## Offline-Prüfung und Reproduktion
 
@@ -52,7 +52,7 @@ Die Gegenproben reproduzierten im Altstand die Annahme von Callback-Benutzerinfo
 
 Nach Integration in die Shell führt `KairosCapture --self-test` denselben `Run()`-Vertrag aus. Der hier beschriebene isolierte Compilerlauf ist keine Abnahme des gesamten WPF-Projekts.
 
-Offen bleiben reale Konto-/Workspace-Zulassung, der verfügbare bildfähige Katalog, Nutzerlogin, reale Tokenrotation/Widerruf, OCR-Qualität und Latenz. Die Oberfläche muss bei Kontoänderung ihre Modellliste neu laden und alte Deltas verwerfen. Die Prüfung, dass die Produkt-UI ausschließlich den endgültig geschwärzten Export sendet und Diagnose-/Demo-Modi keine Produktkonten lesen, gehört zur Shell-/Editor-Integration.
+Offen bleiben andere Konto- und Workspace-Konstellationen, reale Tokenrotation und Widerruf sowie OCR-Qualität und Latenz für echte Aufnahmen. Die Oberfläche muss bei Kontoänderung ihre Modellliste neu laden und alte Deltas verwerfen. Die Prüfung, dass die Produkt-UI ausschließlich den endgültig geschwärzten Export sendet, gehört zur Shell-/Editor-Integration. Offline-Prüfungen und Vorschauen lesen keine Produktkonten. Nur der ausdrücklich aufgerufene Schalter `--openai-ocr-probe` verwendet die gespeicherte Nutzersitzung.
 
 ## Diagnose und Übersetzung (19.10.2026)
 
@@ -65,3 +65,74 @@ Die Originalausnahme bleibt jetzt erhalten. Diagnose und UI unterscheiden Callba
 Nach bestätigter Identität übernehmen die Einstellungen das aktive Konto sofort, auch bei fehlender Direct-Planfreigabe. Bei nutzbarer Freigabe wird der Katalog geladen: Ein gültiges Modell bleibt erhalten, sonst wird das erste gelistete Modell in Serverreihenfolge gewählt und gespeichert. Ein leerer Katalog bleibt als Fehler sichtbar. Tray und Kontostatus werden über die vorhandenen Änderungsereignisse sofort aktualisiert.
 
 Der OCR-Dialog beginnt bei jedem Öffnen mit „Nicht übersetzen“. Die feste Liste erlaubt zusätzlich Deutsch, Englisch, Thai, Französisch, Spanisch, Italienisch, Japanisch und Chinesisch (vereinfacht). `ExtractTextAsync` akzeptiert dafür einen optionalen letzten Sprachparameter; andere Werte werden vor HTTP abgewiesen. Übersetzung und Transkription verwenden dasselbe PNG und behalten die Anweisung bei, Bildinhalt als nicht vertrauenswürdig zu behandeln. Ein Wechsel bricht den alten Request ab und verwirft dessen Deltas, Ergebnis und Abschlussstatus. Fertige Ergebnisse werden nur im Fenster pro Sprache zwischengespeichert; AutoCopy gilt auch für Übersetzungen. `--render-ocr-result <PNG>` ist ein Alias für die OCR-Vorschau.
+
+## Reale OCR-Probe und fehlender Content-Type (19.10.2026)
+
+`KairosCapture --openai-ocr-probe <Ausgabedatei>` rendert ein weißes PNG mit dem schwarzen Text `Kairos Test 123`. Der Schalter lädt `Settings.AccountKey` und `Settings.Model`, wählt das gespeicherte Konto und sendet genau eine OCR-Anfrage über denselben Service und Parser wie das Ergebnisfenster. Er öffnet keinen Browser und speichert keine Einstellungen. Die übliche Sitzungserneuerung durch den Service bleibt möglich.
+
+Die Ausgabe enthält HTTP-Status, Content-Type-MediaType und Charset, die geordnete Folge von SSE-`event` und JSON-`type`, Feldnamen des ersten und letzten Ereignisses sowie sichere Fehlercodes und Fehlerparameter. Feldwerte, Header außer Content-Type, Kontodaten und rohe Antworttexte werden nicht ausgegeben. Nur wenn das bestätigte Ergebnis exakt dem synthetischen Text entspricht, erscheint `result=Kairos Test 123`. Andere Ergebnisse werden als `<unexpected-text>` ausgegeben. Die Antwort wird nur während der Probe mit der bestehenden Grenze von 2 MiB im Speicher gehalten. Größen- und Zeitgrenzen des Produktparsers bleiben bestehen.
+
+Bei einer Firewall mit standardmäßig blockierten ausgehenden Verbindungen nutzt die Probe den bereits freigegebenen .NET-Host. Aus dem eigenen Worktree ausführen.
+
+```powershell
+$d = (Get-Content 'C:/Users/Axel_desktop/.t3/projects/kapture/.tools/dotnet-sdk-path.txt').Trim()
+$env:DOTNET_ROOT = Split-Path $d
+& $d 'src/KairosCapture/bin/Release/net10.0-windows/win-x64/KairosCapture.dll' --openai-ocr-probe 'test-results/ocr-probe.txt'
+```
+
+Zwei echte OCR-Anfragen wurden ausgeführt. Beide nutzten das gespeicherte Modell `gpt-6.1-sol`. Vor der Korrektur brach die erste Anfrage direkt nach HTTP 200 ab. Die vollständige Ausgabe liegt lokal in `test-results/ocr-probe-before.txt`.
+
+```text
+http.status=200
+contentType.mediaType=<missing>
+contentType.charset=<missing>
+sse[1].event=<missing> json.type=<invalid-json>
+first.fields=<none>
+last.fields=<none>
+check=ContentType
+step=Unknown class=Protocol types=KairosCapture.Services.OpenAiOcrProtocolException httpRequestError=None socketError=None status= code=None
+```
+
+Die erste Version der Diagnose versuchte bei fehlendem Content-Type, den gesamten Body als JSON zu lesen. Deshalb ist `<invalid-json>` hier kein Beleg für fehlerhafte SSE-Ereignisse. Diese Erfassung wurde vor der zweiten Anfrage korrigiert. Es wurde kein roher Body gespeichert.
+
+Die belegte Ursachenkette lautet:
+
+1. `ExtractTextAsync` erhält HTTP 200. Die Probe misst MediaType und Charset als fehlend.
+2. Die Bedingung `ContentType?.MediaType != "text/event-stream"` ist auch für `null` wahr. Der Service verwirft die Antwort, bevor `ReadSseAsync` ein Ereignis lesen kann.
+3. Diese Ausnahme entsteht hinter `SendAsync`. Der bisherige OCR-Pfad markiert sie nicht mit einem Schritt. Daher erscheinen `step=Unknown`, `InvalidOperationException` und die allgemeine UI-Meldung.
+4. Die beeinflussbare Wurzel ist die Annahme, eine gültige SIWC-Stream-Antwort enthalte zwingend den Content-Type-Header. Die zweite Anfrage widerlegt diese Annahme mit einem gültigen SSE-Body und bestätigtem synthetischem Text bei erneut fehlendem Header. Warum der Header auf der Gegenseite fehlt, ist nicht bestimmt.
+
+Der Service lässt einen fehlenden MediaType jetzt durch den strengen SSE-Parser prüfen. Ein ausdrücklich anderer MediaType bleibt `reason=ContentType`. Die Prüfung erfolgt ohne Beachtung der Großschreibung. Gültiges JSON, vorhandener JSON-`type`, übereinstimmende Ereignisnamen, Grenzen für Ereignisse und Text sowie `response.completed` mit Status `completed` bleiben erforderlich. EOF, `[DONE]`, Refusal und Fehlerzustände bleiben Fehler. Zusätzliche typisierte Ereignisse wie das tatsächlich gelieferte `response.metadata` wurden bereits ignoriert und werden weiterhin ignoriert.
+
+Die zweite Anfrage liefert Exit 0. Die vollständige Metadatenausgabe mit den Feldnamen liegt lokal in `test-results/ocr-probe-after.txt`. Dieser Auszug enthält die gesamte Ereignisfolge.
+
+```text
+http.status=200
+contentType.mediaType=<missing>
+contentType.charset=<missing>
+sse[1].event=response.created json.type=response.created
+sse[2].event=response.in_progress json.type=response.in_progress
+sse[3].event=response.output_item.added json.type=response.output_item.added
+sse[4].event=response.content_part.added json.type=response.content_part.added
+sse[5].event=response.output_text.delta json.type=response.output_text.delta
+sse[6].event=response.output_text.delta json.type=response.output_text.delta
+sse[7].event=response.output_text.delta json.type=response.output_text.delta
+sse[8].event=response.output_text.delta json.type=response.output_text.delta
+sse[9].event=response.output_text.delta json.type=response.output_text.delta
+sse[10].event=response.metadata json.type=response.metadata
+sse[11].event=response.output_text.done json.type=response.output_text.done
+sse[12].event=response.content_part.done json.type=response.content_part.done
+sse[13].event=response.output_item.done json.type=response.output_item.done
+sse[14].event=response.completed json.type=response.completed
+result=Kairos Test 123
+check=Passed
+```
+
+Die erfolgreiche Bildanfrage mit demselben Modell belegt, dass für diesen Fehler keine Änderung der Modellauswahl nötig ist. Fehlender `type`, widersprüchliche Namen und unbekannte Ereignisse verursachten den beobachteten Abbruch ebenfalls nicht. Die neue Offline-Fixture bildet die 14 Ereignisse mit fünf synthetischen Textdeltas und fehlendem Content-Type nach. Weitere Fälle prüfen explizit falschen MediaType, JSON statt SSE, fehlenden Typ, widersprüchliche Namen und unbestätigten Abschluss. Fehler werden als `step=Ocr`, HTTP-Status und festem `reason` protokolliert. Das Ergebnisfenster zeigt die zugehörige feste deutsche Meldung über den vorhandenen `UserMessage`-Pfad.
+
+Der abschließende Lauf von `pwsh -File scripts/build.ps1` besteht einschließlich Release-Build, neun Offline-Suiten, WPF-Vorschauen und Publish. Ergebnis ist Exit 0 mit 0 Warnungen, 0 Fehlern und 9/9 bestandenen Suiten. Der Bericht liegt lokal in `test-results/self-test.json`. Die laufende Nutzerinstanz mit PID 47440 wurde nicht beendet.
+
+Offizielle Quellen, abgerufen am 19.10.2026:
+
+- [Models and inference](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference) beschreibt den öffentlichen Responses-Endpunkt, `store=false`, `stream=true` und den erforderlichen Abschluss durch `response.completed`. Die Seite belegt keine Garantie für einen vorhandenen Content-Type-Header.
+- [Streaming API responses](https://developers.openai.com/api/docs/guides/streaming-responses) beschreibt HTTP-SSE und semantische Ereignisse mit `type`. Anwendungen können die für sie relevanten Ereignisse verarbeiten.

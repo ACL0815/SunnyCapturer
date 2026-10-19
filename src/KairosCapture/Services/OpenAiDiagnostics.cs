@@ -87,6 +87,7 @@ internal static class OpenAiDiagnostics
         return $"step={Step(ex)} class={Classify(ex)} types={string.Join("<-", chain.Select(e => e.GetType().FullName))}" +
             $" httpRequestError={http?.HttpRequestError.ToString() ?? "None"} socketError={socket?.SocketErrorCode.ToString() ?? "None"}" +
             $" status={api?.Status ?? (int?)http?.StatusCode ?? (ex.Data[StatusKey] is int status ? status : (int?)null)} code={Code(api?.ErrorCode)}" +
+            (ex is OpenAiOcrProtocolException protocol ? $" reason={protocol.Reason}" : "") +
             (ex is OpenAiUserException user ? $" userError={user.Error}" : "");
     }
     internal static string Event(OpenAiStep step, OpenAiOutcome outcome, Exception? ex = null, int? status = null) =>
@@ -94,7 +95,7 @@ internal static class OpenAiDiagnostics
 
     internal static string UserMessage(Exception ex)
     {
-        if (ex is OpenAiUserException) return ex.Message;
+        if (ex is OpenAiUserException or OpenAiOcrProtocolException) return ex.Message;
         string context = Step(ex) switch
         {
             OpenAiStep.Token => "Der Browser-Login ist angekommen. Der Tokenaustausch mit OpenAI ist fehlgeschlagen. ",
@@ -103,6 +104,7 @@ internal static class OpenAiDiagnostics
             OpenAiStep.Models => "Die OpenAI-Modellliste konnte nicht geladen werden. ",
             OpenAiStep.Callback => "Die Rückkehr vom Browser konnte nicht bestätigt werden. ",
             OpenAiStep.Persist => "Die OpenAI-Anmeldung konnte nicht lokal gespeichert werden. ",
+            OpenAiStep.Ocr => "Die Texterkennung ist fehlgeschlagen. ",
             _ => ""
         };
         if (ex is OpenAiRequestException) return context + ex.Message;
@@ -116,6 +118,7 @@ internal static class OpenAiDiagnostics
             OpenAiFailure.Connect => "Die Verbindung zu OpenAI konnte nicht aufgebaut werden. Netzwerk, Firewall und Proxy-Einstellungen prüfen.",
             OpenAiFailure.Tls => "Die verschlüsselte Verbindung zu OpenAI konnte nicht hergestellt werden. Systemzeit, Zertifikate und HTTPS-Filter prüfen.",
             OpenAiFailure.Proxy => "Der konfigurierte Proxy konnte die Verbindung zu OpenAI nicht herstellen. Proxy-Einstellungen prüfen.",
+            OpenAiFailure.Timeout when Step(ex) == OpenAiStep.Ocr => "OpenAI hat nicht rechtzeitig geantwortet. Bitte einen kleineren Ausschnitt versuchen.",
             OpenAiFailure.Timeout => "OpenAI hat nicht rechtzeitig geantwortet. Bitte erneut versuchen; eine Anmeldung beginnt dabei mit einem neuen Code.",
             OpenAiFailure.Transport => "Die Netzwerkverbindung zu OpenAI wurde unterbrochen. Bitte erneut versuchen. Technische Fehlerklasse steht im Protokoll.",
             _ => "Die OpenAI-Aktion konnte nicht abgeschlossen werden. Technischer Schritt und Fehlertyp stehen im Protokoll."
