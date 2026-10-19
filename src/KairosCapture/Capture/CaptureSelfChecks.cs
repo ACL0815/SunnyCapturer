@@ -123,7 +123,7 @@ public static class CaptureSelfChecks
         {
             return;
         }
-        throw new InvalidOperationException("CaptureSelfChecks: Rasterlimit wurde nicht geprüft.");
+        throw new SelfCheckFailure("CaptureSelfChecks: Rasterlimit wurde nicht geprüft.");
     }
 
     private static void Check(bool condition, string name)

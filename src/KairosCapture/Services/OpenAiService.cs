@@ -33,6 +33,7 @@ public sealed partial class OpenAiService : IDisposable
     private readonly Action<string>? _diagnostic;
     private readonly TimeSpan _ocrTimeout;
     private readonly TimeSpan _refreshTimeout;
+    private readonly TimeSpan _jsonTimeout;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly object _sync = new();
     private readonly CancellationTokenSource _lifetime = new();
@@ -52,7 +53,7 @@ public sealed partial class OpenAiService : IDisposable
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "KairosCapture")), null, true, App.LogOpenAiDiagnostic) { }
 
     internal OpenAiService(HttpClient http, OpenAiStorage storage, Action<Uri>? openBrowser = null, bool ownsHttp = false,
-        Action<string>? diagnostic = null, TimeSpan? ocrTimeout = null, TimeSpan? refreshTimeout = null)
+        Action<string>? diagnostic = null, TimeSpan? ocrTimeout = null, TimeSpan? refreshTimeout = null, TimeSpan? jsonTimeout = null)
     {
         _http = http;
         _storage = storage;
@@ -60,8 +61,9 @@ public sealed partial class OpenAiService : IDisposable
         _diagnostic = diagnostic;
         _ocrTimeout = ocrTimeout ?? TimeSpan.FromMinutes(2);
         _refreshTimeout = refreshTimeout ?? TimeSpan.FromSeconds(30);
+        _jsonTimeout = jsonTimeout ?? TimeSpan.FromSeconds(30);
         _openBrowser = openBrowser ?? (uri => { Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }); });
-        _state = storage.Load();
+        _state = LoadState();
         _activeKey = (_state.Registrations.FirstOrDefault(r => r.Credentials is not null) ?? _state.Registrations.FirstOrDefault())?.Key;
     }
 
@@ -108,10 +110,12 @@ public sealed partial class OpenAiService : IDisposable
     {
         using var attempt = CancellationTokenSource.CreateLinkedTokenSource(ct, _lifetime.Token);
         attempt.CancelAfter(TimeSpan.FromMinutes(5));
-        await _gate.WaitAsync(attempt.Token).ConfigureAwait(false);
-        OpenAiStep step = OpenAiStep.Persist;
+        bool gateHeld = false;
+        OpenAiStep step = OpenAiStep.Session;
         try
         {
+            await _gate.WaitAsync(attempt.Token).ConfigureAwait(false);
+            gateHeld = true;
             lock (_sync)
             {
                 ThrowIfDisposed();
@@ -120,9 +124,9 @@ public sealed partial class OpenAiService : IDisposable
             }
             OpenAiState state;
             OpenAiRegistration? selected;
-            using (await _storage.LockAsync(attempt.Token).ConfigureAwait(false))
+            using (await LockStorageAsync(attempt.Token).ConfigureAwait(false))
             {
-                state = _storage.Load();
+                state = LoadState();
                 selected = accountKey is null ? null : state.Registrations.FirstOrDefault(r => r.Key == accountKey)
                     ?? throw new ArgumentException("Unbekanntes OpenAI-Konto.", nameof(accountKey));
                 await SaveAsync(state, attempt.Token).ConfigureAwait(false); // Host ID exists before the browser opens.
@@ -156,14 +160,12 @@ public sealed partial class OpenAiService : IDisposable
             catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
             { throw new InvalidOperationException("Der Systembrowser konnte für die OpenAI-Anmeldung nicht geöffnet werden."); }
             OpenAiCallback callback = await ListenAsync(listener, redirect, oauthState, expectedClient, attempt.Token).ConfigureAwait(false);
-            Report(OpenAiStep.Callback, OpenAiOutcome.Succeeded);
             listener.Stop();
-            step = OpenAiStep.Persist;
             if (selected is null)
             {
-                using (await _storage.LockAsync(attempt.Token).ConfigureAwait(false))
+                using (await LockStorageAsync(attempt.Token).ConfigureAwait(false))
                 {
-                    state = _storage.Load() with { PendingClientId = callback.ClientId };
+                    state = LoadState() with { PendingClientId = callback.ClientId };
                     await SaveAsync(state, attempt.Token).ConfigureAwait(false);
                 }
             }
@@ -175,12 +177,10 @@ public sealed partial class OpenAiService : IDisposable
             OpenAiIdentity identity = OpenAiProtocol.ValidateIdToken(idToken, keys, callback.ClientId, nonce,
                 DateTimeOffset.UtcNow, true, selected?.Subject);
             OpenAiCredentials credentials = Credentials(token.RootElement, nonce, null);
-            Report(OpenAiStep.Validate, OpenAiOutcome.Succeeded);
             string key = OpenAiProtocol.AccountKey(callback.ClientId, identity.Subject);
-            step = OpenAiStep.Persist;
-            using (await _storage.LockAsync(attempt.Token).ConfigureAwait(false))
+            using (await LockStorageAsync(attempt.Token).ConfigureAwait(false))
             {
-                state = _storage.Load();
+                state = LoadState();
                 OpenAiRegistration? old = state.Registrations.FirstOrDefault(r => r.Key == key);
                 string label = old?.Label ?? Label(identity, key);
                 var registration = new OpenAiRegistration(key, callback.ClientId, identity.Subject, identity.Email, label, credentials);
@@ -191,72 +191,82 @@ public sealed partial class OpenAiService : IDisposable
             // SignOut reads the active account after it acquires the same gate. If it started
             // after the atomic save, it must also clear this newly validated login.
             ActivateAccount(key);
-            Report(OpenAiStep.Persist, OpenAiOutcome.Succeeded);
-            step = OpenAiStep.Validate;
             if (!OpenAiProtocol.CanInfer(credentials))
                 throw new OpenAiUserException(OpenAiUserError.PlanPermissionMissing);
-        }
-        catch (OperationCanceledException ex) when (!ct.IsCancellationRequested && !_lifetime.IsCancellationRequested && !IsSigningOut())
-        {
-            var timeout = new TimeoutException("Zeitüberschreitung bei der OpenAI-Anmeldung.", ex);
-            OpenAiDiagnostics.Mark(timeout, OpenAiDiagnostics.Step(ex) is OpenAiStep.Unknown ? step : OpenAiDiagnostics.Step(ex));
-            Report(step, OpenAiOutcome.Failed, timeout);
-            throw timeout;
+            Report(OpenAiStep.Persist, OpenAiOutcome.Succeeded);
         }
         catch (Exception ex)
         {
-            OpenAiDiagnostics.Mark(ex, step);
-            Report(step, OpenAiOutcome.Failed, ex);
-            throw;
+            Exception failure = FinishFailure(ex, step, ct, IsSigningOut() ? attempt.Token : default,
+                attempt.IsCancellationRequested, "Zeitüberschreitung bei der OpenAI-Anmeldung.");
+            if (ReferenceEquals(failure, ex)) throw;
+            throw failure;
         }
         finally
         {
-            lock (_sync) _pendingSignIn = null;
-            _gate.Release();
+            lock (_sync) { if (ReferenceEquals(_pendingSignIn, attempt)) _pendingSignIn = null; }
+            if (gateHeld) _gate.Release();
         }
     }
 
     public async Task<string?> SignOutAsync(CancellationToken ct)
     {
-        lock (_sync)
-        {
-            ThrowIfDisposed();
-            if (_signingOut) throw new OpenAiUserException(OpenAiUserError.SigningOut);
-            _signingOut = true;
-            _session.Cancel();
-            _pendingSignIn?.Cancel();
-        }
-        await _gate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        bool ownsSignOut = false;
+        bool gateHeld = false;
         try
         {
+            lock (_sync)
+            {
+                ThrowIfDisposed();
+                if (_signingOut) throw new OpenAiUserException(OpenAiUserError.SigningOut);
+                _signingOut = true;
+                ownsSignOut = true;
+                _session.Cancel();
+                _pendingSignIn?.Cancel();
+            }
+            await _gate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+            gateHeld = true;
             string? key;
             lock (_sync) key = _activeKey;
-            using (await _storage.LockAsync(CancellationToken.None).ConfigureAwait(false))
+            using (await LockStorageAsync(CancellationToken.None).ConfigureAwait(false))
             {
-                OpenAiState state = _storage.Load();
+                OpenAiState state = LoadState();
                 OpenAiRegistration? selected = state.Registrations.FirstOrDefault(r => r.Key == key);
                 string? warning = null;
+                Exception? revocationFailure = null;
                 if (selected?.Credentials is { } credentials)
                 {
-                    bool revoked = false;
-                    if (credentials.RefreshToken.Length > 0)
-                        revoked = await RevokeAsync(selected.ClientId, credentials.RefreshToken, ct).ConfigureAwait(false);
-                    if (!revoked) warning = "Lokal abgemeldet. Der Fernwiderruf wurde nicht bestätigt. Die App bei Bedarf zusätzlich in ChatGPT Einstellungen trennen.";
+                    revocationFailure = credentials.RefreshToken.Length > 0 ?
+                        await RevokeAsync(selected.ClientId, credentials.RefreshToken, ct).ConfigureAwait(false) :
+                        new OpenAiUserException(OpenAiUserError.SessionExpired);
+                    if (revocationFailure is not null) warning = "Lokal abgemeldet. Der Fernwiderruf wurde nicht bestätigt. Die App bei Bedarf zusätzlich in ChatGPT Einstellungen trennen.";
                     state = state with { Registrations = state.Registrations.Select(r => r.Key == key ? r with { Credentials = null } : r).ToArray() };
                     await SaveAsync(state, CancellationToken.None).ConfigureAwait(false);
                 }
+                if (revocationFailure is OperationCanceledException && (ct.IsCancellationRequested || _lifetime.IsCancellationRequested))
+                    throw revocationFailure;
+                ct.ThrowIfCancellationRequested();
+                _lifetime.Token.ThrowIfCancellationRequested();
+                if (revocationFailure is null) Report(OpenAiStep.Revoke, OpenAiOutcome.Succeeded);
+                else FinishFailure(revocationFailure, OpenAiStep.Revoke, ct);
                 return warning;
             }
         }
+        catch (Exception ex)
+        {
+            Exception failure = FinishFailure(ex, OpenAiStep.Revoke, ct);
+            if (ReferenceEquals(failure, ex)) throw;
+            throw failure;
+        }
         finally
         {
-            lock (_sync)
+            if (ownsSignOut) lock (_sync)
             {
                 _session.Dispose();
                 _session = new CancellationTokenSource();
                 _signingOut = false;
             }
-            _gate.Release();
+            if (gateHeld) _gate.Release();
         }
     }
 
@@ -277,25 +287,30 @@ public sealed partial class OpenAiService : IDisposable
 
     public async Task<IReadOnlyList<OpenAiModel>> GetModelsAsync(CancellationToken ct)
     {
-        using CancellationTokenSource operation = Operation(ct, TimeSpan.FromSeconds(45), out string key, out CancellationToken session);
+        CancellationTokenSource? operation = null;
+        CancellationToken session = default;
         try
         {
+            using var scope = operation = Operation(ct, TimeSpan.FromSeconds(45), out string key, out session);
             string access = await AccessTokenAsync(key, operation.Token).ConfigureAwait(false);
             using var request = new HttpRequestMessage(HttpMethod.Get, OpenAiProtocol.Resource + "/models");
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", access);
             using JsonDocument json = await SendJsonAsync(request, operation.Token).ConfigureAwait(false);
             if (!json.RootElement.TryGetProperty("models", out JsonElement models) || models.ValueKind != JsonValueKind.Array)
                 throw new InvalidOperationException("OpenAI hat keinen gültigen Modellkatalog geliefert.");
-            return Array.AsReadOnly(models.EnumerateArray().Where(m => OpenAiProtocol.Text(m, "visibility") == "list")
+            var result = Array.AsReadOnly(models.EnumerateArray().Where(m => OpenAiProtocol.Text(m, "visibility") == "list")
                 .Select(m => new OpenAiModel(OpenAiProtocol.RequiredText(m, "slug"), OpenAiProtocol.RequiredText(m, "display_name"))).ToArray());
+            operation.Token.ThrowIfCancellationRequested();
+            Report(OpenAiStep.Models, OpenAiOutcome.Succeeded);
+            return result;
         }
-        catch (OperationCanceledException ex) when (!ct.IsCancellationRequested && !_lifetime.IsCancellationRequested && !session.IsCancellationRequested)
+        catch (Exception ex)
         {
-            var timeout = new TimeoutException("Die OpenAI-Modellliste konnte nicht rechtzeitig geladen werden.", ex);
-            OpenAiDiagnostics.Mark(timeout, OpenAiStep.Models);
-            throw timeout;
+            Exception failure = FinishFailure(ex, OpenAiStep.Models, ct, session, operation?.IsCancellationRequested == true,
+                "Die OpenAI-Modellliste konnte nicht rechtzeitig geladen werden.");
+            if (ReferenceEquals(failure, ex)) throw;
+            throw failure;
         }
-        catch (Exception ex) { OpenAiDiagnostics.Mark(ex, OpenAiStep.Models); throw; }
     }
 
     public Task<string> ExtractTextAsync(byte[] png, string model, IProgress<string>? progress, CancellationToken ct, string? targetLanguage = null) =>
@@ -304,22 +319,24 @@ public sealed partial class OpenAiService : IDisposable
     internal async Task<string> ExtractTextCoreAsync(byte[] png, string model, IProgress<string>? progress, CancellationToken ct,
         string? targetLanguage, OpenAiOcrTrace? trace = null)
     {
-        string instruction = OpenAiOcr.Instruction(targetLanguage);
-        ArgumentNullException.ThrowIfNull(png);
-        if (png.Length is < 33 or > 16 * 1024 * 1024 ||
-            !png.AsSpan(0, 8).SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }) ||
-            !png.AsSpan(12, 4).SequenceEqual("IHDR"u8))
-            throw new ArgumentException("OCR benötigt ein PNG mit höchstens 16 MiB.", nameof(png));
-        uint width = BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(16, 4));
-        uint height = BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(20, 4));
-        if (width == 0 || height == 0 || (ulong)width * height > 64_000_000)
-            throw new ArgumentException("Der PNG-Ausschnitt darf höchstens 64 Millionen Pixel enthalten.", nameof(png));
-        if (string.IsNullOrWhiteSpace(model) || model.Length > 256 || model.Any(char.IsControl))
-            throw new ArgumentException("Bitte ein Modell aus der OpenAI-Modellliste wählen.", nameof(model));
-        using CancellationTokenSource operation = Operation(ct, _ocrTimeout, out string key, out CancellationToken session);
+        CancellationTokenSource? operation = null;
+        CancellationToken session = default;
         int? status = null;
         try
         {
+            string instruction = OpenAiOcr.Instruction(targetLanguage);
+            ArgumentNullException.ThrowIfNull(png);
+            if (png.Length is < 33 or > 16 * 1024 * 1024 ||
+                !png.AsSpan(0, 8).SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }) ||
+                !png.AsSpan(12, 4).SequenceEqual("IHDR"u8))
+                throw new ArgumentException("OCR benötigt ein PNG mit höchstens 16 MiB.", nameof(png));
+            uint width = BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(16, 4));
+            uint height = BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(20, 4));
+            if (width == 0 || height == 0 || (ulong)width * height > 64_000_000)
+                throw new ArgumentException("Der PNG-Ausschnitt darf höchstens 64 Millionen Pixel enthalten.", nameof(png));
+            if (string.IsNullOrWhiteSpace(model) || model.Length > 256 || model.Any(char.IsControl))
+                throw new ArgumentException("Bitte ein Modell aus der OpenAI-Modellliste wählen.", nameof(model));
+            using var scope = operation = Operation(ct, _ocrTimeout, out string key, out session);
             string access = await AccessTokenAsync(key, operation.Token).ConfigureAwait(false);
             using var request = new HttpRequestMessage(HttpMethod.Post, OpenAiProtocol.Resource + "/responses");
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", access);
@@ -347,24 +364,25 @@ public sealed partial class OpenAiService : IDisposable
                 !mediaType.Equals("text/event-stream", StringComparison.OrdinalIgnoreCase))
                 throw new OpenAiOcrProtocolException(OpenAiOcrReason.ContentType);
             await using Stream stream = captured is null ? await response.Content.ReadAsStreamAsync(operation.Token).ConfigureAwait(false) : new MemoryStream(captured);
-            return await OpenAiProtocol.ReadSseAsync(stream, progress, operation.Token).ConfigureAwait(false);
+            string result = await OpenAiProtocol.ReadSseAsync(stream, progress, operation.Token).ConfigureAwait(false);
+            operation.Token.ThrowIfCancellationRequested();
+            Report(OpenAiStep.Ocr, OpenAiOutcome.Succeeded, status: status);
+            return result;
         }
         catch (Exception ex)
         {
             Exception failure = ex switch
             {
-                OperationCanceledException when operation.IsCancellationRequested && !ct.IsCancellationRequested &&
-                    !_lifetime.IsCancellationRequested && !session.IsCancellationRequested =>
-                    new TimeoutException(OpenAiDiagnostics.Step(ex) == OpenAiStep.Session ?
-                        "Die OpenAI-Anmeldung ist noch beschäftigt. Bitte die laufende Anmeldung abschließen und erneut versuchen." :
-                        "Die Texterkennung hat das Zeitlimit von zwei Minuten überschritten. Bitte einen kleineren Ausschnitt versuchen.", ex),
                 IOException when status is not null => new OpenAiOcrProtocolException(OpenAiOcrReason.ConnectionInterrupted, ex),
                 DecoderFallbackException => new OpenAiOcrProtocolException(OpenAiOcrReason.InvalidEncoding, ex),
                 _ => ex
             };
             OpenAiStep step = OpenAiDiagnostics.Step(ex) is OpenAiStep.Unknown ? OpenAiStep.Ocr : OpenAiDiagnostics.Step(ex);
             OpenAiDiagnostics.Mark(failure, step, status);
-            Report(step, failure is OperationCanceledException ? OpenAiOutcome.Cancelled : OpenAiOutcome.Failed, failure);
+            failure = FinishFailure(failure, step, ct, session, operation?.IsCancellationRequested == true,
+                step == OpenAiStep.Session ?
+                    "Die OpenAI-Anmeldung ist noch beschäftigt. Bitte die laufende Anmeldung abschließen und erneut versuchen." :
+                    "Die Texterkennung hat das Zeitlimit von zwei Minuten überschritten. Bitte einen kleineren Ausschnitt versuchen.");
             if (ReferenceEquals(failure, ex)) throw;
             throw failure;
         }
@@ -375,8 +393,8 @@ public sealed partial class OpenAiService : IDisposable
         lock (_sync)
         {
             ThrowIfDisposed();
-            if (_signingOut) throw new OpenAiUserException(OpenAiUserError.SigningOut);
-            if (_activeKey is null) throw new OpenAiUserException(OpenAiUserError.SignedOut);
+            if (_signingOut) throw SessionError(OpenAiUserError.SigningOut);
+            if (_activeKey is null) throw SessionError(OpenAiUserError.SignedOut);
             key = _activeKey;
             session = _session.Token;
             var operation = CancellationTokenSource.CreateLinkedTokenSource(ct, _lifetime.Token, session);
@@ -391,18 +409,18 @@ public sealed partial class OpenAiService : IDisposable
         catch (OperationCanceledException ex) { OpenAiDiagnostics.Mark(ex, OpenAiStep.Session); throw; }
         try
         {
-            using (await _storage.LockAsync(ct).ConfigureAwait(false))
+            using (await LockStorageAsync(ct).ConfigureAwait(false))
             {
-                OpenAiState state = _storage.Load();
+                OpenAiState state = LoadState();
                 Publish(state);
                 OpenAiRegistration r = state.Registrations.FirstOrDefault(r => r.Key == key)
-                    ?? throw new InvalidOperationException("Das gewählte OpenAI-Konto ist nicht vorhanden.");
-                OpenAiCredentials c = r.Credentials ?? throw new OpenAiUserException(OpenAiUserError.SessionExpired);
-                if (!OpenAiProtocol.CanInfer(c)) throw new OpenAiUserException(OpenAiUserError.PlanPermissionMissing);
+                    ?? throw SessionError(OpenAiUserError.SignedOut);
+                OpenAiCredentials c = r.Credentials ?? throw SessionError(OpenAiUserError.SessionExpired);
+                if (!OpenAiProtocol.CanInfer(c)) throw SessionError(OpenAiUserError.PlanPermissionMissing);
                 DateTimeOffset now = DateTimeOffset.UtcNow;
                 if (c.ExpiresAt > now.AddMinutes(1) || (now < c.EarliestRefreshAt && c.ExpiresAt > now)) return c.AccessToken;
-                if (now < c.EarliestRefreshAt) throw new OpenAiUserException(OpenAiUserError.RefreshTooEarly);
-                if (c.RefreshToken.Length == 0) throw new OpenAiUserException(OpenAiUserError.SessionExpired);
+                if (now < c.EarliestRefreshAt) throw SessionError(OpenAiUserError.RefreshTooEarly);
+                if (c.RefreshToken.Length == 0) throw SessionError(OpenAiUserError.SessionExpired);
                 using var rotation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
                 rotation.CancelAfter(_refreshTimeout);
                 try
@@ -426,7 +444,7 @@ public sealed partial class OpenAiService : IDisposable
                     ct.ThrowIfCancellationRequested();
                     return replacement.AccessToken;
                 }
-                catch (OperationCanceledException ex) when (rotation.IsCancellationRequested && !_lifetime.IsCancellationRequested)
+                catch (OperationCanceledException ex) when (!ct.IsCancellationRequested && rotation.IsCancellationRequested && !_lifetime.IsCancellationRequested)
                 {
                     var timeout = new TimeoutException("Die OpenAI-Anmeldung konnte nicht rechtzeitig erneuert werden. Bitte erneut versuchen oder die Anmeldung erneuern.", ex);
                     OpenAiDiagnostics.Mark(timeout, OpenAiStep.Refresh);
@@ -438,9 +456,9 @@ public sealed partial class OpenAiService : IDisposable
                     await SaveAsync(state with { Registrations = state.Registrations.Select(item => item.Key == key ? item with { Credentials = null } : item).ToArray() }, CancellationToken.None).ConfigureAwait(false);
                     throw;
                 }
+                catch (Exception ex) { OpenAiDiagnostics.Mark(ex, OpenAiStep.Refresh); throw; }
             }
         }
-        catch (Exception ex) { OpenAiDiagnostics.Mark(ex, OpenAiStep.Persist); throw; }
         finally { _gate.Release(); }
     }
 
@@ -485,8 +503,9 @@ public sealed partial class OpenAiService : IDisposable
         return _jwks!.Value;
     }
 
-    private async Task<bool> RevokeAsync(string clientId, string refresh, CancellationToken ct)
+    private async Task<Exception?> RevokeAsync(string clientId, string refresh, CancellationToken ct)
     {
+        Exception? failure = null;
         for (int attempt = 0; attempt < 2; attempt++)
         {
             try
@@ -495,27 +514,37 @@ public sealed partial class OpenAiService : IDisposable
                 timeout.CancelAfter(TimeSpan.FromSeconds(15));
                 using var discoveryRequest = new HttpRequestMessage(HttpMethod.Get, OpenAiProtocol.Issuer + "/.well-known/openid-configuration");
                 using JsonDocument discovery = await SendJsonAsync(discoveryRequest, timeout.Token).ConfigureAwait(false);
-                if (OpenAiProtocol.Text(discovery.RootElement, "issuer") != OpenAiProtocol.Issuer) return false;
+                if (OpenAiProtocol.Text(discovery.RootElement, "issuer") != OpenAiProtocol.Issuer)
+                    throw new InvalidOperationException("OpenAI hat einen unerwarteten Issuer geliefert.");
                 string? endpoint = OpenAiProtocol.Text(discovery.RootElement, "revocation_endpoint");
                 if (!Uri.TryCreate(endpoint, UriKind.Absolute, out Uri? uri) || uri.Scheme != "https" ||
-                    uri.Host != "auth.openai.com" || !uri.IsDefaultPort || uri.UserInfo.Length != 0 || uri.Fragment.Length != 0) return false;
+                    uri.Host != "auth.openai.com" || !uri.IsDefaultPort || uri.UserInfo.Length != 0 || uri.Fragment.Length != 0)
+                    throw new InvalidOperationException("OpenAI hat keinen vertrauenswürdigen Widerrufsendpunkt geliefert.");
                 using var request = Form(uri.AbsoluteUri, new Dictionary<string, string>
                 { ["token"] = refresh, ["token_type_hint"] = "refresh_token", ["client_id"] = clientId });
                 using HttpResponseMessage response = await SendAsync(request, timeout.Token).ConfigureAwait(false);
-                if (response.StatusCode == HttpStatusCode.OK) return true;
-                if ((int)response.StatusCode < 500) return false;
+                if (response.StatusCode == HttpStatusCode.OK) return null;
+                failure = await ErrorAsync(response, timeout.Token).ConfigureAwait(false);
+                OpenAiDiagnostics.Mark(failure, OpenAiStep.Revoke);
+                if ((int)response.StatusCode < 500) return failure;
             }
-            catch (OperationCanceledException) { return false; }
-            catch (OpenAiRequestException ex) when (ex.Status is >= 500) { }
-            catch (Exception ex) when (ex is HttpRequestException or IOException) { }
-            catch (InvalidOperationException) { return false; }
+            catch (OperationCanceledException ex)
+            {
+                if (ct.IsCancellationRequested || _lifetime.IsCancellationRequested) return ex;
+                failure = new TimeoutException("Der OpenAI-Widerruf hat das Zeitlimit überschritten.", ex);
+                OpenAiDiagnostics.Mark(failure, OpenAiDiagnostics.Step(ex) is OpenAiStep.Unknown ? OpenAiStep.Revoke : OpenAiDiagnostics.Step(ex));
+                return failure;
+            }
+            catch (Exception ex) when (ex is TimeoutException or JsonException) { return ex; }
+            catch (Exception ex) when (ex is HttpRequestException or IOException or OpenAiRequestException { Status: >= 500 }) { failure = ex; }
+            catch (InvalidOperationException ex) { return ex; }
             if (attempt == 0)
             {
                 try { await Task.Delay(400, ct).ConfigureAwait(false); }
-                catch (OperationCanceledException) { return false; }
+                catch (OperationCanceledException ex) { return ex; }
             }
         }
-        return false;
+        return failure;
     }
 
     private static HttpRequestMessage Form(string url, Dictionary<string, string> values)
@@ -539,7 +568,6 @@ public sealed partial class OpenAiService : IDisposable
             try { return await SendJsonAsync(request, ct).ConfigureAwait(false); }
             catch (HttpRequestException ex) when (!ct.IsCancellationRequested && OpenAiDiagnostics.MayRetryToken(ex, attempt))
             {
-                Report(OpenAiStep.Token, OpenAiOutcome.Retrying, ex);
                 await Task.Delay(250, ct).ConfigureAwait(false);
             }
         }
@@ -550,6 +578,28 @@ public sealed partial class OpenAiService : IDisposable
         // Diagnostic sinks must never change authentication/rotation behavior.
         try { _diagnostic?.Invoke(OpenAiDiagnostics.Event(step, outcome, ex, status)); }
         catch (Exception) { }
+    }
+
+    private Exception FinishFailure(Exception ex, OpenAiStep fallback, CancellationToken caller, CancellationToken session = default,
+        bool deadlineExpired = false, string? timeoutMessage = null)
+    {
+        CancellationToken cancelled = caller.IsCancellationRequested ? caller :
+            _lifetime.IsCancellationRequested ? _lifetime.Token : session;
+        Exception failure = cancelled.IsCancellationRequested ?
+            ex is OperationCanceledException ? ex : new OperationCanceledException("Die OpenAI-Aktion wurde abgebrochen.", ex, cancelled) :
+            ex is OperationCanceledException ? deadlineExpired ?
+                new TimeoutException(timeoutMessage, ex) : new InvalidOperationException("Die OpenAI-Aktion wurde unerwartet unterbrochen.", ex) : ex;
+        OpenAiStep step = OpenAiDiagnostics.Step(ex) is OpenAiStep.Unknown ? fallback : OpenAiDiagnostics.Step(ex);
+        OpenAiDiagnostics.Mark(failure, step, OpenAiDiagnostics.Status(ex));
+        Report(step, cancelled.IsCancellationRequested ? OpenAiOutcome.Cancelled : OpenAiOutcome.Failed, failure);
+        return failure;
+    }
+
+    private static OpenAiUserException SessionError(OpenAiUserError error)
+    {
+        var ex = new OpenAiUserException(error);
+        OpenAiDiagnostics.Mark(ex, OpenAiStep.Session);
+        return ex;
     }
     private static OpenAiStep RequestStep(HttpRequestMessage request) => request.Options.TryGetValue(StepOverride, out OpenAiStep step) ? step : request.RequestUri?.AbsolutePath switch
     {
@@ -576,7 +626,7 @@ public sealed partial class OpenAiService : IDisposable
     private async Task<JsonDocument> SendJsonAsync(HttpRequestMessage request, CancellationToken ct)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(TimeSpan.FromSeconds(30));
+        timeout.CancelAfter(_jsonTimeout);
         int? status = null;
         try
         {
@@ -588,9 +638,11 @@ public sealed partial class OpenAiService : IDisposable
         }
         catch (Exception ex)
         {
-            OpenAiDiagnostics.Mark(ex, RequestStep(request), status);
-            Report(RequestStep(request), ex is OperationCanceledException ? OpenAiOutcome.Cancelled : OpenAiOutcome.Failed, ex);
-            throw;
+            Exception failure = ex is OperationCanceledException && !ct.IsCancellationRequested && timeout.IsCancellationRequested ?
+                new TimeoutException("OpenAI hat nicht rechtzeitig geantwortet.", ex) : ex;
+            OpenAiDiagnostics.Mark(failure, RequestStep(request), status);
+            if (ReferenceEquals(failure, ex)) throw;
+            throw failure;
         }
     }
 
@@ -636,8 +688,19 @@ public sealed partial class OpenAiService : IDisposable
 
     private async Task SaveAsync(OpenAiState state, CancellationToken ct)
     {
-        await _storage.SaveAsync(state, ct).ConfigureAwait(false);
+        try { await _storage.SaveAsync(state, ct).ConfigureAwait(false); }
+        catch (Exception ex) { OpenAiDiagnostics.Mark(ex, OpenAiStep.Persist); throw; }
         Publish(state);
+    }
+    private OpenAiState LoadState()
+    {
+        try { return _storage.Load(); }
+        catch (Exception ex) { OpenAiDiagnostics.Mark(ex, OpenAiStep.Persist); throw; }
+    }
+    private async Task<FileStream> LockStorageAsync(CancellationToken ct)
+    {
+        try { return await _storage.LockAsync(ct).ConfigureAwait(false); }
+        catch (Exception ex) { OpenAiDiagnostics.Mark(ex, OpenAiStep.Persist); throw; }
     }
     private void Publish(OpenAiState state) { lock (_sync) _state = state; }
     private static string Label(OpenAiIdentity identity, string key)
@@ -653,32 +716,39 @@ public sealed partial class OpenAiService : IDisposable
             using TcpClient client = await listener.AcceptTcpClientAsync(ct).ConfigureAwait(false);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(TimeSpan.FromSeconds(10));
-            await using NetworkStream stream = client.GetStream();
-            var header = new StringBuilder();
-            byte[] buffer = new byte[1024];
-            while (!header.ToString().Contains("\r\n\r\n", StringComparison.Ordinal))
+            try
             {
-                int count = await stream.ReadAsync(buffer, timeout.Token).ConfigureAwait(false);
-                if (count == 0 || header.Length + count > 16384) throw new InvalidOperationException("Ungültiger OpenAI-HTTP-Rückruf.");
-                header.Append(Encoding.ASCII.GetString(buffer, 0, count));
+                await using NetworkStream stream = client.GetStream();
+                var header = new StringBuilder();
+                byte[] buffer = new byte[1024];
+                while (!header.ToString().Contains("\r\n\r\n", StringComparison.Ordinal))
+                {
+                    int count = await stream.ReadAsync(buffer, timeout.Token).ConfigureAwait(false);
+                    if (count == 0 || header.Length + count > 16384) throw new InvalidOperationException("Ungültiger OpenAI-HTTP-Rückruf.");
+                    header.Append(Encoding.ASCII.GetString(buffer, 0, count));
+                }
+                string[] lines = header.ToString().Split("\r\n", StringSplitOptions.None);
+                string[] first = lines[0].Split(' ');
+                if (first.Length != 3 || first[0] != "GET" || !first[1].StartsWith("/auth/callback?", StringComparison.Ordinal) ||
+                    !lines.Any(line => line.Equals("Host: " + redirect.Authority, StringComparison.OrdinalIgnoreCase)))
+                {
+                    await CallbackReplyAsync(stream, false, timeout.Token).ConfigureAwait(false);
+                    continue;
+                }
+                OpenAiCallback callback;
+                try { callback = OpenAiProtocol.ValidateCallback(new Uri(redirect.GetLeftPart(UriPartial.Authority) + first[1]), redirect, state, clientId); }
+                catch (InvalidOperationException)
+                {
+                    await CallbackReplyAsync(stream, false, timeout.Token).ConfigureAwait(false);
+                    throw;
+                }
+                await CallbackReplyAsync(stream, true, timeout.Token).ConfigureAwait(false);
+                return callback;
             }
-            string[] lines = header.ToString().Split("\r\n", StringSplitOptions.None);
-            string[] first = lines[0].Split(' ');
-            if (first.Length != 3 || first[0] != "GET" || !first[1].StartsWith("/auth/callback?", StringComparison.Ordinal) ||
-                !lines.Any(line => line.Equals("Host: " + redirect.Authority, StringComparison.OrdinalIgnoreCase)))
+            catch (OperationCanceledException ex) when (!ct.IsCancellationRequested && timeout.IsCancellationRequested)
             {
-                await CallbackReplyAsync(stream, false, timeout.Token).ConfigureAwait(false);
-                continue;
+                throw new TimeoutException("Der OpenAI-Browserrückruf hat das Zeitlimit überschritten.", ex);
             }
-            OpenAiCallback callback;
-            try { callback = OpenAiProtocol.ValidateCallback(new Uri(redirect.GetLeftPart(UriPartial.Authority) + first[1]), redirect, state, clientId); }
-            catch (InvalidOperationException)
-            {
-                await CallbackReplyAsync(stream, false, timeout.Token).ConfigureAwait(false);
-                throw;
-            }
-            await CallbackReplyAsync(stream, true, timeout.Token).ConfigureAwait(false);
-            return callback;
         }
         throw new InvalidOperationException("Zu viele ungültige OpenAI-Rückrufe. Bitte neu anmelden.");
     }

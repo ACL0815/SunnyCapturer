@@ -204,12 +204,11 @@ internal static class OpenAiProtocol
                 string field = colon < 0 ? line : line[..colon];
                 string value = colon < 0 ? "" : line[(colon + 1)..];
                 if (value.StartsWith(' ')) value = value[1..];
-                if (field == "data") data.Append(value).Append('\n');
+                if (field == "data") { hasEvents = true; data.Append(value).Append('\n'); }
                 else if (field == "event") eventName = value;
                 continue;
             }
             if (data.Length == 0) { eventName = null; continue; }
-            hasEvents = true;
             string json = data.ToString();
             data.Clear();
             if (json.Trim() == "[DONE]") throw new OpenAiOcrProtocolException(OpenAiOcrReason.UnconfirmedDone);

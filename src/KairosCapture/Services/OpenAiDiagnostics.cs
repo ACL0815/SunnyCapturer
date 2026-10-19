@@ -7,7 +7,7 @@ using System.Net.Sockets;
 
 namespace KairosCapture.Services;
 
-internal enum OpenAiStep { Unknown, Callback, Token, Jwks, Validate, Persist, Models, Discovery, Refresh, Revoke, Ocr, Session }
+internal enum OpenAiStep { Unknown, Callback, Token, Jwks, Validate, Persist, Models, Discovery, Refresh, Revoke, Ocr, Session, Probe }
 internal enum OpenAiOutcome { Started, Succeeded, Failed, Retrying, Response, Cancelled }
 internal enum OpenAiFailure { Unknown, Dns, Connect, Tls, Proxy, Timeout, Cancelled, Transport, Http, Permission, Validation, Protocol, Storage }
 // Provider strings are never log fields unless they match one of these fixed enum values.
@@ -33,6 +33,7 @@ internal static class OpenAiDiagnostics
         if (status.HasValue) ex.Data[StatusKey] = status.Value;
     }
     internal static OpenAiStep Step(Exception ex) => ex.Data[StepKey] is OpenAiStep step ? step : OpenAiStep.Unknown;
+    internal static int? Status(Exception ex) => ex.Data[StatusKey] is int status ? status : null;
     private static IEnumerable<Exception> Chain(Exception ex)
     {
         for (int depth = 0; depth < 16; depth++)
@@ -44,6 +45,8 @@ internal static class OpenAiDiagnostics
     }
     internal static OpenAiFailure Classify(Exception ex)
     {
+        if (ex is OperationCanceledException) return OpenAiFailure.Cancelled;
+        if (ex is TimeoutException) return OpenAiFailure.Timeout;
         HttpRequestException? http = Chain(ex).OfType<HttpRequestException>().FirstOrDefault();
         if (http is not null) return http.HttpRequestError switch
         {
@@ -104,7 +107,7 @@ internal static class OpenAiDiagnostics
             OpenAiStep.Validate => "Die OpenAI-Identität konnte nicht sicher bestätigt werden. Bitte erneut anmelden. ",
             OpenAiStep.Models => "Die OpenAI-Modellliste konnte nicht geladen werden. ",
             OpenAiStep.Callback => "Die Rückkehr vom Browser konnte nicht bestätigt werden. ",
-            OpenAiStep.Persist => "Die OpenAI-Anmeldung konnte nicht lokal gespeichert werden. ",
+            OpenAiStep.Persist => "Die OpenAI-Anmeldung konnte nicht lokal gelesen oder gespeichert werden. ",
             OpenAiStep.Session => "Die OpenAI-Anmeldung ist noch beschäftigt. ",
             OpenAiStep.Refresh => "Die OpenAI-Anmeldung konnte nicht erneuert werden. ",
             OpenAiStep.Ocr => "Die Texterkennung ist fehlgeschlagen. ",

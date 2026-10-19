@@ -1,6 +1,7 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -70,7 +71,7 @@ public static class OpenAiSelfChecks
             cancelled.Cancel();
             try { Read(Completed, cancelled.Token); }
             catch (OperationCanceledException) { return; }
-            throw new InvalidOperationException("Cancelled stream succeeded.");
+            throw new SelfCheckFailure("Cancelled stream succeeded.");
         });
         Check("Model catalog and image request contract", RequestChecks);
         Check("OCR content type and protocol diagnostics", OcrResponseChecks);
@@ -80,6 +81,12 @@ public static class OpenAiSelfChecks
         Check("OCR trace preserves single-read error and headerless SSE", OcrTraceChecks);
         Check("OCR interrupted stream and strict UTF-8", OcrStreamFailureChecks);
         Check("OCR cancellation outcome", () => OcrCancellationChecks().GetAwaiter().GetResult());
+        Check("Login callback cancellation propagation", () => CallbackCancellationCheck().GetAwaiter().GetResult());
+        Check("Refresh cancellation precedence and propagation", () => RefreshCancellationFailuresCheck().GetAwaiter().GetResult());
+        Check("Session and refresh failure attribution", AccessTokenFailureChecks);
+        Check("Models JSON deadlines and single terminal log", () => ModelsBoundaryChecks().GetAwaiter().GetResult());
+        Check("Probe has one terminal log", ProbeLogChecks);
+        Check("Logout timeout and cancellation retain local clearing", () => SignOutBoundaryChecks().GetAwaiter().GetResult());
         Check("OCR and refresh timeout attribution", () => OcrTimeoutChecks().GetAwaiter().GetResult());
         Check("OCR waits for pending sign-in", () => OcrGateTimeoutCheck().GetAwaiter().GetResult());
         Check("OCR local storage failure attribution", OcrStorageFailureCheck);
@@ -119,7 +126,7 @@ public static class OpenAiSelfChecks
                     "Service discarded the original transport cause.");
                 return;
             }
-            throw new InvalidOperationException("Transport failure was ignored.");
+            throw new SelfCheckFailure("Transport failure was ignored.");
         });
         Check("Refresh serialization and atomic rotation", () => RefreshChecks().GetAwaiter().GetResult());
         Check("Refresh persists after caller cancellation", () => RefreshCancellationCheck().GetAwaiter().GetResult());
@@ -198,6 +205,7 @@ public static class OpenAiSelfChecks
     private static void RequestChecks()
     {
         int models = 0, ocr = 0;
+        var logs = new List<string>();
         using var fixture = new Fixture();
         using HttpClient http = Client(request =>
         {
@@ -220,10 +228,11 @@ public static class OpenAiSelfChecks
             Require(root.GetProperty("input")[0].GetProperty("content")[0].GetProperty("text").GetString() == "Transcribe the visible text in this screenshot.", "Default user instruction changed.");
             ocr++; return Sse(Delta("offline") + Completed);
         });
-        using var service = new OpenAiService(http, fixture.Storage, _ => throw new InvalidOperationException("Browser forbidden in offline checks."));
+        using var service = new OpenAiService(http, fixture.Storage, _ => throw new InvalidOperationException("Browser forbidden in offline checks."), diagnostic: logs.Add);
         Require(service.GetModelsAsync(CancellationToken.None).GetAwaiter().GetResult().Select(m => m.Slug).SequenceEqual(new[] { "z", "a" }), "Model order/filter failed.");
         Require(service.ExtractTextAsync(Png, "z", null, CancellationToken.None).GetAwaiter().GetResult() == "offline", "OCR fixture failed.");
         Require(models == 1 && ocr == 1, "Unexpected request count.");
+        RequireLogSequence(logs, "Models/Started", "Models/Response", "Models/Succeeded", "Ocr/Started", "Ocr/Response", "Ocr/Succeeded");
         Reject(() => service.ExtractTextAsync(new byte[33], "z", null, CancellationToken.None).GetAwaiter().GetResult());
     }
 
@@ -282,6 +291,9 @@ public static class OpenAiSelfChecks
             (null, ": keepalive\n\n", OpenAiOcrReason.NoEvents),
             (null, "", OpenAiOcrReason.NoEvents),
             (null, Delta("partial"), OpenAiOcrReason.UnexpectedEnd),
+            (null, "data: {\"type\":\"response.completed\"", OpenAiOcrReason.UnexpectedEnd),
+            (null, "data: {\"type\":\"response.completed\"\n", OpenAiOcrReason.UnexpectedEnd),
+            (null, "data:\n", OpenAiOcrReason.UnexpectedEnd),
             (null, "data: {}\n\n", OpenAiOcrReason.MissingType),
             (null, "data: not-json\n\n", OpenAiOcrReason.InvalidJson),
             (null, "data: [DONE]\n\n", OpenAiOcrReason.UnconfirmedDone),
@@ -300,13 +312,14 @@ public static class OpenAiSelfChecks
             try { service.ExtractTextAsync(Png, "test-model", null, CancellationToken.None).GetAwaiter().GetResult(); }
             catch (OpenAiOcrProtocolException ex)
             {
+                RequireLogSequence(logs, "Ocr/Started", "Ocr/Response", "Ocr/Failed/Protocol");
                 Require(ex.Reason == item.Reason && OpenAiDiagnostics.Step(ex) == OpenAiStep.Ocr, "Protocol guard or OCR step lost.");
                 Require(logs.Last().Contains("step=Ocr") && logs.Last().Contains("status=200") && logs.Last().Contains("reason=" + item.Reason),
                     "OCR log must retain status and a fixed reason.");
                 Require(OpenAiDiagnostics.UserMessage(ex) == ex.Message && !ex.Message.Contains("Technischer Schritt"), "UI must explain the failed protocol check.");
                 continue;
             }
-            throw new InvalidOperationException("Invalid OCR response was accepted.");
+            throw new SelfCheckFailure("Invalid OCR response was accepted.");
         }
     }
 
@@ -390,10 +403,12 @@ public static class OpenAiSelfChecks
             }
             catch (OpenAiRequestException ex)
             {
+                RequireLogSequence(logs, "Ocr/Started", "Ocr/Response", "Ocr/Failed/Http");
                 Require(error && ex.Status == 429 && ex.ErrorCode == "rate_limit_exceeded" &&
                     logs.Last().Contains("status=429 code=rate_limit_exceeded"), "Trace must preserve the parsed HTTP error and its code.");
             }
-            Require(requests == 1 && stream.Reads == 2 && stream.EndReads == 1,
+            if (!error) RequireLogSequence(logs, "Ocr/Started", "Ocr/Response", "Ocr/Succeeded");
+            Require(requests == 1 && stream.EndReads == 1,
                 "Trace must send exactly one request and consume the network stream exactly once.");
             Require(trace.Lines.Contains(error ? "http.status=429" : "contentType.mediaType=<missing>") &&
                 trace.Lines.All(line => !line.Contains("private") && !line.Contains("traced text")), "Trace metadata leaked response values.");
@@ -416,6 +431,7 @@ public static class OpenAiSelfChecks
             try { service.ExtractTextAsync(Png, "test-model", new InlineProgress(text => progress.Append(text)), CancellationToken.None).GetAwaiter().GetResult(); }
             catch (OpenAiOcrProtocolException ex)
             {
+                RequireLogSequence(logs, "Ocr/Started", "Ocr/Response", "Ocr/Failed/Protocol");
                 OpenAiOcrReason reason = invalidEncoding ? OpenAiOcrReason.InvalidEncoding : OpenAiOcrReason.ConnectionInterrupted;
                 Require(ex.Reason == reason && OpenAiDiagnostics.Step(ex) == OpenAiStep.Ocr &&
                     (invalidEncoding ? ex.InnerException is DecoderFallbackException : ReferenceEquals(ex.InnerException, interruption)),
@@ -448,33 +464,218 @@ public static class OpenAiSelfChecks
     private static async Task OcrCancellationChecks()
     {
         using var fixture = new Fixture();
-        foreach (string source in new[] { "caller", "session", "lifetime", "unrelated" })
+        foreach (string source in new[] { "caller", "session", "lifetime" })
         {
             using var caller = new CancellationTokenSource();
-            var original = new OperationCanceledException(caller.Token);
             var logs = new List<string>();
-            OpenAiService? service = null;
-            using var stream = new SinglePassStream(Encoding.UTF8.GetBytes(Delta("partial")), _ =>
+            var waiting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var stream = new SinglePassStream(Encoding.UTF8.GetBytes(Delta("partial")), async token =>
             {
-                if (source == "caller") caller.Cancel();
-                else if (source == "session") service!.SelectAccount(service.ActiveAccount!.Key);
-                else if (source == "lifetime") service!.Dispose();
-                throw original;
+                waiting.SetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, token).ConfigureAwait(false);
+                throw new SelfCheckFailure("Stream did not wait for its supplied token.");
             });
             using HttpClient http = Client(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(stream) });
-            using (service = new OpenAiService(http, fixture.Storage, diagnostic: logs.Add))
+            using (var service = new OpenAiService(http, fixture.Storage, diagnostic: logs.Add, ocrTimeout: TimeSpan.FromSeconds(2)))
             {
                 Task<string> task = service.ExtractTextAsync(Png, "test-model", null, caller.Token);
-                try { await task.ConfigureAwait(false); }
+                await waiting.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+                await Task.Delay(20).ConfigureAwait(false);
+                var elapsed = Stopwatch.StartNew();
+                if (source == "caller") caller.Cancel();
+                else if (source == "session") service.SelectAccount(service.ActiveAccount!.Key);
+                else service.Dispose();
+                try { await task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false); }
                 catch (OperationCanceledException ex)
                 {
-                    Require(ReferenceEquals(ex, original) && task.IsCanceled, "Cancellation must preserve the exception and cancelled task state.");
-                    Require(logs.Last().Contains("outcome=Cancelled") && logs.Last().Contains("step=Ocr class=Cancelled") &&
-                        logs.All(line => !line.Contains("outcome=Failed")), "Cancellation must never be logged as Failed.");
+                    Require(task.IsCanceled && ex.CancellationToken.IsCancellationRequested && elapsed.Elapsed < TimeSpan.FromSeconds(1),
+                        "OCR must observe the supplied cancellation token within one second and finish Canceled.");
+                    RequireLogSequence(logs, "Ocr/Started", "Ocr/Response", "Ocr/Cancelled/Cancelled");
                     continue;
                 }
                 throw new SelfCheckFailure("Cancelled OCR operation succeeded.");
             }
+        }
+    }
+
+    private static async Task CallbackCancellationCheck()
+    {
+        using var fixture = new Fixture();
+        using var caller = new CancellationTokenSource();
+        var opened = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var logs = new List<string>();
+        using HttpClient http = Client(_ => throw new SelfCheckFailure("Callback wait reached HTTP."));
+        using var service = new OpenAiService(http, fixture.Storage, _ => opened.SetResult(), diagnostic: logs.Add);
+        Task task = service.SignInAsync(null, caller.Token);
+        await opened.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        await Task.Delay(20).ConfigureAwait(false);
+        var elapsed = Stopwatch.StartNew();
+        caller.Cancel();
+        try { await task.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false); }
+        catch (OperationCanceledException)
+        {
+            Require(task.IsCanceled && elapsed.Elapsed < TimeSpan.FromSeconds(1), "Callback must promptly observe the caller token and finish Canceled.");
+            RequireLogSequence(logs, "Callback/Cancelled/Cancelled");
+            return;
+        }
+        throw new SelfCheckFailure("Callback cancellation was not propagated.");
+    }
+
+    private static async Task RefreshCancellationFailuresCheck()
+    {
+        foreach (bool lifetime in new[] { false, true })
+        {
+            using var fixture = new Fixture(expired: true);
+            using var caller = new CancellationTokenSource();
+            var waiting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var logs = new List<string>();
+            int requests = 0;
+            using HttpClient http = new(new FakeHttp(async (_, token) =>
+            {
+                requests++;
+                waiting.SetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, token).ConfigureAwait(false);
+                throw new SelfCheckFailure("Refresh did not wait for its supplied token.");
+            }));
+            using var service = new OpenAiService(http, fixture.Storage, diagnostic: logs.Add,
+                refreshTimeout: lifetime ? TimeSpan.FromSeconds(2) : TimeSpan.FromMilliseconds(200));
+            Task task = service.ExtractTextAsync(Png, "test-model", null, caller.Token);
+            await waiting.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            await Task.Delay(20).ConfigureAwait(false);
+            var elapsed = Stopwatch.StartNew();
+            if (lifetime) service.Dispose();
+            else caller.Cancel();
+            try { await task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false); }
+            catch (OperationCanceledException)
+            {
+                Require(task.IsCanceled && requests == 1 && elapsed.Elapsed < TimeSpan.FromSeconds(1),
+                    "Refresh must propagate lifetime cancellation and preserve caller cancellation over its own timeout.");
+                RequireLogSequence(logs, "Refresh/Started", "Refresh/Cancelled/Cancelled");
+                continue;
+            }
+            throw new SelfCheckFailure("Cancelled refresh did not finish Canceled.");
+        }
+    }
+
+    private static void AccessTokenFailureChecks()
+    {
+        foreach (string scenario in new[] { "missing-account", "session-expired", "invalid-token" })
+        {
+            using var fixture = new Fixture(expired: true);
+            var logs = new List<string>();
+            using HttpClient http = Client(_ => Json(TokenResponse().Replace("\"token_type\":\"Bearer\"", "\"token_type\":\"invalid\"", StringComparison.Ordinal)));
+            using var service = new OpenAiService(http, fixture.Storage, diagnostic: logs.Add);
+            OpenAiState state = fixture.Storage.Load();
+            if (scenario != "invalid-token")
+            {
+                using (fixture.Storage.LockAsync(CancellationToken.None).GetAwaiter().GetResult())
+                    fixture.Storage.SaveAsync(state with { Registrations = scenario == "missing-account" ? Array.Empty<OpenAiRegistration>() :
+                        state.Registrations.Select(r => r with { Credentials = null }).ToArray() }, CancellationToken.None).GetAwaiter().GetResult();
+            }
+            try { service.ExtractTextAsync(Png, "test-model", null, CancellationToken.None).GetAwaiter().GetResult(); }
+            catch (InvalidOperationException ex)
+            {
+                OpenAiStep expected = scenario == "invalid-token" ? OpenAiStep.Refresh : OpenAiStep.Session;
+                Require(OpenAiDiagnostics.Step(ex) == expected && !OpenAiDiagnostics.UserMessage(ex).Contains("gespeichert"),
+                    "Only storage operations may be marked Persist; session and invalid refresh tokens need their actual step.");
+                RequireLogSequence(logs, scenario == "invalid-token" ? new[] { "Refresh/Started", "Refresh/Response", "Refresh/Failed/Protocol" } :
+                    new[] { "Session/Failed/Protocol" });
+                continue;
+            }
+            throw new SelfCheckFailure("Invalid session or token was accepted.");
+        }
+    }
+
+    private static async Task ModelsBoundaryChecks()
+    {
+        foreach (string scenario in new[] { "timeout", "body-timeout", "http", "refresh-http", "malformed", "unrelated", "success" })
+        {
+            using var fixture = new Fixture(expired: scenario == "refresh-http");
+            var logs = new List<string>();
+            using var stream = new SinglePassStream(Array.Empty<byte>(), async token =>
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, token).ConfigureAwait(false);
+                throw new SelfCheckFailure("JSON body did not wait for its supplied token.");
+            });
+            using HttpClient http = new(new FakeHttp(async (_, token) =>
+            {
+                if (scenario == "timeout") await Task.Delay(Timeout.InfiniteTimeSpan, token).ConfigureAwait(false);
+                if (scenario == "body-timeout") return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(stream) };
+                if (scenario == "unrelated") throw new OperationCanceledException();
+                return scenario is "http" or "refresh-http" ? Json("{\"error\":\"invalid_grant\"}", HttpStatusCode.BadRequest) :
+                    Json(scenario == "malformed" ? "{" : "{\"models\":[]}");
+            }));
+            using var service = new OpenAiService(http, fixture.Storage, diagnostic: logs.Add, jsonTimeout: TimeSpan.FromMilliseconds(200));
+            Task task = service.GetModelsAsync(CancellationToken.None);
+            Exception? failure = null;
+            try { await task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false); }
+            catch (Exception ex) { failure = ex; }
+            string step = scenario == "refresh-http" ? "Refresh" : "Models";
+            if (scenario == "success")
+                Require(failure is null && task.IsCompletedSuccessfully, "Valid models must succeed.");
+            else if (scenario.Contains("timeout", StringComparison.Ordinal))
+                Require(failure is TimeoutException && task.IsFaulted && OpenAiDiagnostics.Step(failure) == OpenAiStep.Models &&
+                    OpenAiDiagnostics.Classify(failure) == OpenAiFailure.Timeout, "JSON header and body deadlines must be Models timeouts, never cancellation.");
+            else Require(failure is not null && task.IsFaulted, "Rejected models must finish Faulted.");
+            string terminal = scenario == "success" ? "Models/Succeeded" : step + "/Failed/" + OpenAiDiagnostics.Classify(failure!);
+            RequireLogSequence(logs, scenario is "timeout" or "unrelated" ? new[] { step + "/Started", terminal } :
+                new[] { step + "/Started", step + "/Response", terminal });
+        }
+    }
+
+    private static void ProbeLogChecks()
+    {
+        foreach (bool fail in new[] { false, true })
+        {
+            using HttpClient http = Client(request =>
+            {
+                if (request.Method == HttpMethod.Post || fail) return Json("{\"error\":\"invalid_grant\"}", HttpStatusCode.BadRequest);
+                return request.RequestUri!.AbsolutePath.EndsWith("jwks.json", StringComparison.Ordinal) ? Json("{\"keys\":[{}]}") :
+                    Json(JsonSerializer.Serialize(new { issuer = OpenAiProtocol.Issuer,
+                        authorization_endpoint = OpenAiProtocol.Issuer + "/api/accounts/authorize",
+                        token_endpoint = OpenAiProtocol.Issuer + "/api/accounts/oauth/token",
+                        jwks_uri = OpenAiProtocol.Issuer + "/.well-known/jwks.json",
+                        revocation_endpoint = OpenAiProtocol.Issuer + "/api/accounts/oauth/revoke" }));
+            });
+            OpenAiProbeResult result = OpenAiService.ProbeAsync(http).GetAwaiter().GetResult();
+            Require(result.Passed == !fail, "Probe must distinguish the expected fake-code rejection from discovery failure.");
+            RequireLogSequence(result.Lines, "Discovery/Started", "Discovery/Response", "Jwks/Started", "Jwks/Response",
+                "Token/Started", "Token/Response", fail ? "Discovery/Failed/Http" : "Probe/Succeeded");
+        }
+    }
+
+    private static async Task SignOutBoundaryChecks()
+    {
+        foreach (bool cancel in new[] { false, true })
+        {
+            using var fixture = new Fixture();
+            using var caller = new CancellationTokenSource();
+            var waiting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var logs = new List<string>();
+            using HttpClient http = new(new FakeHttp(async (request, token) =>
+            {
+                if (cancel && request.Method == HttpMethod.Get) return Json(JsonSerializer.Serialize(new
+                    { issuer = OpenAiProtocol.Issuer, revocation_endpoint = OpenAiProtocol.Issuer + "/test/revoke" }));
+                waiting.SetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, token).ConfigureAwait(false);
+                throw new SelfCheckFailure("Logout did not wait for its supplied token.");
+            }));
+            using var service = new OpenAiService(http, fixture.Storage, diagnostic: logs.Add, jsonTimeout: TimeSpan.FromMilliseconds(200));
+            Task<string?> task = service.SignOutAsync(caller.Token);
+            await waiting.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            if (cancel) caller.Cancel();
+            try
+            {
+                string? warning = await task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+                Require(!cancel && warning is not null, "Unconfirmed logout must retain its local-clearing warning.");
+                RequireLogSequence(logs, "Discovery/Started", "Discovery/Failed/Timeout");
+            }
+            catch (OperationCanceledException)
+            {
+                Require(cancel && task.IsCanceled, "Caller-cancelled logout must finish Canceled after local clearing.");
+                RequireLogSequence(logs, "Discovery/Started", "Discovery/Response", "Revoke/Started", "Revoke/Cancelled/Cancelled");
+            }
+            Require(fixture.Storage.Load().Registrations.Single().Credentials is null, "Remote timeout or cancellation must still clear local tokens.");
         }
     }
 
@@ -505,7 +706,8 @@ public static class OpenAiSelfChecks
                     ex.InnerException is OperationCanceledException, "Actual OCR and rotation deadlines must become distinct typed timeouts.");
                 Require(refresh ? message.Contains("Anmeldung erneuern") && !message.Contains("kleineren Ausschnitt") && ex.Message.Contains("Anmeldung") :
                     message.Contains("kleineren Ausschnitt") && ex.Message.Contains("zwei Minuten"), "Timeout guidance must match the phase that timed out.");
-                Require(requests == 1 && logs.Last().Contains("step=" + step + " class=Timeout"), "A timeout must not retry and must log its own phase.");
+                Require(requests == 1, "A timeout must not retry.");
+                RequireLogSequence(logs, step + "/Started", step + "/Failed/Timeout");
                 messages.Add(message);
                 continue;
             }
@@ -531,6 +733,7 @@ public static class OpenAiSelfChecks
             catch (TimeoutException ex)
             {
                 string message = OpenAiDiagnostics.UserMessage(ex);
+                RequireLogSequence(logs, "Session/Failed/Timeout");
                 Require(OpenAiDiagnostics.Step(ex) == OpenAiStep.Session && message.Contains("laufende Anmeldung abschließen") &&
                     !message.Contains("kleineren Ausschnitt") && requests == 0 && logs.Last().Contains("step=Session class=Timeout"),
                     "Waiting on sign-in must identify the session gate instead of an OCR response timeout.");
@@ -541,6 +744,7 @@ public static class OpenAiSelfChecks
         finally
         {
             signInCancellation.Cancel();
+            service.Dispose();
             try { await signIn.ConfigureAwait(false); }
             catch (OperationCanceledException) { }
         }
@@ -557,7 +761,9 @@ public static class OpenAiSelfChecks
         try { service.ExtractTextAsync(Png, "test-model", null, CancellationToken.None).GetAwaiter().GetResult(); }
         catch (IOException ex)
         {
+            RequireLogSequence(logs, "Persist/Failed/Storage");
             Require(OpenAiDiagnostics.Step(ex) == OpenAiStep.Persist && OpenAiDiagnostics.Classify(ex) == OpenAiFailure.Storage &&
+                OpenAiDiagnostics.UserMessage(ex).Contains("gelesen oder gespeichert") &&
                 OpenAiDiagnostics.UserMessage(ex).Contains("lokalen Sitzungsspeicher") && requests == 0 &&
                 logs.Last().Contains("step=Persist class=Storage") && !logs.Last().Contains("reason=ConnectionInterrupted"),
                 "Local storage I/O must not be labelled as an interrupted OCR connection.");
@@ -779,6 +985,7 @@ public static class OpenAiSelfChecks
         {
             using var fixture = new Fixture();
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var logs = new List<string>();
             Dictionary<string, string>? authorization = null;
             int exchanges = 0;
             string clientId = scenario == "new" || scenario == "identity-only" ? "oaiapp_new" : "oaiapp_test";
@@ -788,7 +995,7 @@ public static class OpenAiSelfChecks
             {
                 if (request.Method == HttpMethod.Get) return Json(jwks.GetRawText());
                 exchanges++;
-                Dictionary<string, string> pending = authorization ?? throw new InvalidOperationException("No pending authorization.");
+                Dictionary<string, string> pending = authorization ?? throw new SelfCheckFailure("No pending authorization.");
                 Dictionary<string, string> form = ParseParameters(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
                 Require(form["grant_type"] == "authorization_code" && form["client_id"] == clientId && form["code"] == "test-code" &&
                     form["resource"] == OpenAiProtocol.Resource && form["redirect_uri"] == pending["redirect_uri"] &&
@@ -815,7 +1022,7 @@ public static class OpenAiSelfChecks
                 string query = scenario == "declined" ? "error=access_denied" : "code=test-code&client_id=" + clientId;
                 query += "&state=" + (scenario == "wrong-state" ? "wrong" : authorization["state"]);
                 callback = SendCallback(new Uri(authorization["redirect_uri"] + "?" + query), timeout.Token);
-            });
+            }, diagnostic: logs.Add);
             bool rejected = false;
             try { await service.SignInAsync(account, timeout.Token).ConfigureAwait(false); }
             catch (InvalidOperationException ex)
@@ -826,6 +1033,13 @@ public static class OpenAiSelfChecks
             if (callback is not null) await callback.ConfigureAwait(false);
             Require(rejected == (scenario is "wrong-subject" or "wrong-state" or "declined" or "identity-only"), "Incorrect sign-in outcome: " + scenario);
             Require(exchanges == (scenario is "wrong-state" or "declined" ? 0 : 1), "Invalid callback reached token endpoint.");
+            RequireLogSequence(logs, scenario is "wrong-state" or "declined" ? new[] { "Callback/Failed/Protocol" } :
+                new[] { "Token/Started", "Token/Response", "Jwks/Started", "Jwks/Response", scenario switch
+                {
+                    "wrong-subject" => "Validate/Failed/Validation",
+                    "identity-only" => "Validate/Failed/Permission",
+                    _ => "Persist/Succeeded"
+                } });
             if (scenario is "wrong-subject" or "wrong-state" or "declined")
                 Require(fixture.Storage.Load().Registrations.Single().Credentials!.AccessToken == "test-access", "Rejected login replaced existing credentials.");
             else
@@ -883,7 +1097,7 @@ public static class OpenAiSelfChecks
         switched.SetResult();
         try { await request.ConfigureAwait(false); }
         catch (OperationCanceledException) { return; }
-        throw new InvalidOperationException("Account switch did not cancel the old request.");
+        throw new SelfCheckFailure("Account switch did not cancel the old request.");
     }
 
     private static Dictionary<string, string> ParseParameters(string query) => query.Split('&').ToDictionary(
@@ -907,6 +1121,7 @@ public static class OpenAiSelfChecks
         foreach (bool trusted in new[] { true, false })
         {
             using var fixture = new Fixture();
+            var logs = new List<string>();
             int revocations = 0;
             using HttpClient http = Client(request =>
             {
@@ -917,11 +1132,13 @@ public static class OpenAiSelfChecks
                 Require(form.Contains("token=test-refresh") && form.Contains("client_id=oaiapp_test") && form.Contains("token_type_hint=refresh_token"), "Revocation contract failed.");
                 revocations++; return new HttpResponseMessage(HttpStatusCode.OK);
             });
-            using var service = new OpenAiService(http, fixture.Storage);
+            using var service = new OpenAiService(http, fixture.Storage, diagnostic: logs.Add);
             string? warning = service.SignOutAsync(CancellationToken.None).GetAwaiter().GetResult();
             Require((warning is null) == trusted && revocations == (trusted ? 1 : 0), "Unconfirmed revocation reported as success.");
             OpenAiState state = fixture.Storage.Load();
             Require(state.HostId == fixture.HostId && state.Registrations.Single().Credentials is null, "Logout lost registration or retained tokens.");
+            RequireLogSequence(logs, trusted ? new[] { "Discovery/Started", "Discovery/Response", "Revoke/Started", "Revoke/Response", "Revoke/Succeeded" } :
+                new[] { "Discovery/Started", "Discovery/Response", "Revoke/Failed/Protocol" });
         }
     }
 
@@ -942,7 +1159,7 @@ public static class OpenAiSelfChecks
             Require(ex.Status == 403 && ex.Message.Contains("detail") && !ex.Message.Contains("private diagnostic"), "Admission shape was not safely preserved.");
             return;
         }
-        throw new InvalidOperationException("Admission error succeeded.");
+        throw new SelfCheckFailure("Admission error succeeded.");
     }
 
     private const string Completed = "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n";
@@ -960,11 +1177,18 @@ public static class OpenAiSelfChecks
     private static HttpResponseMessage Sse(string body) => new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "text/event-stream") };
     private static HttpClient Client(Func<HttpRequestMessage, HttpResponseMessage> handler) => new(new FakeHttp((request, _) => Task.FromResult(handler(request))));
     private static void Require(bool condition, string message) { if (!condition) throw new SelfCheckFailure(message); }
+    private static void RequireLogSequence(IReadOnlyList<string> logs, params string[] expected)
+    {
+        string Field(string line, string key) => line.Split(' ').SingleOrDefault(part => part.StartsWith(key + "=", StringComparison.Ordinal))?[(key.Length + 1)..] ?? "";
+        string[] actual = logs.Select(line => Field(line, "step") + "/" + Field(line, "outcome") +
+            (Field(line, "class") is { Length: > 0 } failure ? "/" + failure : "")).ToArray();
+        Require(actual.SequenceEqual(expected), "Complete diagnostic sequence differs. Expected " + string.Join(", ", expected) + "; actual " + string.Join(", ", actual));
+    }
     private static void Reject(Action action)
     {
         try { action(); }
         catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or OperationCanceledException) { return; }
-        throw new InvalidOperationException("Invalid input was accepted.");
+        throw new SelfCheckFailure("Invalid input was accepted.");
     }
     // Small, complete 1x1 PNG; never an actual screenshot.
     private static readonly byte[] Png = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j/p8AAAAASUVORK5CYII=");
