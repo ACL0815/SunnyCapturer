@@ -37,10 +37,123 @@ public static class OverlaySelfChecks
         CheckOcrMode(background);
         CheckGestureEscape(background);
         CheckRendering(background);
+        CheckFrameInputRecovery();
     }
 
     private static RegionOverlay Create(BitmapSource background) => new(background,
         new DrawingRectangle(-1600, -900, background.PixelWidth, background.PixelHeight));
+
+    private enum FrameInput { Release, LostCapture, Deactivate, Escape, RightClick, OutsideRelease, SecondPress, ChildLostCapture, ReleasedMove }
+    private enum FrameFixture { New, Move, Resize, ResumedMove }
+
+    private static void CheckFrameInputRecovery()
+    {
+        BitmapSource background = Pattern(1374, 859);
+        var original = new Int32Rect(264, 182, 600, 300);
+        var failures = new List<string>();
+        foreach (FrameFixture fixture in Enum.GetValues<FrameFixture>())
+        foreach (FrameInput input in Enum.GetValues<FrameInput>())
+        {
+            RegionOverlay overlay = Create(background);
+            if (fixture != FrameFixture.New) overlay.SetRegion(original);
+            if (fixture == FrameFixture.ResumedMove)
+            {
+                Require(overlay.ExecuteOutput(CaptureCompletion.Copied, _ => true), "Resume fixture must retain a completed session.");
+                CaptureSessionResult session = overlay.Result;
+                overlay = new RegionOverlay(session.Screenshot!, session.Bounds, editor: session.Editor);
+                overlay.SetRegion(session.Region);
+                Require(FrameControlsVisible(overlay, background), "Resume must start with all frame controls visible.");
+            }
+            try
+            {
+                Point start = fixture switch {
+                    FrameFixture.New => new Point(264, 182),
+                    FrameFixture.Resize => new Point(864, 482),
+                    _ => new Point(500, 350) };
+                Require(overlay.HandlePointerDown(start), "Interruption fixture must begin a frame gesture.");
+                Point end = fixture == FrameFixture.New || fixture == FrameFixture.Resize ? new Point(993, 593) : start + new Vector(70, 50);
+                overlay.UpdateFrameGesture(end);
+                Int32Rect dragged = overlay.Selection;
+                Require(overlay.IsFrameGestureActive && !overlay.ToolbarVisible && !ChipVisible(overlay) &&
+                    !GoldHandlesVisible(overlay, RenderScene(overlay, background)), "Active drag must hide toolbar, chip and gold handles together.");
+                switch (input)
+                {
+                    case FrameInput.Release:
+                        overlay.EndFrameGesture();
+                        break;
+                    case FrameInput.LostCapture:
+                        overlay.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0)
+                            { RoutedEvent = Mouse.LostMouseCaptureEvent, Source = overlay });
+                        break;
+                    case FrameInput.Deactivate:
+                        typeof(Window).GetMethod("OnDeactivated", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                            .Invoke(overlay, new object[] { EventArgs.Empty });
+                        break;
+                    case FrameInput.Escape:
+                        overlay.HandleSessionKey(Key.Escape);
+                        break;
+                    case FrameInput.RightClick:
+                        overlay.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Right)
+                            { RoutedEvent = UIElement.PreviewMouseRightButtonDownEvent });
+                        break;
+                    case FrameInput.OutsideRelease:
+                        overlay.UpdateFrameGesture(new Point(5000, 5000));
+                        overlay.EndFrameGesture();
+                        break;
+                    case FrameInput.SecondPress:
+                        Require(!overlay.HandlePointerDown(end), "A duplicate press must not replace the running gesture.");
+                        overlay.EndFrameGesture();
+                        break;
+                    case FrameInput.ChildLostCapture:
+                        overlay.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0)
+                            { RoutedEvent = Mouse.LostMouseCaptureEvent, Source = overlay.Editor });
+                        Require(overlay.IsFrameGestureActive, "A child's capture loss must not cancel the window's frame gesture.");
+                        overlay.EndFrameGesture();
+                        break;
+                    case FrameInput.ReleasedMove:
+                        overlay.HandlePointerMove(end + new Vector(100, 80), MouseButtonState.Released);
+                        break;
+                }
+                if (overlay.IsFrameGestureActive)
+                {
+                    failures.Add($"{fixture}/{input}: selection={overlay.Selection.Width}x{overlay.Selection.Height}, gesture=active, toolbar=Collapsed, chip=Collapsed, handles=0");
+                    continue;
+                }
+                if (input == FrameInput.RightClick)
+                    Require(overlay.IsClosed && overlay.Selection.IsEmpty, "Right-click during a frame gesture must cancel the session.");
+                else if (input is FrameInput.LostCapture or FrameInput.Deactivate or FrameInput.Escape)
+                    Require(!overlay.IsClosed && overlay.Selection == (fixture == FrameFixture.New ? Int32Rect.Empty : original),
+                        "Interrupted frame gestures must restore the previous selection.");
+                else if (input != FrameInput.OutsideRelease)
+                    Require(!overlay.IsClosed && overlay.Selection == dragged, "Release recovery must retain the last position observed while dragging.");
+                if (!overlay.IsClosed && !overlay.Selection.IsEmpty)
+                {
+                    Require(FrameControlsVisible(overlay, background), "Finished frame gestures must show toolbar, size chip and all eight gold handles.");
+                    Buttons(overlay.Toolbar).Single(b => Equals(b.Tag, EditorTool.Rectangle)).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    Require(overlay.Editor.Tool == EditorTool.Rectangle && overlay.Editor.IsHitTestVisible,
+                        "Recovered frame controls and annotation input must be usable.");
+                    Require(overlay.HandlePointerDown(overlay.FrameHandles()[0].Center), "Recovered frame handles must remain usable.");
+                    overlay.EndFrameGesture(true);
+                }
+            }
+            finally { overlay.Cancel(); }
+        }
+        Require(failures.Count == 0, "Frame input recovery failed: " + string.Join("; ", failures));
+    }
+
+    private static bool ChipVisible(RegionOverlay overlay) => ((Canvas)overlay.PreviewRoot).Children.OfType<Border>()
+        .Single(border => border.Child is TextBlock).Visibility == Visibility.Visible;
+
+    private static bool GoldHandlesVisible(RegionOverlay overlay, BitmapSource scene) => overlay.FrameHandles().All(handle =>
+        Pixel(scene, Math.Clamp((int)handle.Center.X, 0, scene.PixelWidth - 1), Math.Clamp((int)handle.Center.Y, 0, scene.PixelHeight - 1))
+            .SequenceEqual(new byte[] { 0x76, 0xB5, 0xD3, 0xFF }));
+
+    private static bool FrameControlsVisible(RegionOverlay overlay, BitmapSource background)
+    {
+        BitmapSource scene = RenderScene(overlay, background);
+        return overlay.ToolbarVisible && ChipVisible(overlay) && overlay.Toolbar.ActualHeight > 0 &&
+            GoldHandlesVisible(overlay, scene) && overlay.ToolbarBounds.Top >= 0 && overlay.ToolbarBounds.Bottom <= background.PixelHeight;
+    }
 
     private static void CheckDoubleClick(BitmapSource background)
     {

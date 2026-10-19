@@ -279,7 +279,7 @@ internal sealed class RegionOverlay : Window
         base.OnPreviewMouseMove(e);
         if (_gesture != FrameGesture.None)
         {
-            if (ReadCursor(out Point point)) UpdateFrameGesture(point);
+            if (ReadCursor(out Point point)) HandlePointerMove(point, e.LeftButton);
             e.Handled = true;
         }
         else if (!IsControlSource(e.OriginalSource as DependencyObject) && ReadCursor(out Point point))
@@ -411,6 +411,8 @@ internal sealed class RegionOverlay : Window
             SetRegion(new Int32Rect(l, t, r - l, b - t));
         }
     }
+
+    internal void HandlePointerMove(Point point, MouseButtonState leftButton) => UpdateFrameGesture(point);
 
     internal void EndFrameGesture(bool cancel = false)
     {
