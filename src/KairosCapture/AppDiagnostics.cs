@@ -104,6 +104,8 @@ internal static class AppDiagnostics
             Require(((TextBox)window.FindName("HotkeyBox")).Text == "Strg+Alt+A", "Default shortcut must be visible.");
             Require(((CheckBox)window.FindName("AutoCopy")).IsChecked == true && ((CheckBox)window.FindName("AskSave")).IsChecked != true,
                 "Settings UI must reflect robust defaults.");
+            foreach (string name in new[] { "AskSave", "SaveCopy", "AutoCopy", "StartupCheck" })
+                Require(((CheckBox)window.FindName(name)).Foreground is SolidColorBrush { Color.R: > 180, Color.G: > 180, Color.B: > 180 }, "Settings toggles must retain a readable light foreground.");
             LayoutPreview(window, 500, 550);
             Require(!window.IsVisible && new WindowInteropHelper(window).Handle == IntPtr.Zero, "Shell checks must stay offscreen.");
             return Array.Empty<string>();
@@ -164,6 +166,13 @@ internal static class AppDiagnostics
         {
             Task operation = window.RecognizeAsync();
             Require(operation.IsCompletedSuccessfully && window.HasImage && window.Status.Contains("ChatGPT", StringComparison.Ordinal), "Missing account must explain next action and retain image without network.");
+            var desktop = new System.Drawing.Rectangle(-1920, -1080, 4480, 2520);
+            var work = new System.Drawing.Rectangle(-1920, -1080, 1920, 1040);
+            foreach (double scale in new[] { 1d, 1.5, 2, 3 })
+            {
+                var placed = OcrResultWindow.ResultBounds(desktop, new Int32Rect(1700, 800, 200, 200), work, scale);
+                Require(work.Contains(placed) && placed.Width == Math.Min(work.Width, (int)Math.Ceiling(440 * scale)), "OCR result placement must use target DPI and stay in its working area.");
+            }
             LayoutPreview(window, 440, 350);
             window.SetPreviewResult();
             Require(!window.ResultText.IsReadOnly && window.ResultText.AcceptsReturn, "Recognized text must stay editable.");
@@ -215,7 +224,7 @@ internal static class AppDiagnostics
     internal static void RenderPreview(string path)
     {
         var window = new MainWindow(diagnosticsMode: true);
-        try { RenderWindow(window, path, 560, 660); }
+        try { RenderWindow(window, path, 560, 700); }
         finally { window.Close(); }
     }
     private static void RenderOcrPreview(string path)
@@ -247,7 +256,10 @@ internal static class AppDiagnostics
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         FrameworkElement content = LayoutPreview(window, width, height);
-        var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32); bitmap.Render(content);
+        var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        var background = new DrawingVisual();
+        using (DrawingContext dc = background.RenderOpen()) dc.DrawRectangle(window.Background, null, new Rect(0, 0, width, height));
+        bitmap.Render(background); bitmap.Render(content);
         File.WriteAllBytes(path, ImageOutput.EncodePng(bitmap));
         WriteJson(Path.ChangeExtension(path, ".json"), new { rendered = true, width, height, mode = "WPF / isolated offscreen diagnostics / native DWM backdrop requires visible Windows window" });
     }

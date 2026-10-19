@@ -94,7 +94,11 @@ public sealed class GlobalHotkey : IDisposable
         // Reserve the new combination before releasing the old one. A conflict never
         // interrupts the existing shortcut or steals a different application's shortcut.
         if (!RegisterHotKey(_handle, candidate, gesture.NativeModifiers, gesture.VirtualKey))
-        { error = $"{gesture} ist bereits belegt oder nicht verfügbar. Das bisherige Tastenkürzel bleibt aktiv."; return false; }
+        {
+            error = LastError = $"{gesture} ist bereits belegt oder nicht verfügbar. " + (_registered
+                ? "Das bisherige Tastenkürzel bleibt aktiv." : "Aktuell ist kein Tastenkürzel registriert. Bitte eine andere Kombination wählen.");
+            return false;
+        }
         ReleaseRegistration();
         _id = candidate;
         _gesture = gesture;

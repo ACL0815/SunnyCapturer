@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Interop;
 using System.Windows.Media;
 using Path = System.Windows.Shapes.Path;
@@ -40,8 +41,9 @@ internal static class GlassWindow
     internal static object Caption(FrameworkElement context, string glyph, string text)
     {
         var panel = new StackPanel { Orientation = Orientation.Horizontal };
+        TextElement.SetForeground(panel, (Brush)context.FindResource("TextBrush"));
         panel.Children.Add(Icon(context, glyph));
-        panel.Children.Add(new TextBlock { Text = text, Margin = new Thickness(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center });
+        panel.Children.Add(new TextBlock { Foreground = (Brush)context.FindResource("TextBrush"), Text = text, Margin = new Thickness(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center });
         return panel;
     }
 

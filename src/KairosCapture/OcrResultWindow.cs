@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -37,18 +38,19 @@ internal sealed class OcrResultWindow : Window
         Topmost = true; ShowInTaskbar = false; Background = new SolidColorBrush(Color.FromRgb(19, 21, 30));
         WindowStartupLocation = diagnostics ? WindowStartupLocation.CenterScreen : WindowStartupLocation.Manual;
         var root = new Border { Style = (Style)FindResource("GlassPanel"), Padding = new Thickness(18) };
+        TextElement.SetForeground(root, (Brush)FindResource("TextBrush"));
         var grid = new Grid();
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var header = new StackPanel();
-        var title = new ContentControl { Content = GlassWindow.Caption(this, "Ocr", "Text aus deiner Aufnahme"), FontSize = 17, FontWeight = FontWeights.SemiBold };
+        var title = new ContentControl { Content = GlassWindow.Caption(this, "Ocr", "Text aus deiner Aufnahme"), FontSize = 17, FontWeight = FontWeights.SemiBold, Foreground = (Brush)FindResource("TextBrush") };
         header.Children.Add(title);
         _status = new TextBlock { Text = "Texterkennung wird vorbereitet…", TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 10, 0, 9), FontSize = 12, Foreground = (Brush)FindResource("LavenderBrush") };
         header.Children.Add(_status); grid.Children.Add(header);
-        _progress = new ProgressBar { Height = 3, IsIndeterminate = true, Margin = new Thickness(0, 0, 0, 10) };
+        _progress = new ProgressBar { Height = 3, Foreground = (Brush)FindResource("LavenderBrush"), IsIndeterminate = true, Margin = new Thickness(0, 0, 0, 10) };
         Grid.SetRow(_progress, 1); grid.Children.Add(_progress);
         _text = new TextBox { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             IsReadOnly = true, Padding = new Thickness(10), FontSize = 14, MinHeight = 70 };
@@ -141,16 +143,29 @@ internal sealed class OcrResultWindow : Window
     {
         _closed = true; _operation?.Cancel(); _image = null; base.OnClosed(e);
     }
+    internal static DrawingRectangle ResultBounds(DrawingRectangle desktop, Int32Rect region, DrawingRectangle work, double scale)
+    {
+        int width = Math.Min(work.Width, (int)Math.Ceiling(440 * scale));
+        int height = Math.Min(work.Height, (int)Math.Ceiling(350 * scale));
+        int x = Math.Clamp(desktop.X + region.X + region.Width + 12, work.Left, Math.Max(work.Left, work.Right - width));
+        int y = Math.Clamp(desktop.Y + region.Y, work.Top, Math.Max(work.Top, work.Bottom - height));
+        return new DrawingRectangle(x, y, width, height);
+    }
     private void PlaceNear(DrawingRectangle bounds, Int32Rect region)
     {
         IntPtr handle = new WindowInteropHelper(this).Handle;
-        double scale = GetDpiForWindow(handle) / 96d;
-        int width = (int)(Width * scale), height = (int)(Height * scale);
         int anchorX = bounds.X + region.X + region.Width, anchorY = bounds.Y + region.Y;
         var work = System.Windows.Forms.Screen.FromPoint(new System.Drawing.Point(anchorX - 1, anchorY)).WorkingArea;
-        int x = Math.Clamp(anchorX + 12, work.Left, Math.Max(work.Left, work.Right - width));
-        int y = Math.Clamp(anchorY, work.Top, Math.Max(work.Top, work.Bottom - height));
-        SetWindowPos(handle, new IntPtr(-1), x, y, width, height, 0x0040);
+        // Move the HWND onto the destination monitor before asking for its DPI.
+        // The posted placement runs after WPF's synchronous WM_DPICHANGED handling.
+        SetWindowPos(handle, IntPtr.Zero, work.Left, work.Top, 0, 0, 0x0015);
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, new Action(() =>
+        {
+            if (_closed) return;
+            uint dpi = GetDpiForWindow(handle);
+            DrawingRectangle target = ResultBounds(bounds, region, work, (dpi == 0 ? 96 : dpi) / 96d);
+            SetWindowPos(handle, new IntPtr(-1), target.X, target.Y, target.Width, target.Height, 0x0010);
+        }));
     }
     [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr window);
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);

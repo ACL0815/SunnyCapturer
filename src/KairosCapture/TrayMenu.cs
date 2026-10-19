@@ -22,6 +22,7 @@ internal sealed class TrayMenu : IDisposable
     private readonly List<Forms.ToolStripMenuItem> _captureItems = new();
     private readonly Forms.ToolStripMenuItem _region, _resume, _recent, _ocrStatus;
     private readonly List<Image> _images = new();
+    private bool _imagesQueued;
 
     internal TrayMenu(MainWindow window, Action<int> delay)
     {
@@ -48,6 +49,8 @@ internal sealed class TrayMenu : IDisposable
         Item("Einstellungen…", "Settings").Click += (_, _) => _window.ShowFromTray();
         Item("Beenden", "Exit").Click += async (_, _) => await _window.RequestExitAsync();
         Menu.Opening += (_, _) => Refresh(CaptureService.IsCapturing, CaptureService.LastSession != null);
+        Menu.HandleCreated += (_, _) => QueueImages();
+        Menu.Opened += (_, _) => QueueImages();
         Refresh(false, CaptureService.LastSession != null);
     }
     private Forms.ToolStripMenuItem Item(string text, string glyph, Forms.ToolStripItemCollection? collection = null)
@@ -55,6 +58,8 @@ internal sealed class TrayMenu : IDisposable
         var item = new Forms.ToolStripMenuItem(text) { Tag = glyph, ForeColor = Menu.ForeColor, Padding = new Forms.Padding(3, 5, 8, 5) };
         (collection ?? Menu.Items).Add(item);
         item.DropDown.BackColor = Menu.BackColor; item.DropDown.ForeColor = Menu.ForeColor; item.DropDown.Renderer = Menu.Renderer;
+        item.DropDown.HandleCreated += (_, _) => QueueImages();
+        item.DropDown.Opened += (_, _) => QueueImages();
         return item;
     }
     private Forms.ToolStripMenuItem Capture(string text, string glyph, CaptureMode mode)
@@ -80,17 +85,34 @@ internal sealed class TrayMenu : IDisposable
             _recent.DropDownItems.Add(new Forms.ToolStripMenuItem("Noch keine Aufnahmen gespeichert") { Enabled = false });
         _recent.DropDownItems.Add(new Forms.ToolStripSeparator());
         Item("Ordner öffnen", "Folder", _recent.DropDownItems).Click += (_, _) => _window.OpenSaveFolder();
+        UpdateImages();
+    }
+    private void QueueImages()
+    {
+        if (_imagesQueued || Menu.IsDisposed || !Menu.IsHandleCreated) return;
+        _imagesQueued = true;
+        Menu.BeginInvoke(new Action(() => { _imagesQueued = false; if (!Menu.IsDisposed) UpdateImages(); }));
+    }
+    private void UpdateImages()
+    {
         foreach (var item in AllItems(Menu.Items)) item.Image = null;
         foreach (var image in _images) image.Dispose(); _images.Clear();
-        int size = Math.Max(20, (int)Math.Round(20d * Menu.DeviceDpi / 96));
-        Menu.ImageScalingSize = new Size(size, size);
-        foreach (var item in AllItems(Menu.Items))
+        ApplyImages(Menu);
+    }
+    private void ApplyImages(Forms.ToolStrip strip)
+    {
+        int size = Math.Max(20, (int)Math.Round(20d * strip.DeviceDpi / 96));
+        strip.ImageScalingSize = new Size(size, size);
+        foreach (Forms.ToolStripItem entry in strip.Items)
+        {
+            if (entry is not Forms.ToolStripMenuItem item) continue;
             if (item.Tag is string glyph)
             {
                 var image = RenderGlyph(_window, glyph, size);
                 _images.Add(image); item.Image = image;
-                if (item.HasDropDownItems) item.DropDown.ImageScalingSize = new Size(size, size);
             }
+            if (item.HasDropDownItems) ApplyImages(item.DropDown);
+        }
     }
     private void OpenFile(string path)
     {
