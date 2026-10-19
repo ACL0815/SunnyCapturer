@@ -1,12 +1,12 @@
 # Kairos Capture
 
-> Stand 19.10.2026, Version 0.3.0: Kairos läuft nur noch im Infobereich. Die frühere Werkbank ist entfallen; das Fenster dient nur noch den Einstellungen. Overlay, Tray-Menü und Icons haben einen Liquid-Glass-Look. Build, neun Offline-Prüfsuiten und alle WPF-Vorschauen sind geprüft. Echte Maus-/Tastaturbedienung, Mixed-DPI und echter OpenAI-Zugriff sind weiterhin offen. Siehe [Kernabnahme](docs/kairos/OVERLAY-ABNAHME.md), [Icons](docs/kairos/ICONS.md).
+> Stand 19.10.2026, Version 0.4.0: Speichern öffnet wieder den Dialog, rechts in der Glasleiste stehen Schließen, Anpinnen, Speichern und Fertig; angepinnte Bilder schweben rahmenlos im Vordergrund. Markierungen zeigen direkt nach dem Zeichnen Anfasser. Der OCR-Dialog kann übersetzen, die OpenAI-Anmeldung protokolliert Fehler jetzt schrittgenau. Build und neun Offline-Prüfsuiten sind grün; echte Bedienung, Mixed-DPI und echter OpenAI-Login sind weiterhin offen. Siehe [Kernabnahme](docs/kairos/OVERLAY-ABNAHME.md), [Icons](docs/kairos/ICONS.md), [OAuth](docs/kairos/OAUTH.md).
 
 Native Screenshot-Anwendung für Windows 11, geschrieben in C# mit WPF und .NET 10, in der dunklen Violett-/Lavendel-/Gold-Palette der Nutzervorlage.
 
 ## Starten
 
-`artifacts\KairosCapture-0.3.0-win-x64\KairosCapture.exe` öffnen oder `.\Start-KairosCapture.ps1`. Kairos erscheint ohne Fenster im Infobereich. Voraussetzung ist die **.NET 10 Desktop Runtime** für Windows x64.
+`artifacts\KairosCapture-0.4.0-win-x64\KairosCapture.exe` öffnen oder `.\Start-KairosCapture.ps1`. Kairos erscheint ohne Fenster im Infobereich. Voraussetzung ist die **.NET 10 Desktop Runtime** für Windows x64.
 
 ## Tray
 

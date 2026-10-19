@@ -83,7 +83,7 @@ try {
         Write-Host "Offline-Prüfungen bestanden. Aufnahme-Overlay: $kairosOverlayPreview"
     }
     if (-not $BuildOnly) {
-        $kairosOutput = Join-Path $kairosRoot 'artifacts\KairosCapture-0.3.0-win-x64'
+        $kairosOutput = Join-Path $kairosRoot 'artifacts\KairosCapture-0.4.0-win-x64'
         & $kairosDotnet publish $kairosProject -c Release -r win-x64 --self-contained false --no-restore --nologo -o $kairosOutput
         if ($LASTEXITCODE -ne 0) { throw 'Frameworkabhängiger Publish-Build fehlgeschlagen.' }
         Write-Host "Startbereit: $(Join-Path $kairosOutput 'KairosCapture.exe')"

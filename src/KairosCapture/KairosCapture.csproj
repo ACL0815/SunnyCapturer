@@ -10,7 +10,7 @@
     <AssemblyName>KairosCapture</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>KairosCapture.ico</ApplicationIcon>
-    <Version>0.3.0</Version>
+    <Version>0.4.0</Version>
     <Company>Kairos Capture</Company>
     <Description>Screenshots und Texterkennung für Windows</Description>
     <Deterministic>true</Deterministic>
