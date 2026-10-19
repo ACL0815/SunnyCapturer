@@ -1,6 +1,6 @@
 # Kairos Capture
 
-> Stand 18.10.2026: C#/WPF ist implementiert. Die ursprüngliche Beschränkung auf Bearbeitung im Hauptfenster wurde durch den verbindlichen [Overlay-Ablauf](../plans/2026-10-18-live-overlay-correction.md) ersetzt. Für die nach Untersuchung der installierten SunnyCapturer-Version geprüfte Technologieabwägung siehe [ARCHITEKTUR-ABWAEGUNG.md](reverse/ARCHITEKTUR-ABWAEGUNG.md) und [Untersuchungsbericht](reverse/README.md). Praktische Windows-/Mixed-DPI-Abnahme bleibt offen.
+> Stand 19.10.2026, Version 0.4.0: C#/WPF mit Tray-Start, Bearbeitung im Aufnahme-Overlay und einem reinen Einstellungsfenster. Die aktuelle Bedienfolge steht in [OVERLAY-ABNAHME.md](OVERLAY-ABNAHME.md); der frühere [Overlay-Plan](../plans/2026-10-18-live-overlay-correction.md) dokumentiert die Ablösung der Werkbank-Bearbeitung. Für die geprüfte Technologieabwägung siehe [ARCHITEKTUR-ABWAEGUNG.md](reverse/ARCHITEKTUR-ABWAEGUNG.md) und [Untersuchungsbericht](reverse/README.md). Praktische Windows-/Mixed-DPI-Abnahme bleibt offen.
 
 Entscheidung vom 18.10.2026, Architekturprüfung durch Claude Opus 5.5 mit Ponytail.
 
@@ -17,10 +17,12 @@ Die Wahl ist auf Windows optimiert. Sie ist keine Zusage für macOS/Linux und ke
 
 ## Aufbau
 
-- `Capture`: vollständigen virtuellen Desktop einfrieren, Auswahlrahmen im offenen Overlay verschieben/verändern, Werkzeuge und Bildausgabe direkt dort verwenden; Hotkey und native Bildaufnahme.
+- `App` / `TrayMenu`: Lebenszyklus ohne sichtbares Startfenster, Aufnahmeaktionen, Countdown, letzte Sitzung und Verwaltung der angepinnten Bilder.
+- `Capture`: vollständigen virtuellen Desktop einfrieren, Auswahlrahmen im offenen Overlay verschieben/verändern, Werkzeuge und Bildausgabe direkt dort verwenden; Hotkey, native Bildaufnahme und rahmenlose Pin-Fenster.
 - `Editor`: ein gemeinsamer Canvas für das volle Pixelraster mit eigenständigen Zeichenobjekten, Auswahl, Move/Resize, Stiländerung, direkter Texteingabe und Rückgängig/Wiederholen. Der veränderbare Rahmen ist ein Crop; Export rendert direkt dessen aktuelle Originalpixel.
-- `Services`: direkter OpenAI-OAuth-Login, geschützte lokale Sitzung und OCR über die Responses API.
-- `MainWindow`: ausdrücklich gewählte Werkbank mit demselben lebenden Editor und bearbeitbarem OCR-Text; kleine WPF-Codebehind ohne zusätzliches UI-Framework. Kein automatischer Wechsel nach dem Aufziehen eines Ausschnitts.
+- `Services`: direkter OpenAI-OAuth-Login, geschützte lokale Sitzung und OCR mit optionaler Übersetzung über die Responses API.
+- `MainWindow`: Einstellungen für Hotkey, Speicherverhalten, Konten, OCR und Autostart; kleine WPF-Codebehind ohne zusätzliches UI-Framework. Das Fenster enthält keinen Bildeditor.
+- `OcrResultWindow`: separates Fenster mit bearbeitbarem OCR-Ergebnis und fester Sprachauswahl. „Letzte Aufnahme fortsetzen“ verwendet weiterhin dieselbe eingefrorene Aufnahme mit ihrem Editor, Crop und Undo/Redo.
 
 Die Farben folgen der Nutzervorlage: fast schwarzer Grund, violette und lavendelfarbene Akzente, sparsame goldene Konturen. Das Screenshot-Bild bleibt der Mittelpunkt der Oberfläche.
 
@@ -30,7 +32,7 @@ Aufnahme und Bearbeitung laufen lokal. Erst die ausdrücklich gestartete Texterk
 
 Schwarze Abdeckungen werden beim PNG-Export in die Bildpixel geschrieben. Einzelne markierte Objekte bleiben bis zum Export bearbeitbar. Geschützte Bildschirminhalte können durch Windows schwarz erscheinen. Unterschiedliche Monitor-Skalierungen und Remote Desktop brauchen eine Prüfung auf dem jeweiligen Aufbau.
 
-Scroll-Aufnahmen, Video, Cloud-Synchronisierung und Übersetzung gehören nicht zur ersten Fassung.
+Scroll-Aufnahmen, Video und Cloud-Synchronisierung gehören nicht zum Funktionsumfang von Version 0.4.0. OCR-Übersetzung ist über die feste Sprachauswahl im Ergebnisfenster verfügbar.
 
 ## Quellen
 

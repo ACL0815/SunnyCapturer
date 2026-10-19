@@ -1,6 +1,6 @@
 # Kernabnahme: Screenshot bleibt direkt bearbeitbar
 
-Diese Abnahme ersetzt die unzureichende Prüfung des ersten separaten Werkbank-Ablaufs. Der Nutzer verlangt ausdrücklich Bearbeitung direkt auf dem aufgenommenen Bildschirm, nachträgliche Rahmenänderung und weiter editierbare Markierungen.
+Stand 19.10.2026, Version 0.4.0. Kairos startet im Tray; MainWindow enthält die Einstellungen. Die Bedienfolge verlangt Bearbeitung direkt auf dem aufgenommenen Bildschirm, nachträgliche Rahmenänderung und weiter editierbare Markierungen. Die frühere Werkbank und ihre Handoff-Rückfragen sind entfallen.
 
 ## Reproduzierbare Bedienfolge
 
@@ -16,14 +16,20 @@ Diese Abnahme ersetzt die unzureichende Prüfung des ersten separaten Werkbank-A
 | Rahmen verkleinern und wieder vergrößern | Zuvor angelegte Objekte und ihre History bleiben erhalten, auch wenn sie zeitweise außerhalb des Ausschnitts lagen. |
 | Mehrfach Undo und Redo | Objektänderungen werden nachvollziehbar zurückgenommen und wiederhergestellt; kein stilles Rastern oder Verlust der einzelnen Objekte. |
 | Kopieren bzw. PNG speichern | Exakt der aktuelle Ausschnitt mit den aktuellen Markierungen wird ausgegeben. Maske, Rahmen, Griffe und Werkzeugleiste erscheinen nicht im Bild. Das Hauptfenster wird dadurch nicht geöffnet. |
-| Explizit OCR oder Werkbank wählen | Derselbe Editor samt Objekten, Crop und History wird übergeben. Kopieren, Speichern und OCR verwenden denselben aktuellen Crop-Export. |
-| OCR/Werkbank wählen, während ein altes Werkbankdokument ungesichert ist; Rückfrage oder Speicherdialog abbrechen | Das aktuelle Overlay bleibt mit demselben Editor, Ausschnitt und History offen. Dialoge gehören zum Overlay; die neue Aufnahme wird nicht verworfen. |
-| Verzögerte Handoff-Freigabe, erneuter Klick, externe Schließung | Nur ein Freigabeversuch läuft. Währenddessen entstehen keine parallelen Ausgaben oder Gesten. Ein nach Schließung zurückkehrender Callback aktiviert kein Dokument. |
-| In der Werkbank ein Objekt am Ausschnittrand ziehen/skalieren oder neuen Text setzen | Neue Eingaben bleiben im sichtbaren Ausschnitt. Die vollständige Aufnahme und bereits außerhalb liegende alte Objekte bleiben unverändert erhalten. |
-| Escape bei aktiver Text-, Zeichen- oder Rahmengeste | Nur die aktuelle Eingabe/Geste wird verworfen; der vorherige Ausschnitt und ältere Markierungen bleiben erhalten. Ein weiteres Escape im Idle beendet die Sitzung. |
-| Abbrechen / Rechtsklick oder Escape ohne aktive Geste | Sitzung endet ohne Ausgabe. Keine Eingabe wird versehentlich als neuer Auswahlrahmen aufgefasst. |
+| Speichern oder Strg+S wählen und den Dialog abbrechen | Das Overlay bleibt mit demselben Editor, Ausschnitt, ausgewählten Objekt und Undo/Redo offen. Direktspeichern erfolgt nur bei aktiviertem `SaveWithoutDialog`; Speichern beim Kopieren bleibt direkt. |
+| OCR wählen oder die OCR-Aufnahme aus dem Tray starten | Der aktuelle Crop wird mit Markierungen exportiert; das Overlay schließt und ein separates Ergebnisfenster öffnet. Der Text bleibt bearbeitbar, die feste Sprachauswahl erlaubt Übersetzung. |
+| Anpinnen oder I wählen | Der markierte Ausschnitt erscheint rahmenlos im Vordergrund. Mehrere Pins sind möglich; sie lassen sich bewegen und proportional skalieren. P bleibt das Stiftwerkzeug. |
+| Letzte Aufnahme fortsetzen | Derselbe eingefrorene Bildschirm, Rahmen, Editor und beide History-Stacks werden wieder geöffnet. |
+| Escape bei aktiver Text-, Zeichen- oder Rahmengeste | Nur die aktuelle Eingabe/Geste wird verworfen; der vorherige Ausschnitt und ältere Markierungen bleiben erhalten. Ohne aktive Geste wird zunächst ein ausgewähltes Objekt abgewählt, danach beendet Escape die Sitzung. |
+| Abbrechen / Rechtsklick oder Escape ohne aktive Geste und Objektauswahl | Sitzung endet ohne Ausgabe. Keine Eingabe wird versehentlich als neuer Auswahlrahmen aufgefasst. |
 
-## Belegarten
+## Aktuelle Offline-Prüfung
+
+`scripts/build.ps1` baut Release, führt neun Suiten (`capture`, `editor`, `overlay`, `openai`, `shell`, `settings`, `hotkey`, `ocr-result`, `tray`) aus und rendert `overlay.png`, `settings-window.png`, `ocr-result.png` sowie `tray-menu.png` unter `test-results`. Die Aufruf- und Startdetails stehen in [KAIROS.md](../../KAIROS.md). Offline-Prüfungen und Offscreen-Vorschauen belegen keine reale Maus-/Tastaturbedienung, Mixed-DPI-Hardware oder einen echten OpenAI-Login.
+
+## Historische Belegarten: Version 0.2.0 vom 18.10.2026
+
+Die folgenden Protokolle halten den damaligen Stand mit sechs Suiten und Werkbank-Handoff fest. Sie sind keine Beschreibung der aktuellen Oberfläche oder des heutigen Prüfregisters.
 
 Root hat den integrierten Stand am 18.10.2026 mit SDK 10.0.401 gebaut: **0 Warnungen, 0 Fehler; sechs Suiten bestanden**, einschließlich `OverlaySelfChecks` und der Shell-Handoff-Prüfungen. Die Pixelgegenproben vergleichen den direkt gerenderten Crop mit den entsprechenden Pixeln des vollständigen Editors. Sie prüfen alle acht Rahmengriffe, Vergrößerung über den ersten Ausschnitt hinaus, Objektidentität trotz zeitweiliger Ausblendung, Move/Resize, Text-Reedition, Stiländerungen und Undo/Redo. Handoff-Prüfungen bestätigen dieselbe Editorinstanz und denselben Crop sowie den Erhalt des bisherigen Dokuments bei Copy/Save/Cancel.
 
@@ -31,7 +37,7 @@ Root hat den integrierten Stand am 18.10.2026 mit SDK 10.0.401 gebaut: **0 Warnu
 
 Die physische Computer-Use-Steuerung wurde durch Esc beendet und wird in diesem laufenden Turn nicht erneut benutzt. Die obige vollständige reale Maus-/Tastaturfolge gilt deshalb bis zu einer tatsächlichen Ausführung als **offen**, auch wenn Offline-Prüfungen und Vorschau grün sind. Mixed-DPI und echte OpenAI-OCR bleiben separate Laufzeitprüfungen.
 
-## Ergänzung aus dem Opus-Review
+### Historische Ergänzung aus dem Opus-Review
 
 Der [Opus/Ponytail-Gegencheck](../plans/2026-10-18-opus-overlay-review.md) bestätigte die Koordinaten-, Objekt-/History- und Routingstruktur. Er fand jedoch den möglichen Verlust der neuen Aufnahme bei abgelehnter Handoff-Rückfrage sowie zwei kleinere Grenzfälle bei Werkbank-Eingabegrenzen und Escape während einer Geste. Die [Root-Entscheidung für diese drei Korrekturen](../plans/2026-10-18-overlay-review-fixes.md) wurde in Code-Commit `67711de` umgesetzt und anschließend von Root geprüft.
 

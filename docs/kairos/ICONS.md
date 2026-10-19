@@ -48,17 +48,19 @@ Ausgaben:
 
 Der Renderer prüft alle Vertragsschlüssel, Geometrie- und Strichgrenzen, Zeichenflächen, ICO-Verzeichnis, PNG-Signatur und die WPF-Dekodierung sämtlicher acht Frames. Er prüft außerdem 35 % Disabled-Opacity, den RadioButton-Checked-Stil und den weißen Swatch-Ring. Ausgabe bei Erfolg endet mit PASS-Zeilen und den beiden Dateipfaden.
 
-In diesem isolierten Worktree fehlt der ignorierte SDK-Hinweis des Haupt-Repositories. Für den Build wurde die **bereits vorhandene** private SDK-Kopie verwendet, ohne Installation:
+### Historischer Buildlauf vom 18.10.2026
+
+Im damaligen isolierten Worktree fehlte der ignorierte SDK-Hinweis des Haupt-Repositories. Für diesen Build wurde die **bereits vorhandene** private SDK-Kopie verwendet, ohne Installation:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -BuildOnly -DotnetPath 'C:/Users/Axel_desktop/.t3/projects/clockify/.dotnet/dotnet.exe'
 ```
 
-Ergebnis: SDK 10.0.401; 0 Warnungen, 0 Fehler; sechs Offline-Prüfungen (`capture`, `editor`, `overlay`, `openai`, `shell`, `handoff`) bestanden. Live-Aufnahme, Hardware-DPI und echte Tastatur-/Tray-Interaktion sind damit nicht nachgewiesen.
+Ergebnis dieses historischen Laufs: SDK 10.0.401; 0 Warnungen, 0 Fehler; sechs Offline-Prüfungen (`capture`, `editor`, `overlay`, `openai`, `shell`, `handoff`) bestanden. Der aktuelle Build findet den gemeinsamen privaten SDK-Hinweis selbst und führt neun Suiten aus; siehe [KAIROS.md](../../KAIROS.md). Live-Aufnahme, Hardware-DPI und echte Tastatur-/Tray-Interaktion sind damit nicht nachgewiesen.
 
 ## Visuelle Prüfung und Grenzen
 
-Aktuellen Kontaktbogen mit allen 27 Glyphen selbst in Originalauflösung geöffnet. Pin und Download sind bei 16/24/32 px auf beiden Glas-Fixtures erkennbar; Kopf, Schulter und Nadel beziehungsweise Pfeil und Ablage bleiben unterscheidbar. Der Renderer besteht seine Vertrags-, Bounds-, ICO- und Style-Prüfungen mit 27 Glyphen. Die Abnahme-Kopie liegt lokal als `test-results/icons-preview-pin.png`; der bisher eingecheckte Kontaktbogen bleibt im Commit unverändert und kann mit dem Skript neu erzeugt werden.
+Bei der Icon-Abnahme vom 19.10.2026 wurde der Kontaktbogen mit allen 27 Glyphen in Originalauflösung geöffnet. Pin und Download waren bei 16/24/32 px auf beiden Glas-Fixtures erkennbar; Kopf, Schulter und Nadel beziehungsweise Pfeil und Ablage blieben unterscheidbar. Der Renderer bestand seine Vertrags-, Bounds-, ICO- und Style-Prüfungen mit 27 Glyphen. Kontaktbogen und Abnahme-Kopien sind generierte lokale Ausgaben im ignorierten `test-results/`; `scripts/render-icons.ps1` erzeugt den aktuellen Kontaktbogen neu. Der alte getrackte Kontaktbogen mit 25 Glyphen wurde aus dem Index entfernt. Das für den Build benötigte `src/KairosCapture/KairosCapture.ico` bleibt versioniert.
 
 Die unabhängige Gegenprüfung des bisherigen Bestands bestätigt dessen Glyphen auch bei 16 px als unterscheidbar und den Kontrast auf beiden Fixtures. Kleine verbleibende Schwächen: Capture/OCR und Pen/Highlight besitzen bei 16 px nur kleine Unterscheidungsmerkmale; OCR, Settings, History und Keyboard haben dort die dichtesten Details. Bei 24/32 px ist die Binnenzeichnung klarer. Der Goldpunkt des App-Icons bleibt bei 16/20 px sichtbar, seine goldene Farbe und Materialtiefe werden erst in größeren Größen deutlich. Die Flächen sind zugunsten des Kontrasts relativ deckend. Nach der Gegenprüfung wurde ausschließlich die zusätzliche Hauptaktionsfüllung für ihren Hover-Textkontrast abgedunkelt.
 

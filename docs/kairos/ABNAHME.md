@@ -1,4 +1,6 @@
-# Kairos Capture: Bau und Abnahme
+# Historische Bau- und Abnahmeprotokolle: Version 0.2.0
+
+> Archivstand vom 18.10.2026. Die Werkbank, sechs Prüfsuiten, `main-window.png` und die unten genannten Veröffentlichungspfade beschreiben ausschließlich Version 0.2.0. Aktuelle Start- und Buildhinweise stehen in [KAIROS.md](../../KAIROS.md), die Bedienfolge ab Version 0.4.0 in [OVERLAY-ABNAHME.md](OVERLAY-ABNAHME.md). Die damaligen Ergebnisse und offenen Hardwareprüfungen bleiben als Verlauf erhalten.
 
 Stand 18.10.2026, Version 0.2.0. **Der korrigierte Overlay-Kern ist implementiert, integriert und von Root offline geprüft.** Der erste Release verfehlte den Produktkern durch den automatischen Wechsel ins Hauptfenster. Die [Korrektur](../plans/2026-10-18-live-overlay-correction.md) hält die Bearbeitung im offenen Aufnahme-Overlay und erhält nachträgliche Rahmenänderungen sowie einzelne Markierungsobjekte. Praktische Windows-Bedienung, Mixed-DPI und echter OpenAI-Zugriff bleiben offen.
 
