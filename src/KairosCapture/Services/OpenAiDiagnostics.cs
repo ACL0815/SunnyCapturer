@@ -109,7 +109,10 @@ internal static class OpenAiDiagnostics
         return context + (Classify(ex) switch
         {
             OpenAiFailure.Dns => "Die OpenAI-Adresse konnte nicht aufgelöst werden. DNS und Internetverbindung prüfen und erneut versuchen.",
-            OpenAiFailure.Connect when IsOutboundBlocked(ex) => "Kairos darf keine Internetverbindung aufbauen. Bitte KairosCapture.exe in der Firewall für ausgehende Verbindungen freigeben (z. B. Windows Firewall Control).",
+            // Firewall rules are per path; name the app host even when the process runs under dotnet.exe.
+            OpenAiFailure.Connect when IsOutboundBlocked(ex) => "Kairos darf keine Internetverbindung aufbauen. Bitte „" +
+                System.IO.Path.Combine(AppContext.BaseDirectory, "KairosCapture.exe") +
+                "“ in der Firewall für ausgehende Verbindungen freigeben (z. B. Windows Firewall Control).",
             OpenAiFailure.Connect => "Die Verbindung zu OpenAI konnte nicht aufgebaut werden. Netzwerk, Firewall und Proxy-Einstellungen prüfen.",
             OpenAiFailure.Tls => "Die verschlüsselte Verbindung zu OpenAI konnte nicht hergestellt werden. Systemzeit, Zertifikate und HTTPS-Filter prüfen.",
             OpenAiFailure.Proxy => "Der konfigurierte Proxy konnte die Verbindung zu OpenAI nicht herstellen. Proxy-Einstellungen prüfen.",

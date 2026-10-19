@@ -53,6 +53,7 @@ internal sealed class RegionOverlay : Window
     internal Exception? Failure { get; private set; }
     internal CaptureSessionResult Result { get; private set; } = new(CaptureCompletion.Cancelled);
     internal bool IsClosed => _closed;
+    internal bool IsFrameGestureActive => _gesture != FrameGesture.None;
     internal bool ToolbarVisible => _toolbar.Visibility == Visibility.Visible;
     internal FrameworkElement PreviewRoot => _scene;
     internal FrameworkElement Toolbar => _toolbar;
@@ -358,11 +359,11 @@ internal sealed class RegionOverlay : Window
     internal bool HandlePointerDown(Point point, int clickCount = 1, bool move = false)
     {
         if (_closed || _outputPending) return true;
-        if (clickCount >= 2)
+        // Only a double-click on plain selection content finishes; handles, Space-move and empty space keep their single-click gestures.
+        if (clickCount >= 2 && !move && _editing && Selection.Width >= 2 && Selection.Height >= 2 &&
+            new Rect(Selection.X, Selection.Y, Selection.Width, Selection.Height).Contains(point) &&
+            HitFrame(Clamp(point)) == FrameHandle.None && !Editor.HasAnnotationAt(point))
         {
-            if (!_editing || Selection.Width < 2 || Selection.Height < 2 ||
-                !new Rect(Selection.X, Selection.Y, Selection.Width, Selection.Height).Contains(point)) return true;
-            if (Editor.HasAnnotationAt(point)) return false;
             _ = CompleteAsync(CaptureCompletion.Copied);
             return true;
         }

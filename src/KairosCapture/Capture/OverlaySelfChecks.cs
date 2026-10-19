@@ -95,9 +95,29 @@ public static class OverlaySelfChecks
             failed.ToolbarBounds.Top == crop.Y + crop.Height + 12, "Failed copy must leave a usable toolbar and the original selection.");
         failed.Cancel();
         var initial = Create(background);
-        Require(initial.HandlePointerDown(empty, 2) && initial.Selection.IsEmpty && !initial.ToolbarVisible && !initial.IsClosed,
-            "Double-click without a selection must not begin a zero-sized frame.");
+        Require(initial.HandlePointerDown(empty, 2) && initial.IsFrameGestureActive && !initial.IsClosed,
+            "A fast second press without a selection must still start a new frame.");
+        initial.UpdateFrameGesture(new Point(empty.X + 80, empty.Y + 60));
+        initial.EndFrameGesture();
+        Require(initial.Selection == new Int32Rect((int)empty.X, (int)empty.Y, 80, 60) && !initial.IsClosed,
+            "A frame dragged from a double-click press must become the selection.");
         initial.Cancel();
+        foreach (bool spaceMove in new[] { false, true })
+        {
+            var handles = new RegionOverlay(background, new DrawingRectangle(0, 0, background.PixelWidth, background.PixelHeight),
+                copyImage: _ => throw new InvalidOperationException("Handle and Space double-clicks must not copy."));
+            handles.SetRegion(crop);
+            Point press = spaceMove ? empty : new Point(crop.X + crop.Width, crop.Y + crop.Height);
+            Require(handles.HandlePointerDown(press, 2, spaceMove) && handles.IsFrameGestureActive && !handles.IsClosed,
+                spaceMove ? "Space double-click must keep moving the frame." : "Double-click on a frame handle must keep resizing.");
+            handles.UpdateFrameGesture(new Point(press.X + 20, press.Y + 10));
+            handles.EndFrameGesture();
+            Require(!handles.IsClosed && handles.Selection == (spaceMove
+                ? new Int32Rect(crop.X + 20, crop.Y + 10, crop.Width, crop.Height)
+                : new Int32Rect(crop.X, crop.Y, crop.Width + 20, crop.Height + 10)),
+                "Frame gestures started by a double-click must apply like single-click gestures.");
+            handles.Cancel();
+        }
     }
 
     private static void PointerClick(RegionOverlay overlay, Point point, int clickCount)
@@ -146,7 +166,7 @@ public static class OverlaySelfChecks
                     "Blur backdrop, source crop and rounded clip must follow the measured toolbar.");
             }
             Rect bounds = overlay.ToolbarBounds;
-            Require(overlay.HandlePointerDown(new Point(50, 50), 2) && !overlay.IsClosed && overlay.Selection == crop &&
+            Require(!overlay.HandlePointerDown(new Point(50, 50), 2) && !overlay.IsClosed && overlay.Selection == crop &&
                 overlay.ToolbarBounds == bounds && !overlay.Editor.HasActiveGesture && !overlay.Editor.IsEditingText,
                 "Outside double-click must leave the selection and layout untouched.");
             RemeasureToolbar(overlay);

@@ -103,6 +103,11 @@ internal static class AppDiagnostics
     private static IReadOnlyList<string> CheckShell()
     {
         Require(Thread.CurrentThread.GetApartmentState() == ApartmentState.STA, "Shell checks require STA.");
+        Require(App.IsStableInstall(@"C:\x\artifacts\KairosCapture-win-x64\KairosCapture.exe") &&
+            !App.IsStableInstall(@"C:\x\artifacts\KairosCapture-0.4.0-win-x64\KairosCapture.exe") &&
+            !App.IsStableInstall(@"C:\x\bin\Release\net10.0-windows\win-x64\KairosCapture.exe") &&
+            !App.IsStableInstall(@"C:\Program Files\dotnet\dotnet.exe") && !App.IsStableInstall(null),
+            "Only the stable publish folder may take over autostart.");
         var window = new MainWindow(diagnosticsMode: true);
         try
         {

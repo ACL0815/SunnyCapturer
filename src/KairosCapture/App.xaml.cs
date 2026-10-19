@@ -79,13 +79,19 @@ public partial class App : Application
         {
             using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true);
             // An absent value means autostart is off. Never enable it during a path migration.
-            if (key?.GetValue("KairosCapture") is not string current || string.IsNullOrEmpty(Environment.ProcessPath)) return;
+            if (key?.GetValue("KairosCapture") is not string current || !IsStableInstall(Environment.ProcessPath)) return;
             string command = "\"" + Environment.ProcessPath + "\"";
             if (!string.Equals(current, command, StringComparison.OrdinalIgnoreCase))
                 key.SetValue("KairosCapture", command, Microsoft.Win32.RegistryValueKind.String);
         }
         catch (Exception ex) { LogException("Autostart path update", ex); }
     }
+
+    // Debug builds, worktrees and old versioned folders must not take over autostart.
+    internal static bool IsStableInstall(string? processPath) =>
+        processPath is not null &&
+        string.Equals(Path.GetFileName(processPath), "KairosCapture.exe", StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(Path.GetFileName(Path.GetDirectoryName(processPath)), "KairosCapture-win-x64", StringComparison.OrdinalIgnoreCase);
 
     private void InitializeTray(MainWindow window)
     {
