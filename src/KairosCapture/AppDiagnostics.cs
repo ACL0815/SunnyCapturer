@@ -35,6 +35,26 @@ internal static class AppDiagnostics
 
     internal static int Run(string[] args)
     {
+        if (args.Length == 2 && args[0] == "--openai-ocr-probe" && !string.IsNullOrWhiteSpace(args[1]))
+        {
+            string path = Path.GetFullPath(args[1]);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            AppSettings settings = AppSettings.Load();
+            var visual = new DrawingVisual();
+            using (DrawingContext drawing = visual.RenderOpen())
+            {
+                drawing.DrawRectangle(Brushes.White, null, new Rect(0, 0, 640, 120));
+                drawing.DrawText(new FormattedText(OpenAiOcrTrace.SyntheticText, CultureInfo.InvariantCulture,
+                    FlowDirection.LeftToRight, new Typeface("Segoe UI"), 40, Brushes.Black, 1), new Point(24, 30));
+            }
+            var bitmap = new RenderTargetBitmap(640, 120, 96, 96, PixelFormats.Pbgra32);
+            bitmap.Render(visual);
+            byte[] png = ImageOutput.EncodePng(bitmap);
+            OpenAiProbeResult probe = Task.Run(() => OpenAiService.ProbeOcrAsync(png, settings.AccountKey, settings.Model)).GetAwaiter().GetResult();
+            File.WriteAllLines(path, probe.Lines);
+            foreach (string line in probe.Lines) Console.WriteLine(line);
+            return probe.Passed ? 0 : 1;
+        }
         if (args.Length is 1 or 2 && args[0] == "--openai-probe")
         {
             OpenAiProbeResult probe = Task.Run(OpenAiService.ProbeAsync).GetAwaiter().GetResult();

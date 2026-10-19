@@ -27,7 +27,7 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-        _diagnostics = e.Args.Length > 0 && (e.Args[0] is "--self-test" or "--self-check" or "--openai-probe" || e.Args[0].StartsWith("--render-", StringComparison.Ordinal));
+        _diagnostics = e.Args.Length > 0 && (e.Args[0] is "--self-test" or "--self-check" or "--openai-probe" or "--openai-ocr-probe" || e.Args[0].StartsWith("--render-", StringComparison.Ordinal));
         DispatcherUnhandledException += OnDispatcherException;
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
         {

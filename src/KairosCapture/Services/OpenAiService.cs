@@ -294,7 +294,11 @@ public sealed partial class OpenAiService : IDisposable
         catch (Exception ex) { OpenAiDiagnostics.Mark(ex, OpenAiStep.Models); throw; }
     }
 
-    public async Task<string> ExtractTextAsync(byte[] png, string model, IProgress<string>? progress, CancellationToken ct, string? targetLanguage = null)
+    public Task<string> ExtractTextAsync(byte[] png, string model, IProgress<string>? progress, CancellationToken ct, string? targetLanguage = null) =>
+        ExtractTextCoreAsync(png, model, progress, ct, targetLanguage);
+
+    private async Task<string> ExtractTextCoreAsync(byte[] png, string model, IProgress<string>? progress, CancellationToken ct,
+        string? targetLanguage, OpenAiOcrTrace? trace = null)
     {
         string instruction = OpenAiOcr.Instruction(targetLanguage);
         ArgumentNullException.ThrowIfNull(png);
@@ -325,10 +329,17 @@ public sealed partial class OpenAiService : IDisposable
                 } } }
             }), Encoding.UTF8, "application/json");
             using HttpResponseMessage response = await SendAsync(request, operation.Token).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode) throw await ErrorAsync(response, operation.Token).ConfigureAwait(false);
+            byte[]? captured = null;
+            if (trace is not null)
+            {
+                trace.Response(response);
+                captured = await ReadBodyAsync(response, operation.Token).ConfigureAwait(false);
+                trace.Body(captured, response.Content.Headers.ContentType?.MediaType);
+            }
+            if (!response.IsSuccessStatusCode) throw await ErrorAsync(response, operation.Token, captured).ConfigureAwait(false);
             if (response.Content.Headers.ContentType?.MediaType != "text/event-stream")
-                throw new InvalidOperationException("OpenAI hat keinen OCR-Ereignisstream geliefert.");
-            await using Stream stream = await response.Content.ReadAsStreamAsync(operation.Token).ConfigureAwait(false);
+                throw new OpenAiOcrProtocolException(OpenAiOcrReason.ContentType);
+            await using Stream stream = captured is null ? await response.Content.ReadAsStreamAsync(operation.Token).ConfigureAwait(false) : new MemoryStream(captured);
             return await OpenAiProtocol.ReadSseAsync(stream, progress, operation.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested && !_lifetime.IsCancellationRequested && !session.IsCancellationRequested)
@@ -566,11 +577,11 @@ public sealed partial class OpenAiService : IDisposable
         }
     }
 
-    private static async Task<OpenAiRequestException> ErrorAsync(HttpResponseMessage response, CancellationToken ct)
+    private static async Task<OpenAiRequestException> ErrorAsync(HttpResponseMessage response, CancellationToken ct, byte[]? captured = null)
     {
         string? code = null, parameter = null;
         string shape = "leer";
-        byte[] body = await ReadBodyAsync(response, ct).ConfigureAwait(false);
+        byte[] body = captured ?? await ReadBodyAsync(response, ct).ConfigureAwait(false);
         if (body.Length > 0)
         {
             try
