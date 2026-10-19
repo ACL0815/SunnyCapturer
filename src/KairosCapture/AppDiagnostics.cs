@@ -36,16 +36,11 @@ internal static class AppDiagnostics
     internal static int Run(string[] args)
     {
         if (args.Length != 2 || string.IsNullOrWhiteSpace(args[1])) return 2;
-        if (args[0] == "--render-preview")
-        {
-            RenderPreview(Path.GetFullPath(args[1]));
-            return 0;
-        }
-        if (args[0] == "--render-overlay-preview")
-        {
-            RenderOverlayPreview(Path.GetFullPath(args[1]));
-            return 0;
-        }
+        string previewPath = Path.GetFullPath(args[1]);
+        if (args[0] is "--render-preview" or "--render-settings-preview") { RenderPreview(previewPath); return 0; }
+        if (args[0] == "--render-overlay-preview") { RenderOverlayPreview(previewPath); return 0; }
+        if (args[0] == "--render-ocr-preview") { RenderOcrPreview(previewPath); return 0; }
+        if (args[0] == "--render-tray-preview") { RenderTrayPreview(previewPath); return 0; }
         if (args[0] is not ("--self-test" or "--self-check")) return 2;
         string directory = Path.GetFullPath(args[1]);
         Directory.CreateDirectory(directory);
@@ -61,7 +56,10 @@ internal static class AppDiagnostics
             RunCheck(results, "openai", () => run.Invoke(null, null) is IReadOnlyList<string> errors ? errors :
                 new[] { "OpenAiSelfChecks.Run must return IReadOnlyList<string> (errors only)." });
         RunCheck(results, "shell", CheckShell);
-        RunCheck(results, "handoff", CheckHandoff);
+        RunCheck(results, "settings", CheckSettings);
+        RunCheck(results, "hotkey", CheckHotkey);
+        RunCheck(results, "ocr-result", CheckOcrResult);
+        RunCheck(results, "tray", CheckTray);
         bool passed = results.All(result => result.Status == "passed");
         WriteJson(Path.Combine(directory, "self-test.json"), new
         {
@@ -94,205 +92,109 @@ internal static class AppDiagnostics
 
     private static IReadOnlyList<string> CheckShell()
     {
-        if (Thread.CurrentThread.GetApartmentState() != ApartmentState.STA) return new[] { "Shell checks require STA." };
+        Require(Thread.CurrentThread.GetApartmentState() == ApartmentState.STA, "Shell checks require STA.");
         var window = new MainWindow(diagnosticsMode: true);
         try
         {
-            window.LoadImage(CreateDemoBitmap(), "Beispiel.png");
-            FrameworkElement content = LayoutPreview(window, 1440, 820);
-            if (content.ActualWidth != 1440 || content.ActualHeight != 820) return new[] { "The WPF shell did not arrange at the preview dimensions." };
-            var errors = new List<string>();
-            Color light = ((SolidColorBrush)window.FindResource("TextBrush")).Color;
-            foreach (string name in new[] { "FileNameText", "AccountStatus" })
-                if (window.FindName(name) is not TextBlock { Foreground: SolidColorBrush brush } || brush.Color != light)
-                    errors.Add(name + " must inherit the light content foreground.");
-            var login = (Button)window.FindName("LoginButton");
-            TextBlock? loginText = Descendants<TextBlock>(login).FirstOrDefault(t => t.Text == "Weiter mit ChatGPT");
-            if (loginText?.Foreground is not SolidColorBrush loginBrush || loginBrush.Color != Color.FromRgb(16, 16, 16))
-                errors.Add("ChatGPT button content must inherit its own dark foreground.");
-            var thickness = (ComboBox)window.FindName("ThicknessPicker");
-            TextBlock? arrow = Descendants<TextBlock>(thickness).FirstOrDefault(t => t.Text == "\uE70D");
-            if (arrow?.Foreground is not SolidColorBrush arrowBrush || arrowBrush.Color != light)
-                errors.Add("ComboBox arrow must inherit the ComboBox foreground.");
-            // Check narrow desktop layout as well; this never creates a visible window or synthesizes input.
-            LayoutPreview(window, 1000, 610);
-            return errors;
+            FrameworkElement content = LayoutPreview(window, 560, 660);
+            Require(content.ActualWidth == 560 && content.ActualHeight == 660, "Settings must arrange at compact dimensions.");
+            foreach (string name in new[] { "HotkeyBox", "FolderText", "AskSave", "SaveCopy", "AccountPicker", "ModelPicker", "AutoCopy", "StartupCheck" })
+                Require(window.FindName(name) is FrameworkElement, "Settings field missing: " + name);
+            Require(window.FindName("CropCanvas") == null && !window.AllowDrop, "Settings must not host a workbench or image drop target.");
+            Require(((TextBox)window.FindName("HotkeyBox")).Text == "Strg+Alt+A", "Default shortcut must be visible.");
+            Require(((CheckBox)window.FindName("AutoCopy")).IsChecked == true && ((CheckBox)window.FindName("AskSave")).IsChecked != true,
+                "Settings UI must reflect robust defaults.");
+            LayoutPreview(window, 500, 550);
+            Require(!window.IsVisible && new WindowInteropHelper(window).Handle == IntPtr.Zero, "Shell checks must stay offscreen.");
+            return Array.Empty<string>();
         }
         finally { window.Close(); }
     }
 
-    private static IEnumerable<T> Descendants<T>(DependencyObject parent) where T : DependencyObject
+    private static IReadOnlyList<string> CheckSettings()
     {
-        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        string directory = Path.Combine(Path.GetTempPath(), "kairos-settings-check-" + Guid.NewGuid().ToString("N"));
+        string file = Path.Combine(directory, "settings.json");
+        try
         {
-            DependencyObject child = VisualTreeHelper.GetChild(parent, i);
-            if (child is T match) yield return match;
-            foreach (T descendant in Descendants<T>(child)) yield return descendant;
+            var defaults = AppSettings.Load(file);
+            Require(defaults.Hotkey == "Strg+Alt+A" && defaults.AutoCopyOcr && !defaults.AskBeforeSaving && !defaults.SaveOnCopy &&
+                defaults.SaveFolder == AppSettings.DefaultSaveFolder, "Missing settings must produce expected defaults.");
+            var settings = new AppSettings { SaveFolder = Path.Combine(directory, "Bilder"), Hotkey = "Strg+Umschalt+F8", AskBeforeSaving = true,
+                SaveOnCopy = true, AutoCopyOcr = false, Model = "test-model", AccountKey = "test-account", WelcomeShown = true, RecentFiles = new[] { "test.png" } };
+            settings.Save(file); var loaded = AppSettings.Load(file);
+            Require(loaded.SaveFolder == settings.SaveFolder && loaded.Hotkey == settings.Hotkey && loaded.AskBeforeSaving && loaded.SaveOnCopy && !loaded.AutoCopyOcr &&
+                loaded.Model == "test-model" && loaded.AccountKey == "test-account" && loaded.WelcomeShown && loaded.RecentFiles.SequenceEqual(settings.RecentFiles), "Settings must roundtrip every preference.");
+            settings.Save(file);
+            Require(Directory.GetFiles(directory, "*.tmp").Length == 0, "Atomic settings writes must leave no temporary files.");
+            foreach (string corrupt in new[] { "{broken", "null", "[]", "{\"Hotkey\":null,\"SaveFolder\":null,\"Model\":null,\"RecentFiles\":null}" })
+            {
+                File.WriteAllText(file, corrupt); var recovered = AppSettings.Load(file);
+                Require(recovered.Hotkey == "Strg+Alt+A" && recovered.AutoCopyOcr && recovered.SaveFolder == AppSettings.DefaultSaveFolder,
+                    "Broken or partial settings must fall back safely.");
+            }
+            BitmapSource image = BitmapSource.Create(2, 2, 96, 96, PixelFormats.Bgra32, null, new byte[16], 8);
+            var now = new DateTime(2026, 10, 19, 14, 5, 9);
+            string saved = ImageOutput.SaveDirect(image, settings.SaveFolder, now);
+            Require(saved == Path.Combine(settings.SaveFolder, "Kairos 2026-10-19 140509.png") && File.Exists(saved), "Direct save must create configured directory and exact filename.");
+            string second = ImageOutput.SaveDirect(image, settings.SaveFolder, now);
+            Require(second != saved && File.Exists(second) && ImageOutput.Load(saved).PixelWidth == 2, "Rapid saves must preserve both images.");
+            return Array.Empty<string>();
         }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
     }
 
-    private static IReadOnlyList<string> CheckHandoff()
+    private static IReadOnlyList<string> CheckHotkey()
     {
-        Require(Thread.CurrentThread.GetApartmentState() == ApartmentState.STA, "Handoff checks require STA.");
-        const int width = 160, height = 120;
-        byte[] pixels = new byte[width * height * 4];
-        for (int y = 0; y < height; y++)
-            for (int x = 0; x < width; x++)
-            {
-                int offset = (y * width + x) * 4;
-                pixels[offset] = (byte)x;
-                pixels[offset + 1] = (byte)y;
-                pixels[offset + 2] = (byte)(x + y);
-                pixels[offset + 3] = 255;
-            }
-        BitmapSource source = BitmapSource.Create(width, height, 144, 192, PixelFormats.Bgra32, null, pixels, width * 4);
-        source.Freeze();
-        Int32Rect region = new(30, 20, 100, 80);
-        var editor = new AnnotationCanvas(source) { Stroke = new SolidColorBrush(Color.FromRgb(211, 181, 118)), Thickness = 8 };
-        byte[] original = ImageOutput.EncodePng(editor.Flatten(region));
-        Draw(editor, EditorTool.Rectangle, new Point(40, 30), new Point(90, 75));
-        byte[] first = ImageOutput.EncodePng(editor.Flatten(region));
-        Draw(editor, EditorTool.Arrow, new Point(60, 55), new Point(100, 90));
-        byte[] second = ImageOutput.EncodePng(editor.Flatten(region));
-        Require(!original.SequenceEqual(first) && !first.SequenceEqual(second), "The handoff fixture must contain two distinct edits.");
-        editor.Undo();
-        Require(editor.CanUndo && editor.CanRedo, "The handoff fixture must contain both undo and redo history.");
-        var previousHost = new Canvas();
-        previousHost.Children.Add(editor);
-        previousHost.Children.Remove(editor);
-        var window = new MainWindow(diagnosticsMode: true);
-        try
+        foreach (string text in new[] { "Ctrl+Alt+A", "Strg+Alt+A", "Control+Shift+F12", "Win+7", "Alt+F24" })
         {
-            CompleteOffline(window.AcceptCaptureResultAsync(new CaptureSessionResult(CaptureCompletion.Workbench, editor, region)));
-            var crop = (Canvas)window.FindName("CropCanvas");
-            Require(crop.Children.Count == 1 && ReferenceEquals(crop.Children[0], editor), "Workbench handoff must adopt the exact live editor instance.");
-            Require(editor.Width == width && editor.Height == height, "Handoff must keep the full physical screenshot coordinate system.");
-            Require(crop.ClipToBounds && crop.Width == region.Width && crop.Height == region.Height &&
-                Canvas.GetLeft(editor) == -region.X && Canvas.GetTop(editor) == -region.Y,
-                "The crop host must clip to the selected physical region and offset the full editor.");
-            Require(editor.Tool == EditorTool.Arrow && editor.Thickness == 8 &&
-                editor.Stroke is SolidColorBrush stroke && stroke.Color == Color.FromRgb(211, 181, 118),
-                "Handoff must retain the editor tool and drawing style.");
-            Require(editor.CanUndo && editor.CanRedo && ImageOutput.EncodePng(editor.Flatten(region)).SequenceEqual(first),
-                "Adopting the editor must preserve annotations and both history stacks.");
-            Draw(editor, EditorTool.Rectangle, new Point(2, 2), new Point(15, 15));
-            Require(editor.CanUndo && editor.CanRedo && ImageOutput.EncodePng(editor.Flatten(region)).SequenceEqual(first),
-                "Workbench input outside the crop must not change pixels or either history stack.");
-            editor.Tool = EditorTool.Arrow;
-            editor.Redo();
-            Require(ImageOutput.EncodePng(editor.Flatten(region)).SequenceEqual(second), "Redo from the overlay must work in the workbench.");
-            editor.Undo();
-            editor.Undo();
-            Require(!editor.CanUndo && ImageOutput.EncodePng(editor.Flatten(region)).SequenceEqual(original),
-                "Undo across the handoff must restore the original crop without rasterized annotations.");
-            editor.Redo();
-            editor.Redo();
-            Require(ImageOutput.EncodePng(editor.Flatten(region)).SequenceEqual(second), "History must round-trip across handoff.");
-            LayoutPreview(window, 1440, 820);
-            var viewbox = (Viewbox)window.FindName("ImageViewbox");
-            Require(Math.Abs(viewbox.Width / region.Width - viewbox.Height / region.Height) < 0.0001,
-                "Workbench zoom must use the crop aspect ratio, not the full screenshot dimensions.");
-            Require(((TextBlock)window.FindName("DimensionsText")).Text ==
-                string.Format(CultureInfo.CurrentCulture, "{0:N0} × {1:N0} px", region.Width, region.Height),
-                "Document dimensions must describe the selected region.");
-            var rendered = new RenderTargetBitmap(region.Width, region.Height, 96, 96, PixelFormats.Pbgra32);
-            rendered.Render(crop);
-            Require(PixelBytes(rendered).SequenceEqual(PixelBytes(editor.Flatten(region))),
-                "The offscreen crop host must display exactly the exported region pixels.");
-
-            var ocrText = (TextBox)window.FindName("OcrText");
-            ocrText.Text = "Vorhandener Werkbanktext";
-            string title = window.Title;
-            foreach (CaptureCompletion completion in new[] { CaptureCompletion.Cancelled, CaptureCompletion.Copied, CaptureCompletion.Saved })
-            {
-                CompleteOffline(window.AcceptCaptureResultAsync(new CaptureSessionResult(completion)));
-                Require(ReferenceEquals(crop.Children[0], editor) && window.Title == title &&
-                    ocrText.Text == "Vorhandener Werkbanktext" && editor.CanUndo &&
-                    ImageOutput.EncodePng(editor.Flatten(region)).SequenceEqual(second) && window.HasUnsavedDocumentChanges(),
-                    completion + " must leave the existing unsaved workbench document, text and history intact.");
-            }
-            Require(!window.IsVisible && new WindowInteropHelper(window).Handle == IntPtr.Zero,
-                "Offline handoff checks must never show a window or create a native window handle.");
-
-            var approved = new RegionOverlay(source, new System.Drawing.Rectangle(0, 0, width, height),
-                confirmHandoff: owner => Task.FromResult(owner is RegionOverlay));
-            approved.SetRegion(region);
-            Draw(approved.Editor, EditorTool.Redact, new Point(50, 40), new Point(80, 70));
-            byte[] approvedPixels = ImageOutput.EncodePng(approved.Editor.Flatten(region));
-            Require(approved.CompleteAsync(CaptureCompletion.Workbench).GetAwaiter().GetResult() && approved.Result.ReplacementConfirmed,
-                "A successful pre-detach callback must mark the result as already approved.");
-            // The old workbench is unsaved: a second prompt would throw in diagnostics mode.
-            CompleteOffline(window.AcceptCaptureResultAsync(approved.Result));
-            Require(ReferenceEquals(crop.Children[0], approved.Editor) && approved.Editor.CanUndo &&
-                ImageOutput.EncodePng(approved.Editor.Flatten(region)).SequenceEqual(approvedPixels),
-                "The shell must adopt an approved editor without asking again or changing its pixels/history.");
-            approved.Editor.Undo();
-            Require(!approved.Editor.CanUndo, "Adoption and setting input bounds must add no history entries.");
+            Require(HotkeyGesture.TryParse(text, out var gesture) && gesture.VirtualKey > 0 && (gesture.NativeModifiers & 0x4000) != 0, "Valid shortcut rejected: " + text);
+            Require(HotkeyGesture.TryParse(gesture.ToString(), out var reparsed) && gesture == reparsed, "Hotkey format must roundtrip.");
         }
-        finally { window.Close(); }
-
-        // Hashes must track the selected output. An edit outside the region must not dirty that output.
-        var savedWindow = new MainWindow(diagnosticsMode: true);
-        try
-        {
-            var savedEditor = new AnnotationCanvas(source) { Stroke = Brushes.Black, Thickness = 2 };
-            Draw(savedEditor, EditorTool.Rectangle, new Point(2, 2), new Point(15, 15));
-            savedWindow.LoadEditor(savedEditor, region, "Gespeichert.png", unsaved: false);
-            byte[] savedFull = ImageOutput.EncodePng(savedEditor.Flatten());
-            savedEditor.Undo();
-            Require(!savedWindow.HasUnsavedDocumentChanges(), "The saved hash must ignore edits entirely outside the crop.");
-            savedEditor.Redo();
-            Require(!savedWindow.HasUnsavedDocumentChanges() && savedFull.SequenceEqual(ImageOutput.EncodePng(savedEditor.Flatten())),
-                "A pre-existing outside object must retain its exact full-raster redo after setting workbench bounds.");
-            Draw(savedEditor, EditorTool.Rectangle, new Point(60, 40), new Point(80, 70));
-            Require(savedWindow.HasUnsavedDocumentChanges(), "Edits inside the crop must dirty the saved output.");
-            savedEditor.Undo();
-            Require(!savedWindow.HasUnsavedDocumentChanges(), "Undo must compare against the saved cropped output.");
-            savedWindow.LoadImage(source, "Vollbild.png");
-            var fullCrop = (Canvas)savedWindow.FindName("CropCanvas");
-            Require(fullCrop.Width == width && fullCrop.Height == height && fullCrop.Children.Count == 1 &&
-                Canvas.GetLeft(fullCrop.Children[0]) == 0 && Canvas.GetTop(fullCrop.Children[0]) == 0,
-                "LoadImage must use the same host with the full image rectangle.");
-        }
-        finally { savedWindow.Close(); }
-
-        var ocrWindow = new MainWindow(diagnosticsMode: true);
-        try
-        {
-            var ocrEditor = new AnnotationCanvas(source);
-            CompleteOffline(ocrWindow.AcceptCaptureResultAsync(new CaptureSessionResult(CaptureCompletion.Ocr, ocrEditor, region)));
-            Require(ReferenceEquals(((Canvas)ocrWindow.FindName("CropCanvas")).Children[0], ocrEditor) &&
-                ((TextBlock)ocrWindow.FindName("StatusText")).Text.Contains("Weiter mit ChatGPT", StringComparison.Ordinal) &&
-                ((Button)ocrWindow.FindName("LoginButton")).Visibility == Visibility.Visible,
-                "Explicit OCR without an account must retain the editor and invite login in the sidebar.");
-            Require(!ocrWindow.IsVisible && new WindowInteropHelper(ocrWindow).Handle == IntPtr.Zero,
-                "The offline OCR handoff must not show a window or start browser authentication.");
-        }
-        finally { ocrWindow.Close(); }
+        foreach (string text in new[] { "", "A", "Shift+A", "Ctrl+Ctrl+A", "Alt+", "Ctrl+Escape", "Ctrl+None", "Ctrl+12345" })
+            Require(!HotkeyGesture.TryParse(text, out _), "Invalid hotkey accepted: " + text);
         return Array.Empty<string>();
     }
 
-    private static void CompleteOffline(Task<bool> task)
+    private static IReadOnlyList<string> CheckOcrResult()
     {
-        Require(task.IsCompleted, "Offline handoff must not wait for capture, account access or user input.");
-        Require(!task.GetAwaiter().GetResult(), "Offline handoff must not request a live OCR operation.");
+        var settings = new MainWindow(diagnosticsMode: true);
+        var window = new OcrResultWindow(settings, CreateDemoBitmap(), default, default, diagnostics: true);
+        try
+        {
+            Task operation = window.RecognizeAsync();
+            Require(operation.IsCompletedSuccessfully && window.HasImage && window.Status.Contains("ChatGPT", StringComparison.Ordinal), "Missing account must explain next action and retain image without network.");
+            LayoutPreview(window, 440, 350);
+            window.SetPreviewResult();
+            Require(!window.ResultText.IsReadOnly && window.ResultText.AcceptsReturn, "Recognized text must stay editable.");
+            window.ResultText.Text = "Edited locally";
+            Require(window.ResultText.Text == "Edited locally", "Result text must allow local editing.");
+            Require(!window.IsVisible && new WindowInteropHelper(window).Handle == IntPtr.Zero, "OCR checks must not show a native window.");
+        }
+        finally { window.Close(); settings.Close(); }
+        Require(!window.HasImage, "Closing the result must release its image.");
+        return Array.Empty<string>();
     }
 
-    private static void Draw(AnnotationCanvas editor, EditorTool tool, Point start, Point end)
+    private static IReadOnlyList<string> CheckTray()
     {
-        editor.Tool = tool;
-        editor.BeginGesture(start);
-        editor.UpdateGesture(end);
-        editor.EndGesture();
-    }
-
-    private static byte[] PixelBytes(BitmapSource bitmap)
-    {
-        var converted = new FormatConvertedBitmap(bitmap, PixelFormats.Pbgra32, null, 0);
-        int stride = converted.PixelWidth * 4;
-        byte[] bytes = new byte[stride * converted.PixelHeight];
-        converted.CopyPixels(bytes, stride, 0);
-        return bytes;
+        var settings = new MainWindow(diagnosticsMode: true);
+        using var tray = new TrayMenu(settings, _ => throw new InvalidOperationException("Countdown must not start during layout."));
+        try
+        {
+            var entries = tray.Menu.Items.OfType<System.Windows.Forms.ToolStripMenuItem>().ToArray();
+            Require(entries.Length == 9 && entries[0].Text!.StartsWith("Bereich aufnehmen", StringComparison.Ordinal) && entries[1].Text == "Vollbild aufnehmen" &&
+                entries[2].DropDownItems.Count == 3 && entries[3].Text == "Text erkennen…" && entries[4].Text == "Letzte Aufnahme fortsetzen" &&
+                entries[5].Text == "Zuletzt gespeichert" && entries[6].Text!.StartsWith("OCR:", StringComparison.Ordinal) && entries[7].Text == "Einstellungen…" && entries[8].Text == "Beenden", "Tray menu must expose all requested actions in order.");
+            tray.Refresh(false, false); Require(!entries[4].Enabled && entries.Take(4).All(i => i.Enabled), "Resume must be disabled without a session.");
+            tray.Refresh(true, true); Require(entries.Take(5).All(i => !i.Enabled) && entries.Skip(5).All(i => i.Enabled), "Capture entries must disable during active capture.");
+            tray.Refresh(false, true); Require(entries.Take(5).All(i => i.Enabled) && entries.All(i => i.Image != null), "Idle tray must expose resumed session and glyph icons.");
+            using var icon = TrayMenu.RenderGlyph(settings, "Capture", 40);
+            Require(icon.Width == 40 && icon.Height == 40, "Tray glyphs must render at requested DPI resolution.");
+            Require(!tray.Menu.Visible && !settings.IsVisible, "Tray checks must not display menu or settings.");
+            return Array.Empty<string>();
+        }
+        finally { settings.Close(); }
     }
 
     private static void Require(bool condition, string message)
@@ -312,29 +214,47 @@ internal static class AppDiagnostics
 
     internal static void RenderPreview(string path)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var window = new MainWindow(diagnosticsMode: true);
-        try
-        {
-            window.LoadImage(CreateDemoBitmap(), "Beispiel.png");
-            FrameworkElement content = LayoutPreview(window, 1440, 840);
-            var bitmap = new RenderTargetBitmap(1440, 840, 96, 96, PixelFormats.Pbgra32);
-            bitmap.Render(content);
-            File.WriteAllBytes(path, ImageOutput.EncodePng(bitmap));
-            WriteJson(Path.ChangeExtension(path, ".json"), new { schemaVersion = 1, rendered = true,
-                width = bitmap.PixelWidth, height = bitmap.PixelHeight, mode = "WPF MainWindow / synthetic local image / isolated diagnostics" });
-        }
+        try { RenderWindow(window, path, 560, 660); }
         finally { window.Close(); }
     }
-
-    private static FrameworkElement LayoutPreview(MainWindow window, double width, double height)
+    private static void RenderOcrPreview(string path)
+    {
+        var settings = new MainWindow(diagnosticsMode: true);
+        var window = new OcrResultWindow(settings, CreateDemoBitmap(), default, default, diagnostics: true);
+        try { window.SetPreviewResult(); RenderWindow(window, path, 440, 350); }
+        finally { window.Close(); settings.Close(); }
+    }
+    private static void RenderTrayPreview(string path)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var settings = new MainWindow(diagnosticsMode: true);
+        using var tray = new TrayMenu(settings, _ => { });
+        try
+        {
+            tray.Refresh(false, true);
+            tray.Menu.PerformLayout();
+            System.Drawing.Size size = tray.Menu.GetPreferredSize(System.Drawing.Size.Empty);
+            tray.Menu.Size = size;
+            using var bitmap = new System.Drawing.Bitmap(size.Width, size.Height);
+            tray.Menu.DrawToBitmap(bitmap, new System.Drawing.Rectangle(System.Drawing.Point.Empty, size));
+            bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+            WriteJson(Path.ChangeExtension(path, ".json"), new { rendered = true, mode = "WinForms tray menu / offscreen / no NotifyIcon", width = size.Width, height = size.Height });
+        }
+        finally { settings.Close(); }
+    }
+    private static void RenderWindow(Window window, string path, int width, int height)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        FrameworkElement content = LayoutPreview(window, width, height);
+        var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32); bitmap.Render(content);
+        File.WriteAllBytes(path, ImageOutput.EncodePng(bitmap));
+        WriteJson(Path.ChangeExtension(path, ".json"), new { rendered = true, width, height, mode = "WPF / isolated offscreen diagnostics / native DWM backdrop requires visible Windows window" });
+    }
+    private static FrameworkElement LayoutPreview(Window window, double width, double height)
     {
         var content = (FrameworkElement)window.Content;
-        content.Measure(new Size(width, height));
-        content.Arrange(new Rect(0, 0, width, height));
-        content.UpdateLayout();
-        window.FitDocumentForDiagnostics();
-        content.UpdateLayout();
+        content.Measure(new Size(width, height)); content.Arrange(new Rect(0, 0, width, height)); content.UpdateLayout();
         return content;
     }
 

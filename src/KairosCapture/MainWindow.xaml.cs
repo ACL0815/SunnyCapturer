@@ -1,706 +1,266 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
-using System.Globalization;
 using System.IO;
-using System.Net.Http;
-using System.Runtime.InteropServices;
-using System.Security.Cryptography;
-using System.Text;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Controls.Primitives;
 using System.Windows.Input;
-using System.Windows.Interop;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
-using Microsoft.Win32;
 using KairosCapture.Capture;
-using KairosCapture.Editor;
 using KairosCapture.Services;
+using CaptureMode = KairosCapture.Capture.CaptureMode;
+using Microsoft.Win32;
 
 namespace KairosCapture;
 
 public partial class MainWindow : Window
 {
-    private readonly OpenAiService _openAi;
     private readonly bool _diagnosticsMode;
-    private readonly bool _ocrUnavailable;
-    private AnnotationCanvas? _editor;
-    private Int32Rect _documentRegion;
-    private GlobalHotkey? _hotkey;
-    private EditorTool _tool = EditorTool.Select;
-    private Brush _stroke = new SolidColorBrush(Color.FromRgb(125, 75, 227));
-    private double _thickness = 4;
-    private bool _fit = true;
-    private bool _settingZoom;
-    private bool _refreshingAccounts;
-    private bool _syncingDrawingSettings;
-    private bool _replacing;
-    private bool _closing;
-    private bool _disposed;
-    private string _imageName = "Noch kein Bild";
-    private byte[]? _savedHash;
-    private int _revision;
-    private int _savedRevision;
-    private int _imageVersion;
-    private CancellationTokenSource? _ocrCts;
-    private Task? _ocrTask;
+    private readonly CancellationTokenSource _lifetime = new();
     private CancellationTokenSource? _accountCts;
+    private GlobalHotkey? _hotkey;
+    private bool _refreshing, _closed, _exiting;
+    private IReadOnlyList<OpenAiModel> _models = Array.Empty<OpenAiModel>();
+    internal AppSettings Settings { get; }
+    internal OpenAiService? OpenAi { get; }
+    internal event Action? SettingsChanged;
+    internal event Action<CaptureCompletion, string?>? CaptureCompleted;
+    internal string OcrStatus => OpenAi?.ActiveAccount is { IsSignedIn: true } account
+        ? $"OCR: {(account.Email.Length > 0 ? account.Email : account.Label)} · {(Settings.Model.Length > 0 ? Settings.Model : "Modell wählen")}" : "OCR: nicht verbunden";
 
     public MainWindow(bool diagnosticsMode = false)
     {
         _diagnosticsMode = diagnosticsMode;
-        _ocrUnavailable = false;
-        try { _openAi = diagnosticsMode ? AppDiagnostics.CreateIsolatedService() : new OpenAiService(); }
-        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException or CryptographicException)
-        {
-            // A damaged account store must not prevent local capture/edit/export, or overwrite that store.
-            _openAi = AppDiagnostics.CreateIsolatedService();
-            _ocrUnavailable = true;
-            App.LogException("OpenAI initialization", ex);
-        }
+        Settings = diagnosticsMode ? new() : AppSettings.Load();
         InitializeComponent();
+        HotkeyBox.Text = Settings.Hotkey;
+        FolderText.Text = Settings.SaveFolder;
+        AskSave.IsChecked = Settings.AskBeforeSaving;
+        SaveCopy.IsChecked = Settings.SaveOnCopy;
+        AutoCopy.IsChecked = Settings.AutoCopyOcr;
+        try
+        {
+            OpenAi = diagnosticsMode ? AppDiagnostics.CreateIsolatedService() : new OpenAiService();
+            if (OpenAi.Accounts.Any(a => a.Key == Settings.AccountKey)) OpenAi.SelectAccount(Settings.AccountKey);
+        }
+        catch (Exception ex) { ReportError("OpenAI-Konto konnte nicht geladen werden", ex); }
         RefreshAccounts();
-        UpdateControls();
-        if (_ocrUnavailable && !diagnosticsMode)
-            SetStatus("Die gespeicherten OpenAI-Kontodaten sind nicht lesbar. Bildbearbeitung bleibt verfügbar; die Kontodatei wurde nicht verändert.", true);
-        SourceInitialized += OnSourceInitialized;
+        if (!diagnosticsMode)
+        {
+            using RegistryKey? key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
+            StartupCheck.IsChecked = key?.GetValue("KairosCapture") is string;
+        }
+        SourceInitialized += (_, _) => GlassWindow.Apply(this);
+        IsVisibleChanged += async (_, _) =>
+        {
+            if (IsVisible && !_diagnosticsMode && OpenAi?.ActiveAccount?.IsSignedIn == true && _models.Count == 0)
+                await RunAccountActionAsync(LoadModelsAsync);
+        };
     }
 
-    protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
+    internal void InitializeHotkey()
     {
-        base.OnDpiChanged(oldDpi, newDpi);
-        Dispatcher.BeginInvoke(new Action(() => { if (!_disposed) ApplyZoom(); }));
+        if (_diagnosticsMode || _hotkey != null) return;
+        _hotkey = new GlobalHotkey(this, () => _ = CaptureAsync(), Settings.Hotkey);
+        _hotkey.RegistrationFailed += SetStatus;
+        if (!_hotkey.Register(out string? error)) SetStatus(error!);
     }
 
-    private void OnSourceInitialized(object? sender, EventArgs e)
+    internal void SaveSettings()
     {
-        int dark = 1;
-        DwmSetWindowAttribute(new WindowInteropHelper(this).Handle, 20, ref dark, sizeof(int));
+        try { if (!_diagnosticsMode) Settings.Save(); }
+        catch (Exception ex) { ReportError("Einstellungen konnten nicht gespeichert werden", ex); }
+        SettingsChanged?.Invoke();
+    }
+
+    private void Settings_Click(object sender, RoutedEventArgs e)
+    {
+        Settings.AskBeforeSaving = AskSave.IsChecked == true;
+        Settings.SaveOnCopy = SaveCopy.IsChecked == true;
+        Settings.AutoCopyOcr = AutoCopy.IsChecked == true;
+        SaveSettings();
+    }
+
+    private void Hotkey_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Tab) return;
+        e.Handled = true;
+        Key key = e.Key == Key.System ? e.SystemKey : e.Key;
+        if (!HotkeyGesture.TryCreate(Keyboard.Modifiers, key, out var gesture)) return;
+        if (_diagnosticsMode) { SetStatus("Tastenkürzel werden in der Vorschau nicht registriert."); return; }
+        InitializeHotkey();
+        if (!_hotkey!.TryChange(gesture, out string? error)) { SetStatus(error!); return; }
+        HotkeyBox.Text = Settings.Hotkey = gesture.ToString();
+        SaveSettings();
+        SetStatus("Tastenkürzel ist sofort aktiv: " + Settings.Hotkey);
+    }
+
+    private void Folder_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog { Title = "Speicherordner für Aufnahmen", InitialDirectory = Settings.SaveFolder };
+        if (dialog.ShowDialog(this) != true) return;
+        FolderText.Text = Settings.SaveFolder = dialog.FolderName;
+        SaveSettings();
+    }
+
+    internal void OpenSaveFolder()
+    {
+        try { Directory.CreateDirectory(Settings.SaveFolder); GlassWindow.Open(Settings.SaveFolder); }
+        catch (Exception ex) { ReportError("Ordner konnte nicht geöffnet werden", ex); }
+    }
+    private void OpenFolder_Click(object sender, RoutedEventArgs e) => OpenSaveFolder();
+    private void Logs_Click(object sender, RoutedEventArgs e)
+    {
+        try { string path = Path.Combine(AppSettings.DirectoryPath, "logs"); Directory.CreateDirectory(path); GlassWindow.Open(path); }
+        catch (Exception ex) { ReportError("Protokollordner konnte nicht geöffnet werden", ex); }
+    }
+    private void Startup_Click(object sender, RoutedEventArgs e)
+    {
         if (_diagnosticsMode) return;
-        _hotkey = new GlobalHotkey(this, () => _ = CaptureAsync());
-        _hotkey.RegistrationFailed += OnHotkeyRegistrationFailed;
-        if (!_hotkey.Register(out string? error))
-            OnHotkeyRegistrationFailed(error ?? "Strg+Alt+A ist nicht verfügbar.");
-    }
-
-    private void OnHotkeyRegistrationFailed(string error)
-    {
-        HotkeyText.Text = "Hotkey nicht verfügbar · Aufnahme per Button";
-        HotkeyText.ToolTip = error;
-        SetStatus("Strg+Alt+A konnte nicht registriert werden. Die Aufnahme per Button funktioniert weiterhin.", true);
-    }
-
-    public void LoadImage(BitmapSource image, string name, bool unsaved = false)
-    {
-        ArgumentNullException.ThrowIfNull(image);
-        Dispatcher.VerifyAccess();
-        LoadEditor(new AnnotationCanvas(image) { Tool = _tool, Stroke = _stroke, Thickness = _thickness },
-            new Int32Rect(0, 0, image.PixelWidth, image.PixelHeight), name, unsaved);
-    }
-
-    public void LoadEditor(AnnotationCanvas editor, Int32Rect region, string name, bool unsaved = true)
-    {
-        ArgumentNullException.ThrowIfNull(editor);
-        Dispatcher.VerifyAccess();
-        if (region.X < 0 || region.Y < 0 || region.Width <= 0 || region.Height <= 0 ||
-            !double.IsFinite(editor.Width) || !double.IsFinite(editor.Height) ||
-            (long)region.X + region.Width > editor.Width || (long)region.Y + region.Height > editor.Height)
-            throw new ArgumentOutOfRangeException(nameof(region), "Der Ausschnitt muss innerhalb des Editorbildes liegen.");
-        if (editor.Parent != null)
-            throw new ArgumentException("Der Editor muss vor der Übergabe vom bisherigen Parent gelöst sein.", nameof(editor));
-        _ocrCts?.Cancel();
-        _imageVersion++;
-        if (_editor != null) _editor.Changed -= Editor_Changed;
-        CropCanvas.Children.Clear();
-        _editor = editor;
-        _documentRegion = region;
-        editor.SetEditingBounds(region);
-        CropCanvas.Width = region.Width;
-        CropCanvas.Height = region.Height;
-        Canvas.SetLeft(editor, -region.X);
-        Canvas.SetTop(editor, -region.Y);
-        CropCanvas.Children.Add(editor);
-        SyncDrawingSettings();
-        _editor.Changed += Editor_Changed;
-        _imageName = name;
-        _savedRevision = 0;
-        _revision = unsaved ? 1 : 0;
-        _savedHash = unsaved ? null : SHA256.HashData(ImageOutput.EncodePng(_editor.Flatten(_documentRegion)));
-        EmptyState.Visibility = Visibility.Collapsed;
-        ImageScroll.Visibility = Visibility.Visible;
-        DimensionsText.Text = string.Format(CultureInfo.CurrentCulture, "{0:N0} × {1:N0} px", region.Width, region.Height);
-        OcrText.Clear();
-        _fit = true;
-        UpdateLayout();
-        ApplyZoom();
-        UpdateControls();
-    }
-
-    private void SyncDrawingSettings()
-    {
-        if (_editor == null) return;
-        _syncingDrawingSettings = true;
         try
         {
-            _tool = _editor.Tool;
-            _stroke = _editor.Stroke;
-            _thickness = _editor.Thickness;
-            SelectTool(_tool);
-            foreach (object child in DrawingSettings.Children)
-                if (child is RadioButton swatch)
-                    swatch.IsChecked = swatch.Background is SolidColorBrush color &&
-                        _stroke is SolidColorBrush selected && color.Color == selected.Color;
-            ComboBoxItem? selectedThickness = null;
-            foreach (ComboBoxItem item in ThicknessPicker.Items)
-                if (item.Tag is string value && double.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out double thickness) && thickness == _thickness)
-                    selectedThickness = item;
-            if (selectedThickness == null)
-            {
-                selectedThickness = new ComboBoxItem { Content = _thickness.ToString("0.##", CultureInfo.CurrentCulture) + " px", Tag = _thickness.ToString(CultureInfo.InvariantCulture) };
-                ThicknessPicker.Items.Add(selectedThickness);
-            }
-            ThicknessPicker.SelectedItem = selectedThickness;
+            using RegistryKey key = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
+            if (StartupCheck.IsChecked == true)
+                key.SetValue("KairosCapture", "\"" + (Environment.ProcessPath ?? throw new InvalidOperationException("Programmpfad fehlt.")) + "\"");
+            else key.DeleteValue("KairosCapture", false);
         }
-        finally { _syncingDrawingSettings = false; }
-    }
-
-    private void Editor_Changed(object? sender, EventArgs e) { _revision++; UpdateControls(); }
-
-    private void UpdateControls()
-    {
-        if (!IsInitialized || _disposed) return;
-        bool image = _editor != null;
-        bool accountBusy = _accountCts != null;
-        bool ocrBusy = _ocrCts != null;
-        bool signedIn = _openAi.ActiveAccount?.IsSignedIn == true;
-        CaptureButton.IsEnabled = OpenButton.IsEnabled = PasteButton.IsEnabled = EmptyCaptureButton.IsEnabled = !_replacing && !_closing;
-        CopyButton.IsEnabled = SaveButton.IsEnabled = image && !_replacing;
-        ToolDock.IsEnabled = DrawingSettings.IsEnabled = ZoomControls.IsEnabled = image;
-        UndoButton.IsEnabled = _editor?.CanUndo == true;
-        RedoButton.IsEnabled = _editor?.CanRedo == true;
-        ModelPicker.IsEnabled = signedIn && !accountBusy && !ocrBusy;
-        RefreshModelsButton.IsEnabled = signedIn && !accountBusy && !ocrBusy;
-        ModelPlaceholder.Visibility = ModelPicker.SelectedItem == null ? Visibility.Visible : Visibility.Collapsed;
-        OcrButton.IsEnabled = ocrBusy || (image && signedIn && !accountBusy && !_replacing && ModelPicker.SelectedItem != null);
-        OcrButton.Content = ocrBusy ? "Abbrechen" : "Text erkennen";
-        OcrText.IsReadOnly = ocrBusy;
-        CopyTextButton.IsEnabled = SaveTextButton.IsEnabled = OcrText.Text.Length > 0 && !ocrBusy;
-        AccountPicker.IsEnabled = AddAccountButton.IsEnabled = !accountBusy && !_ocrUnavailable;
-        LoginButton.IsEnabled = !_ocrUnavailable;
-        LoginButton.Content = accountBusy ? "Abbrechen" : "Weiter mit ChatGPT";
-        LoginButton.Visibility = !signedIn || accountBusy ? Visibility.Visible : Visibility.Collapsed;
-        SignOutButton.Visibility = signedIn ? Visibility.Visible : Visibility.Collapsed;
-        SignOutButton.IsEnabled = !accountBusy;
-        SavedAccountsRow.Visibility = _openAi.Accounts.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        AccountStatus.Text = _ocrUnavailable && !_diagnosticsMode ? "Konto nicht verfügbar" : signedIn ? "Mit ChatGPT verbunden" : "Konto verbinden";
-        AccountDetail.Text = signedIn ? (string.IsNullOrWhiteSpace(_openAi.ActiveAccount?.Email) ? _openAi.ActiveAccount?.Label : _openAi.ActiveAccount.Email) : "Direkt bei OpenAI anmelden";
-        AccountDetail.ToolTip = AccountDetail.Text;
-        FileNameText.Text = _imageName + (_revision != _savedRevision ? " •" : "");
-        FileNameText.ToolTip = FileNameText.Text;
-        Title = image ? FileNameText.Text + " — Kairos Capture" : "Kairos Capture";
-    }
-
-    private void SetStatus(string text, bool error = false)
-    {
-        if (_disposed) return;
-        StatusText.Text = text;
-        StatusText.Foreground = (Brush)FindResource(error ? "GoldBrush" : "MutedBrush");
-    }
-
-    private void ReportError(string action, Exception exception)
-    {
-        App.LogException(action, exception);
-        // Provider messages can contain request URLs or account data; keep them out of the UI.
-        string reason = exception is OpenAiRequestException request ? request.Message :
-            exception is OpenAiUserException userError ? userError.Message :
-            exception is TimeoutException ? "Das Zeitlimit wurde erreicht. Versuche es später erneut." :
-            exception is ArgumentException && action == "Texterkennung" ? "Das Bild ist für OCR zu groß oder ungültig. Versuche einen kleineren Ausschnitt." :
-            exception is HttpRequestException ? "Prüfe deine Internetverbindung und versuche es erneut." :
-            exception is UnauthorizedAccessException ? "Der Zugriff wurde verweigert. Wähle einen anderen Speicherort." :
-            exception is IOException ? "Die Datei oder Zwischenablage ist gerade nicht verfügbar." : "Versuche es erneut.";
-        SetStatus(action + " fehlgeschlagen. " + reason, true);
-    }
-
-    public async Task CaptureAsync()
-    {
-        if (_replacing || _closing || _disposed) return;
-        _replacing = true;
-        bool startOcr = false;
-        UpdateControls();
-        try
-        {
-            SetStatus("Bereich aufziehen und direkt im eingefrorenen Bildschirm bearbeiten · Esc bricht ab.");
-            CaptureSessionResult result = await CaptureService.CaptureEditedRegionAsync(this, CancellationToken.None,
-                dialogOwner => PrepareReplacementAsync(dialogOwner));
-            startOcr = await AcceptCaptureResultAsync(result);
-        }
-        catch (OperationCanceledException) { SetStatus("Aufnahme abgebrochen."); }
-        catch (Exception ex) { ReportError("Aufnahme", ex); }
-        finally { _replacing = false; UpdateControls(); }
-        if (startOcr) await StartOcrAsync();
-    }
-
-    // Kept separate from desktop capture so the real handoff path can also run in offline STA checks.
-    internal async Task<bool> AcceptCaptureResultAsync(CaptureSessionResult result)
-    {
-        Dispatcher.VerifyAccess();
-        if (_disposed || _closing) return false;
-        switch (result.Completion)
-        {
-            case CaptureCompletion.Cancelled:
-                SetStatus("Aufnahme abgebrochen.");
-                break;
-            case CaptureCompletion.Copied:
-                SetStatus("Aufnahme im Overlay in die Zwischenablage kopiert.");
-                break;
-            case CaptureCompletion.Saved:
-                SetStatus("Aufnahme im Overlay gespeichert.");
-                break;
-            case CaptureCompletion.Workbench:
-            case CaptureCompletion.Ocr:
-                if (result.Editor == null)
-                    throw new InvalidOperationException("Die Aufnahme hat keinen Editor zur Übergabe bereitgestellt.");
-                // Only an explicit handoff may replace the workbench document. Copy/save leave it intact.
-                if (!result.ReplacementConfirmed && !await PrepareReplacementAsync())
-                {
-                    SetStatus("Aufnahme nicht übernommen. Das bisherige Dokument bleibt erhalten.");
-                    return false;
-                }
-                LoadEditor(result.Editor, result.Region,
-                    "Aufnahme " + DateTime.Now.ToString("yyyy-MM-dd HH-mm-ss", CultureInfo.InvariantCulture) + ".png");
-                if (!_diagnosticsMode) ShowFromTray();
-                if (result.Completion == CaptureCompletion.Workbench)
-                    SetStatus("Aufnahme in der Werkbank. Markierungen und Rückgängig-Schritte bleiben erhalten.");
-                else if (_ocrUnavailable)
-                    SetStatus("Aufnahme übernommen. Die gespeicherten OpenAI-Kontodaten sind nicht lesbar; Texterkennung ist derzeit nicht verfügbar.", true);
-                else if (_openAi.ActiveAccount?.IsSignedIn != true)
-                    SetStatus("Aufnahme übernommen. Melde dich über „Weiter mit ChatGPT“ an, um Text zu erkennen.");
-                else if (_accountCts != null || ModelPicker.SelectedItem is not OpenAiModel)
-                    SetStatus("Aufnahme übernommen. Lade oder wähle rechts ein Modell und starte „Text erkennen“.");
-                else
-                    return true;
-                break;
-            default:
-                throw new InvalidOperationException("Die Aufnahme hat einen unbekannten Abschluss geliefert.");
-        }
-        return false;
-    }
-
-    private async void Capture_Click(object sender, RoutedEventArgs e) => await CaptureAsync();
-
-    private async void Open_Click(object sender, RoutedEventArgs e) => await OpenAsync();
-    private async void Paste_Click(object sender, RoutedEventArgs e) => await PasteAsync();
-
-    private async Task OpenAsync(string? path = null)
-    {
-        if (_replacing || _closing) return;
-        _replacing = true;
-        UpdateControls();
-        try
-        {
-            if (path == null)
-            {
-                var dialog = new OpenFileDialog { Title = "Bild öffnen", Filter = "Bilddateien (*.png;*.jpg;*.jpeg;*.bmp)|*.png;*.jpg;*.jpeg;*.bmp", CheckFileExists = true };
-                if (dialog.ShowDialog(this) != true) return;
-                path = dialog.FileName;
-            }
-            if (!IsSupportedImage(path)) { SetStatus("Bitte eine PNG-, JPG- oder BMP-Datei wählen.", true); return; }
-            // Decode first: a corrupt file must never discard the current work.
-            BitmapSource image = ImageOutput.Load(path);
-            if (!await PrepareReplacementAsync()) return;
-            LoadImage(image, Path.GetFileName(path));
-            SetStatus("Bild geöffnet.");
-        }
-        catch (Exception ex) { ReportError("Bild öffnen", ex); }
-        finally { _replacing = false; UpdateControls(); }
-    }
-
-    private async Task PasteAsync()
-    {
-        if (_replacing || _closing) return;
-        _replacing = true;
-        UpdateControls();
-        try
-        {
-            BitmapSource? image = Clipboard.ContainsImage() ? Clipboard.GetImage() : null;
-            if (image == null) { SetStatus("Die Zwischenablage enthält kein Bild."); return; }
-            if (!await PrepareReplacementAsync()) return;
-            LoadImage(image, "Zwischenablage.png", unsaved: true);
-            SetStatus("Bild aus der Zwischenablage eingefügt.");
-        }
-        catch (Exception ex) { ReportError("Einfügen", ex); }
-        finally { _replacing = false; UpdateControls(); }
-    }
-
-    private async Task<bool> PrepareReplacementAsync(Window? dialogOwner = null)
-    {
-        await CancelOcrAsync();
-        if (_disposed || (dialogOwner != null && _closing)) return false;
-        if (!HasUnsavedDocumentChanges()) return true;
-        MessageBoxResult result = ShowSavePrompt(dialogOwner);
-        return result == MessageBoxResult.No || (result == MessageBoxResult.Yes && SaveImage(dialogOwner));
-    }
-
-    internal bool HasUnsavedDocumentChanges()
-    {
-        if (_editor == null) return false;
-        _editor.CommitText();
-        if (_revision == _savedRevision) return false;
-        byte[] current = SHA256.HashData(ImageOutput.EncodePng(_editor.Flatten(_documentRegion)));
-        return _savedHash == null || !CryptographicOperations.FixedTimeEquals(current, _savedHash);
-    }
-
-    private MessageBoxResult ShowSavePrompt(Window? dialogOwner = null)
-    {
-        if (_diagnosticsMode) throw new InvalidOperationException("Save prompts are disabled in offline diagnostics.");
-        if (dialogOwner == null && !IsVisible) ShowFromTray();
-        var dialog = new Window { Owner = dialogOwner ?? this, Title = "Änderungen speichern?", Width = 460, SizeToContent = SizeToContent.Height, ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.CenterOwner, ShowInTaskbar = false };
-        var panel = new StackPanel { Margin = new Thickness(24) };
-        panel.Children.Add(new TextBlock { Text = "Änderungen speichern?", FontSize = 20, FontWeight = FontWeights.SemiBold });
-        panel.Children.Add(new TextBlock { Text = "Deine Markierungen wurden noch nicht gespeichert.", Margin = new Thickness(0, 10, 0, 23), TextWrapping = TextWrapping.Wrap });
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-        MessageBoxResult result = MessageBoxResult.Cancel;
-        foreach ((string label, MessageBoxResult choice) in new[] { ("Speichern", MessageBoxResult.Yes), ("Verwerfen", MessageBoxResult.No), ("Abbrechen", MessageBoxResult.Cancel) })
-        {
-            var button = new Button { Content = label, Margin = new Thickness(6, 0, 0, 0), IsDefault = choice == MessageBoxResult.Yes, IsCancel = choice == MessageBoxResult.Cancel };
-            if (choice == MessageBoxResult.Yes) button.Style = (Style)FindResource("PrimaryButton");
-            button.Click += (_, _) => { result = choice; dialog.Close(); };
-            buttons.Children.Add(button);
-        }
-        panel.Children.Add(buttons);
-        dialog.Content = panel;
-        dialog.ShowDialog();
-        return result;
-    }
-
-    private bool SaveImage(Window? dialogOwner = null)
-    {
-        if (_editor == null) return false;
-        try
-        {
-            _editor.CommitText();
-            BitmapSource image = _editor.Flatten(_documentRegion);
-            string? path = ImageOutput.Save(image, dialogOwner ?? this);
-            if (path == null) return false;
-            _savedHash = SHA256.HashData(ImageOutput.EncodePng(image));
-            _savedRevision = _revision;
-            _imageName = Path.GetFileName(path);
-            UpdateControls();
-            SetStatus("Bild gespeichert: " + _imageName);
-            return true;
-        }
-        catch (Exception ex) { ReportError("Speichern", ex); return false; }
-    }
-
-    private void Save_Click(object sender, RoutedEventArgs e) => SaveImage();
-    private void Copy_Click(object sender, RoutedEventArgs e) => CopyImage();
-    private void CopyImage()
-    {
-        if (_editor == null) return;
-        try { _editor.CommitText(); ImageOutput.Copy(_editor.Flatten(_documentRegion)); SetStatus("Bild in die Zwischenablage kopiert."); }
-        catch (Exception ex) { ReportError("Kopieren", ex); }
-    }
-
-    private static bool IsSupportedImage(string path) => Path.GetExtension(path).ToLowerInvariant() is ".png" or ".jpg" or ".jpeg" or ".bmp";
-    private void Window_DragOver(object sender, DragEventArgs e)
-    {
-        e.Effects = !_replacing && e.Data.GetData(DataFormats.FileDrop) is string[] files && files.Length == 1 && IsSupportedImage(files[0]) ? DragDropEffects.Copy : DragDropEffects.None;
-        e.Handled = true;
-    }
-    private async void Window_Drop(object sender, DragEventArgs e)
-    {
-        e.Handled = true;
-        if (e.Data.GetData(DataFormats.FileDrop) is string[] files && files.Length == 1) await OpenAsync(files[0]);
-        else SetStatus("Bitte genau eine PNG-, JPG- oder BMP-Datei ablegen.");
-    }
-
-    private void Tool_Checked(object sender, RoutedEventArgs e)
-    {
-        if (_syncingDrawingSettings) return;
-        if (sender is RadioButton { Tag: string name } && Enum.TryParse(name, out EditorTool tool))
-        {
-            _editor?.CommitText();
-            _tool = tool;
-            if (_editor != null) _editor.Tool = tool;
-        }
-    }
-    private void Color_Checked(object sender, RoutedEventArgs e)
-    {
-        if (_syncingDrawingSettings) return;
-        if (sender is RadioButton { Background: Brush brush }) { _stroke = brush; if (_editor != null) _editor.Stroke = brush; }
-    }
-    private void Thickness_Changed(object sender, SelectionChangedEventArgs e)
-    {
-        if (_syncingDrawingSettings) return;
-        if (sender is ComboBox { SelectedItem: ComboBoxItem { Tag: string value } } && double.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out double thickness))
-        { _thickness = thickness; if (_editor != null) _editor.Thickness = thickness; }
-    }
-    private void Undo_Click(object sender, RoutedEventArgs e) { _editor?.CommitText(); _editor?.Undo(); }
-    private void Redo_Click(object sender, RoutedEventArgs e) { _editor?.CommitText(); _editor?.Redo(); }
-
-    private void Fit_Click(object sender, RoutedEventArgs e) { _fit = true; ApplyZoom(); }
-    private double NativePixelScale => 1 / VisualTreeHelper.GetDpi(ImageViewbox).DpiScaleX;
-    private void ActualSize_Click(object sender, RoutedEventArgs e) { _fit = false; SetZoom(NativePixelScale); }
-    private void Stage_SizeChanged(object sender, SizeChangedEventArgs e) { if (_fit) ApplyZoom(); }
-    private void Zoom_Changed(object sender, RoutedPropertyChangedEventArgs<double> e) { if (_settingZoom || _editor == null) return; _fit = false; SetZoom(e.NewValue / 100 * NativePixelScale); }
-    private void ApplyZoom()
-    {
-        if (_editor == null) return;
-        double scale = _fit ? Math.Min(NativePixelScale, Math.Min(Math.Max(1, ImageScroll.ViewportWidth - 56) / _documentRegion.Width, Math.Max(1, ImageScroll.ViewportHeight - 56) / _documentRegion.Height)) : ZoomSlider.Value / 100 * NativePixelScale;
-        SetZoom(scale);
-    }
-    private void SetZoom(double scale)
-    {
-        if (_editor == null || !double.IsFinite(scale) || scale <= 0) return;
-        ImageViewbox.Width = _documentRegion.Width * scale;
-        ImageViewbox.Height = _documentRegion.Height * scale;
-        _settingZoom = true;
-        ZoomSlider.Value = Math.Clamp(scale / NativePixelScale * 100, ZoomSlider.Minimum, ZoomSlider.Maximum);
-        _settingZoom = false;
-        ZoomText.Text = (scale / NativePixelScale).ToString("0 %", CultureInfo.CurrentCulture);
-    }
-    private void ImageScroll_MouseWheel(object sender, MouseWheelEventArgs e)
-    {
-        if ((Keyboard.Modifiers & ModifierKeys.Control) == 0 || _editor == null) return;
-        _fit = false;
-        SetZoom(Math.Clamp(ImageViewbox.Width / _documentRegion.Width * (e.Delta > 0 ? 1.15 : 1 / 1.15), 0.1 * NativePixelScale, 3 * NativePixelScale));
-        e.Handled = true;
-    }
-
-    private async void Window_KeyDown(object sender, KeyEventArgs e)
-    {
-        // The editor owns Escape/Ctrl+Enter inside its text box; all native text edits stay native.
-        if (Keyboard.FocusedElement is TextBoxBase || Keyboard.FocusedElement is PasswordBox) return;
-        ModifierKeys modifiers = Keyboard.Modifiers;
-        bool ctrl = (modifiers & ModifierKeys.Control) != 0;
-        if (ctrl)
-        {
-            switch (e.Key)
-            {
-                case Key.O: e.Handled = true; await OpenAsync(); return;
-                case Key.V: e.Handled = true; await PasteAsync(); return;
-                case Key.C: e.Handled = true; CopyImage(); return;
-                case Key.S: e.Handled = true; SaveImage(); return;
-                case Key.Z: e.Handled = true; _editor?.CommitText(); if ((modifiers & ModifierKeys.Shift) != 0) _editor?.Redo(); else _editor?.Undo(); return;
-                case Key.Y: e.Handled = true; _editor?.CommitText(); _editor?.Redo(); return;
-                case Key.D0: case Key.NumPad0: e.Handled = true; _fit = true; ApplyZoom(); return;
-                case Key.D1: case Key.NumPad1: e.Handled = true; _fit = false; SetZoom(NativePixelScale); return;
-            }
-            return;
-        }
-        if (modifiers != ModifierKeys.None) return;
-        if (e.Key == Key.Delete && _editor != null) { _editor.DeleteSelected(); e.Handled = true; return; }
-        if (e.Key == Key.Escape)
-        {
-            _editor?.HandleKey(Key.Escape);
-            SelectTool(EditorTool.Select);
-            e.Handled = true;
-            return;
-        }
-        EditorTool? tool = e.Key switch { Key.V => EditorTool.Select, Key.A => EditorTool.Arrow, Key.R => EditorTool.Rectangle, Key.E => EditorTool.Ellipse, Key.P => EditorTool.Pen, Key.T => EditorTool.Text, Key.H => EditorTool.Highlight, Key.B => EditorTool.Redact, _ => null };
-        if (tool.HasValue && _editor != null) { SelectTool(tool.Value); e.Handled = true; }
-    }
-    private void SelectTool(EditorTool tool)
-    {
-        foreach (object child in ToolDock.Children)
-            if (child is RadioButton button && (string)button.Tag == tool.ToString()) { button.IsChecked = true; break; }
+        catch (Exception ex) { StartupCheck.IsChecked = !(StartupCheck.IsChecked == true); ReportError("Autostart konnte nicht geändert werden", ex); }
     }
 
     private void RefreshAccounts()
     {
-        _refreshingAccounts = true;
-        AccountPicker.ItemsSource = null;
-        AccountPicker.ItemsSource = _openAi.Accounts;
-        foreach (OpenAiAccount account in _openAi.Accounts)
-            if (account.Key == _openAi.ActiveAccount?.Key) { AccountPicker.SelectedItem = account; break; }
-        _refreshingAccounts = false;
-        UpdateControls();
+        _refreshing = true;
+        AccountPicker.ItemsSource = OpenAi?.Accounts;
+        AccountPicker.SelectedItem = OpenAi?.Accounts.FirstOrDefault(a => a.Key == OpenAi.ActiveAccount?.Key);
+        AccountStatus.Text = OpenAi is null ? "OpenAI ist derzeit nicht verfügbar. Aufnahme und Bearbeitung bleiben verfügbar." :
+            OpenAi.ActiveAccount?.IsSignedIn == true ? "Mit ChatGPT verbunden" : "Mit ChatGPT verbinden, um Text aus Aufnahmen zu erkennen.";
+        _refreshing = false;
+        SettingsChanged?.Invoke();
     }
+
     private async void Account_Changed(object sender, SelectionChangedEventArgs e)
     {
-        if (_refreshingAccounts || AccountPicker.SelectedItem is not OpenAiAccount account) return;
-        await RunAccountActionAsync(async ct =>
-        {
-            _openAi.SelectAccount(account.Key);
-            ModelPicker.ItemsSource = null;
-            SetStatus(account.IsSignedIn ? "Konto gewechselt. Lade die aktuellen Modelle." : "Gespeichertes Konto gewählt. Melde dich erneut an.");
-            if (account.IsSignedIn) await LoadModelsAsync(ct);
-        });
+        if (_refreshing || OpenAi == null || AccountPicker.SelectedItem is not OpenAiAccount account || _accountCts != null) return;
+        OpenAi.SelectAccount(account.Key);
+        Settings.AccountKey = account.Key;
+        _models = Array.Empty<OpenAiModel>();
+        ModelPicker.ItemsSource = _models;
+        SaveSettings(); RefreshAccounts();
+        if (account.IsSignedIn) await RunAccountActionAsync(LoadModelsAsync);
     }
     private async Task RunAccountActionAsync(Func<CancellationToken, Task> action)
     {
-        if (_accountCts != null || _ocrUnavailable || _diagnosticsMode || _disposed) return;
-        using var cts = new CancellationTokenSource();
-        _accountCts = cts;
-        UpdateControls();
-        try { await CancelOcrAsync(); await action(cts.Token); }
-        catch (OperationCanceledException) { SetStatus("Kontovorgang abgebrochen."); }
-        catch (Exception ex) { ReportError("Kontovorgang", ex); }
-        finally { _accountCts = null; if (!_disposed) { RefreshAccounts(); UpdateControls(); } }
+        if (_closed || _accountCts != null) return;
+        using var operation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        _accountCts = operation;
+        AccountPicker.IsEnabled = LoginButton.IsEnabled = AddAccountButton.IsEnabled = SignOutButton.IsEnabled = RefreshButton.IsEnabled = false;
+        CancelLoginButton.Visibility = Visibility.Visible;
+        try { await action(operation.Token); }
+        catch (OperationCanceledException) { if (!_closed) SetStatus("Vorgang abgebrochen."); }
+        catch (Exception ex) { if (!_closed) ReportError("OpenAI", ex); }
+        finally
+        {
+            _accountCts = null;
+            if (!_closed)
+            {
+                AccountPicker.IsEnabled = LoginButton.IsEnabled = AddAccountButton.IsEnabled = SignOutButton.IsEnabled = RefreshButton.IsEnabled = true;
+                CancelLoginButton.Visibility = Visibility.Collapsed;
+                RefreshAccounts();
+            }
+        }
     }
-    private async void Login_Click(object sender, RoutedEventArgs e)
+    internal async Task ConnectAsync(bool addAccount = false)
     {
-        if (_accountCts != null) { _accountCts.Cancel(); SetStatus("Anmeldung wird abgebrochen …"); return; }
-        await SignInAsync(_openAi.ActiveAccount?.Key);
-    }
-    private async void AddAccount_Click(object sender, RoutedEventArgs e) => await SignInAsync(null);
-    private async Task SignInAsync(string? key)
-    {
+        if (OpenAi == null) { ShowFromTray(); SetStatus("OpenAI konnte nicht initialisiert werden. Protokolle prüfen und Kairos neu starten."); return; }
         await RunAccountActionAsync(async ct =>
         {
-            SetStatus("Anmeldung im Browser abschließen. Hier kannst du abbrechen.");
-            await _openAi.SignInAsync(key, ct);
-            ct.ThrowIfCancellationRequested();
-            if (_openAi.ActiveAccount?.IsSignedIn != true) throw new InvalidOperationException("Sign-in did not complete.");
-            ModelPicker.ItemsSource = null;
-            SetStatus("Mit ChatGPT verbunden. Modelle werden geladen …");
-            RefreshAccounts();
+            SetStatus("Anmeldung im Browser abschließen…");
+            await OpenAi.SignInAsync(addAccount ? null : OpenAi.ActiveAccount?.Key, ct);
+            if (_closed) return;
+            Settings.AccountKey = OpenAi.ActiveAccount?.Key ?? "";
+            SaveSettings();
             await LoadModelsAsync(ct);
+            SetStatus("Mit ChatGPT verbunden.");
         });
     }
-    private async void SignOut_Click(object sender, RoutedEventArgs e)
+    private async void Login_Click(object sender, RoutedEventArgs e) => await ConnectAsync();
+    private async void AddAccount_Click(object sender, RoutedEventArgs e) => await ConnectAsync(true);
+    private void CancelLogin_Click(object sender, RoutedEventArgs e) => _accountCts?.Cancel();
+    private async void SignOut_Click(object sender, RoutedEventArgs e) => await RunAccountActionAsync(async ct =>
     {
-        await RunAccountActionAsync(async ct =>
-        {
-            string? warning = await _openAi.SignOutAsync(ct);
-            ModelPicker.ItemsSource = null;
-            SetStatus(string.IsNullOrWhiteSpace(warning) ? "Von ChatGPT abgemeldet." : "Lokal abgemeldet. Die serverseitige Abmeldung konnte nicht bestätigt werden.", !string.IsNullOrWhiteSpace(warning));
-        });
-    }
+        string? warning = OpenAi == null ? null : await OpenAi.SignOutAsync(ct);
+        _models = Array.Empty<OpenAiModel>(); ModelPicker.ItemsSource = _models;
+        SetStatus(warning ?? "Abgemeldet.");
+    });
     private async void RefreshModels_Click(object sender, RoutedEventArgs e) => await RunAccountActionAsync(LoadModelsAsync);
     private async Task LoadModelsAsync(CancellationToken ct)
     {
-        string? selected = (ModelPicker.SelectedItem as OpenAiModel)?.Slug;
-        SetStatus("Aktuelle Modelle werden geladen …");
-        var models = await _openAi.GetModelsAsync(ct);
-        ct.ThrowIfCancellationRequested();
+        if (OpenAi?.ActiveAccount?.IsSignedIn != true) { SetStatus("Zuerst mit ChatGPT verbinden."); return; }
+        var models = await OpenAi.GetModelsAsync(ct);
+        if (_closed) return;
+        _models = models;
+        _refreshing = true;
         ModelPicker.ItemsSource = models;
-        foreach (OpenAiModel model in models) if (model.Slug == selected) { ModelPicker.SelectedItem = model; break; }
-        if (ModelPicker.SelectedItem == null && models.Count > 0) ModelPicker.SelectedIndex = 0;
-        SetStatus(models.Count == 0 ? "Für dieses Konto wurden keine Modelle gefunden." : "Modelle geladen. Die Texterkennung startet erst per Button.", models.Count == 0);
+        ModelPicker.SelectedItem = models.FirstOrDefault(m => m.Slug == Settings.Model) ?? models.FirstOrDefault();
+        _refreshing = false;
+        if (ModelPicker.SelectedItem is OpenAiModel model) { Settings.Model = model.Slug; SaveSettings(); }
+        if (models.Count == 0) SetStatus("Dieses Konto stellt derzeit kein OCR-Modell bereit. Konto und Freigaben in ChatGPT prüfen.");
     }
-    private void Model_Changed(object sender, SelectionChangedEventArgs e) { if (IsInitialized) UpdateControls(); }
+    private void Model_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_refreshing && ModelPicker.SelectedItem is OpenAiModel model) { Settings.Model = model.Slug; SaveSettings(); }
+    }
 
-    private async void Ocr_Click(object sender, RoutedEventArgs e)
+    internal Task CaptureAsync(CaptureMode mode = CaptureMode.Region) => CaptureCoreAsync(mode);
+    private async Task CaptureCoreAsync(CaptureMode mode)
     {
-        if (_ocrCts != null) { _ocrCts.Cancel(); SetStatus("Texterkennung wird abgebrochen …"); return; }
-        await StartOcrAsync();
-    }
-    private async Task StartOcrAsync()
-    {
-        if (_editor == null || _diagnosticsMode || _ocrUnavailable || _disposed || _replacing ||
-            _ocrCts != null || _openAi.ActiveAccount?.IsSignedIn != true ||
-            ModelPicker.SelectedItem is not OpenAiModel model || _accountCts != null) return;
-        _ocrTask = RecognizeAsync(model.Slug);
-        await _ocrTask;
-    }
-    private async Task RecognizeAsync(string model)
-    {
-        using var cts = new CancellationTokenSource();
-        _ocrCts = cts;
-        string previous = OcrText.Text;
-        var pending = new StringBuilder();
-        int imageVersion = _imageVersion;
-        string? accountKey = _openAi.ActiveAccount?.Key;
-        UpdateControls();
-        SetStatus("Text wird erkannt …");
-        bool StillCurrent() => !_disposed && !cts.IsCancellationRequested && imageVersion == _imageVersion && accountKey == _openAi.ActiveAccount?.Key;
+        if (_closed || _diagnosticsMode || CaptureService.IsCapturing) return;
         try
         {
-            _editor!.CommitText();
-            byte[] png = ImageOutput.EncodePng(_editor.Flatten(_documentRegion));
-            var progress = new Progress<string>(delta =>
+            CaptureSessionResult result = await CaptureService.CaptureEditedAsync(this, Settings, mode, _lifetime.Token);
+            if (_closed) return;
+            if (result.SavedPath is { } path)
             {
-                if (!StillCurrent() || !ReferenceEquals(_ocrCts, cts)) return;
-                pending.Append(delta);
-                OcrText.Text = pending.ToString();
-                OcrText.ScrollToEnd();
-            });
-            string text = await _openAi.ExtractTextAsync(png, model, progress, cts.Token);
-            cts.Token.ThrowIfCancellationRequested();
-            if (!StillCurrent()) return;
-            OcrText.Text = text;
-            SetStatus(text.Length == 0 ? "Texterkennung abgeschlossen. Kein Text gefunden." : "Text erkannt. Du kannst ihn jetzt bearbeiten, kopieren oder speichern.");
+                Settings.RecentFiles = new[] { path }.Concat(Settings.RecentFiles).Distinct(StringComparer.OrdinalIgnoreCase).Take(5).ToArray();
+                SaveSettings();
+            }
+            if (result.Completion == CaptureCompletion.Ocr && result.Image != null)
+            {
+                var window = new OcrResultWindow(this, result.Image, result.Bounds, result.Region);
+                window.Show();
+            }
+            else if (result.Completion is CaptureCompletion.Copied or CaptureCompletion.Saved)
+                CaptureCompleted?.Invoke(result.Completion, result.SavedPath);
+            SettingsChanged?.Invoke();
         }
-        catch (OperationCanceledException) { if (!_disposed && imageVersion == _imageVersion) { OcrText.Text = previous; SetStatus("Texterkennung abgebrochen. Vorheriger Text bleibt erhalten."); } }
-        catch (Exception ex) { if (!_disposed && imageVersion == _imageVersion) { OcrText.Text = previous; ReportError("Texterkennung", ex); } }
-        finally { _ocrCts = null; UpdateControls(); }
-    }
-    private async Task CancelOcrAsync()
-    {
-        _ocrCts?.Cancel();
-        if (_ocrTask != null) await _ocrTask;
-    }
-    private void OcrText_Changed(object sender, TextChangedEventArgs e)
-    {
-        if (OcrPlaceholder == null) return;
-        OcrPlaceholder.Visibility = OcrText.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
-        UpdateControls();
-    }
-    private void CopyText_Click(object sender, RoutedEventArgs e)
-    {
-        try { Clipboard.SetText(OcrText.Text); SetStatus("Text in die Zwischenablage kopiert."); }
-        catch (Exception ex) { ReportError("Text kopieren", ex); }
-    }
-    private void SaveText_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            var dialog = new SaveFileDialog { Title = "Text speichern", Filter = "Textdatei (*.txt)|*.txt", DefaultExt = ".txt", AddExtension = true, OverwritePrompt = true, FileName = Path.GetFileNameWithoutExtension(_imageName) + ".txt" };
-            if (dialog.ShowDialog(this) != true) return;
-            File.WriteAllText(dialog.FileName, OcrText.Text, new UTF8Encoding(false));
-            SetStatus("Text gespeichert.");
-        }
-        catch (Exception ex) { ReportError("Text speichern", ex); }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { ShowFromTray(); ReportError("Aufnahme fehlgeschlagen", ex); }
     }
 
     public void ShowFromTray()
     {
-        if (_disposed) return;
-        Show();
-        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
-        Activate();
+        if (_closed) return;
+        Show(); WindowState = WindowState.Normal; Activate();
     }
-    internal void FitDocumentForDiagnostics() { _fit = true; ApplyZoom(); }
-    internal void ShowUnexpectedError() => SetStatus("Die Aktion konnte nicht abgeschlossen werden. Speichere dein Bild und starte Kairos bei Bedarf neu.", true);
-    public async Task RequestExitAsync()
+    internal void SetStatus(string text) { if (!_closed) StatusText.Text = text; }
+    private void ReportError(string action, Exception ex) { App.LogException(action, ex); SetStatus(action + ": " + ex.Message); }
+    internal void ShowUnexpectedError() => SetStatus("Die Aktion konnte nicht abgeschlossen werden. Details stehen im Protokoll.");
+    public Task RequestExitAsync()
     {
-        if (_closing || _replacing) return;
-        _closing = true;
-        UpdateControls();
-        try
-        {
-            if (!await PrepareReplacementAsync()) return;
-            _accountCts?.Cancel();
-            if (Application.Current is App app) app.ExitApplication();
-            else Close();
-        }
-        catch (Exception ex) { ReportError("Beenden", ex); }
-        finally { _closing = false; UpdateControls(); }
+        _exiting = true; _lifetime.Cancel(); _accountCts?.Cancel();
+        Close(); ((App)Application.Current).ExitApplication();
+        return Task.CompletedTask;
     }
     protected override void OnClosing(CancelEventArgs e)
     {
-        if (!_diagnosticsMode && Application.Current is App app && !app.IsExiting)
-        {
-            e.Cancel = true;
-            Hide();
-            app.NotifyHidden();
-        }
+        if (!_diagnosticsMode && !_exiting && !((App)Application.Current).IsExiting) { e.Cancel = true; Hide(); }
         base.OnClosing(e);
     }
     protected override void OnClosed(EventArgs e)
     {
-        _disposed = true;
-        _ocrCts?.Cancel();
-        _accountCts?.Cancel();
-        _hotkey?.Dispose();
-        _openAi.Dispose();
+        _closed = true; _lifetime.Cancel(); _accountCts?.Cancel(); _hotkey?.Dispose(); OpenAi?.Dispose();
         base.OnClosed(e);
     }
-
-    [DllImport("dwmapi.dll")]
-    private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
 }

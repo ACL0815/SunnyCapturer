@@ -13,14 +13,17 @@ public partial class App : Application
 {
     private Forms.NotifyIcon? _tray;
     private Icon? _trayIcon;
-    private bool _hiddenNoticeShown;
+    private TrayMenu? _trayMenu;
+    private DispatcherTimer? _countdown;
+    private int _remaining;
+    private string? _balloonFolder;
     private bool _diagnostics;
     public bool IsExiting { get; private set; }
 
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-        _diagnostics = e.Args.Length > 0 && e.Args[0] is "--self-test" or "--self-check" or "--render-preview" or "--render-overlay-preview";
+        _diagnostics = e.Args.Length > 0 && (e.Args[0] is "--self-test" or "--self-check" || e.Args[0].StartsWith("--render-", StringComparison.Ordinal));
         DispatcherUnhandledException += OnDispatcherException;
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
         {
@@ -40,13 +43,18 @@ public partial class App : Application
                 Shutdown(exit);
                 return;
             }
-            if (e.Args.Length > 1 || (e.Args.Length == 1 && e.Args[0] != "--demo"))
+            if (e.Args.Length > 1 || (e.Args.Length == 1 && e.Args[0] is not ("--demo" or "--settings")))
                 throw new ArgumentException("Aufruf: KairosCapture [--demo | --self-test <Ordner> | --render-preview <PNG-Datei> | --render-overlay-preview <PNG-Datei>]");
             var window = new MainWindow();
             MainWindow = window;
             InitializeTray(window);
-            if (e.Args.Length == 1) window.LoadImage(AppDiagnostics.CreateDemoBitmap(), "Beispiel.png");
-            window.Show();
+            window.InitializeHotkey();
+            if (e.Args.Length == 1) window.ShowFromTray();
+            if (!window.Settings.WelcomeShown)
+            {
+                _tray?.ShowBalloonTip(4000, "Kairos Capture ist bereit", "Linksklick nimmt einen Bereich auf. Rechtsklick öffnet Aufnahmen und Einstellungen. Tastenkürzel: " + window.Settings.Hotkey, Forms.ToolTipIcon.Info);
+                window.Settings.WelcomeShown = true; window.SaveSettings();
+            }
         }
         catch (Exception exception)
         {
@@ -65,21 +73,62 @@ public partial class App : Application
         string? executable = Environment.ProcessPath;
         if (executable is not null) _trayIcon = Icon.ExtractAssociatedIcon(executable);
         _trayIcon ??= (Icon)SystemIcons.Application.Clone();
-        var menu = new Forms.ContextMenuStrip();
-        menu.Items.Add("Kairos Capture öffnen", null, (_, _) => Dispatcher.Invoke(window.ShowFromTray));
-        menu.Items.Add("Bereich aufnehmen  ·  Strg+Alt+A", null, (_, _) => Dispatcher.InvokeAsync(async () => await window.CaptureAsync()));
-        menu.Items.Add(new Forms.ToolStripSeparator());
-        menu.Items.Add("Beenden", null, (_, _) => Dispatcher.InvokeAsync(async () => await window.RequestExitAsync()));
-        _tray = new Forms.NotifyIcon { Icon = _trayIcon, Text = "Kairos Capture · Strg+Alt+A", ContextMenuStrip = menu, Visible = true };
-        _tray.DoubleClick += (_, _) => Dispatcher.Invoke(window.ShowFromTray);
-        _tray.BalloonTipClicked += (_, _) => Dispatcher.Invoke(window.ShowFromTray);
+        _trayMenu = new TrayMenu(window, seconds => ToggleCountdown(window, seconds));
+        _tray = new Forms.NotifyIcon { Icon = _trayIcon, Text = "Kairos Capture · " + window.Settings.Hotkey, ContextMenuStrip = _trayMenu.Menu, Visible = true };
+        _tray.MouseClick += async (_, e) =>
+        {
+            if (e.Button != Forms.MouseButtons.Left) return;
+            if (_countdown?.IsEnabled == true) { CancelCountdown(window); return; }
+            await window.CaptureAsync();
+        };
+        _tray.BalloonTipClicked += (_, _) =>
+        {
+            if (_balloonFolder != null)
+            {
+                try { GlassWindow.Open(_balloonFolder); }
+                catch (Exception ex) { LogException("Balloon folder", ex); }
+            }
+            else window.ShowFromTray();
+        };
+        window.SettingsChanged += () => RefreshTray(window);
+        window.CaptureCompleted += (completion, path) =>
+        {
+            _balloonFolder = path == null ? null : Path.GetDirectoryName(path);
+            string text = path != null ? "Gespeichert – klicken öffnet den Ordner." : "Aufnahme in die Zwischenablage kopiert.";
+            _tray.ShowBalloonTip(2000, completion == Capture.CaptureCompletion.Copied ? "Kopiert" : "Gespeichert", text, Forms.ToolTipIcon.None);
+        };
+        Capture.CaptureService.CaptureStateChanged += (_, _) =>
+        {
+            if (Capture.CaptureService.IsCapturing) CancelCountdown(window);
+            RefreshTray(window);
+        };
     }
 
-    public void NotifyHidden()
+    private void RefreshTray(MainWindow window)
     {
-        if (_hiddenNoticeShown || _tray is null) return;
-        _hiddenNoticeShown = true;
-        _tray.ShowBalloonTip(3000, "Kairos Capture bleibt bereit", "Strg+Alt+A nimmt einen Bereich auf. Im Tray-Menü kannst du Kairos beenden.", Forms.ToolTipIcon.Info);
+        _trayMenu?.Refresh(Capture.CaptureService.IsCapturing, Capture.CaptureService.LastSession != null);
+        if (_tray != null && _countdown?.IsEnabled != true) _tray.Text = "Kairos Capture · " + window.Settings.Hotkey;
+    }
+
+    private void ToggleCountdown(MainWindow window, int seconds)
+    {
+        if (_countdown?.IsEnabled == true) { CancelCountdown(window); return; }
+        if (Capture.CaptureService.IsCapturing) return;
+        _remaining = seconds;
+        _countdown = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _tray!.Text = $"Kairos · Aufnahme in {_remaining} s · Linksklick bricht ab";
+        _countdown.Tick += async (_, _) =>
+        {
+            if (--_remaining > 0) { _tray.Text = $"Kairos · Aufnahme in {_remaining} s · Linksklick bricht ab"; return; }
+            CancelCountdown(window);
+            await window.CaptureAsync();
+        };
+        _countdown.Start();
+    }
+    private void CancelCountdown(MainWindow window)
+    {
+        _countdown?.Stop(); _countdown = null;
+        if (_tray != null) _tray.Text = "Kairos Capture · " + window.Settings.Hotkey;
     }
 
     public void ExitApplication()
@@ -115,10 +164,11 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         IsExiting = true;
+        _countdown?.Stop();
         if (_tray is not null)
         {
             _tray.Visible = false;
-            _tray.ContextMenuStrip?.Dispose();
+            _trayMenu?.Dispose();
             _tray.Dispose();
         }
         _trayIcon?.Dispose();

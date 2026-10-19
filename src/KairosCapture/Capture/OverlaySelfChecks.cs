@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -26,107 +27,72 @@ public static class OverlaySelfChecks
         CheckSelectedStyle(background);
         CheckRoutesAndText(background);
         CheckCompletion(background);
-        CheckHandoffPermission(background);
+        CheckResume(background);
+        CheckOcrMode(background);
         CheckGestureEscape(background);
         CheckRendering(background);
     }
 
-    private static RegionOverlay Create(BitmapSource background, Func<Window, Task<bool>>? confirmHandoff = null) => new(background,
-        new DrawingRectangle(-1600, -900, background.PixelWidth, background.PixelHeight), confirmHandoff: confirmHandoff);
+    private static RegionOverlay Create(BitmapSource background) => new(background,
+        new DrawingRectangle(-1600, -900, background.PixelWidth, background.PixelHeight));
 
-    private static void CheckHandoffPermission(BitmapSource background)
+    private static void CheckResume(BitmapSource background)
     {
-        // Complete controlled delayed callbacks on this STA, just as a modal WPF owner does.
-        SynchronizationContext? previous = SynchronizationContext.Current;
-        SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext());
-        try
+        foreach (CaptureCompletion completion in new[] { CaptureCompletion.Copied, CaptureCompletion.Saved, CaptureCompletion.Ocr })
         {
-            foreach (CaptureCompletion completion in new[] { CaptureCompletion.Workbench, CaptureCompletion.Ocr })
+            var overlay = Create(background);
+            Int32Rect crop = new(30, 20, 700, 430); overlay.SetRegion(crop);
+            AnnotationCanvas editor = overlay.Editor;
+            byte[] baseline = Bytes(editor.Flatten());
+            Draw(editor, EditorTool.Rectangle, new Point(80, 70), new Point(120, 110));
+            byte[] first = Bytes(editor.Flatten());
+            Draw(editor, EditorTool.Ellipse, new Point(180, 170), new Point(220, 210));
+            byte[] second = Bytes(editor.Flatten()); editor.Undo();
+            editor.Tool = EditorTool.Select; editor.BeginGesture(new Point(100, 90)); editor.EndGesture();
+            object? identity = editor.SelectedIdentity;
+            byte[] expected = Bytes(editor.Flatten(crop));
+            Require(overlay.ExecuteOutput(completion, image => Bytes(image).SequenceEqual(expected)), "Completion must export the crop.");
+            CaptureSessionResult session = overlay.Result;
+            CaptureService.Remember(session);
+            Require(ReferenceEquals(CaptureService.LastSession, session), "Successful completion must retain the last session.");
+            CaptureService.Remember(new(CaptureCompletion.Cancelled));
+            Require(ReferenceEquals(CaptureService.LastSession, session), "Cancelled captures must not replace the last successful session.");
+            Require(editor.Parent == null && VisualTreeHelper.GetParent(editor) == null && editor.Clip == null, "Completed editor must detach cleanly.");
+            for (int round = 0; round < 2; round++)
             {
-                Task<bool> permission = Task.FromResult(false);
-                int calls = 0;
-                Window? dialogOwner = null;
-                var overlay = Create(background, owner => { calls++; dialogOwner = owner; return permission; });
-                Int32Rect crop = new(30, 20, 700, 430);
-                overlay.SetRegion(crop);
-                AnnotationCanvas editor = overlay.Editor;
-                byte[] baseline = Bytes(editor.Flatten());
-                Draw(editor, EditorTool.Rectangle, new Point(80, 70), new Point(120, 110));
-                byte[] first = Bytes(editor.Flatten());
-                Draw(editor, EditorTool.Ellipse, new Point(180, 170), new Point(220, 210));
-                byte[] second = Bytes(editor.Flatten());
+                var resumed = new RegionOverlay(session.Screenshot!, session.Bounds, editor: session.Editor);
+                resumed.SetRegion(session.Region);
+                Require(ReferenceEquals(resumed.Editor, editor) && ReferenceEquals(identity, editor.SelectedIdentity) && resumed.Selection == crop,
+                    "Resume must keep object identity, frame and editor.");
+                Require(editor.CanUndo && editor.CanRedo && expected.SequenceEqual(Bytes(editor.Flatten(crop))), "Resume must preserve both history stacks and pixels.");
+                editor.Undo(); Require(baseline.SequenceEqual(Bytes(editor.Flatten())), "Resumed undo must reach original screen.");
+                editor.Redo(); Require(first.SequenceEqual(Bytes(editor.Flatten())), "Resumed redo must restore the first object.");
+                editor.Redo(); Require(second.SequenceEqual(Bytes(editor.Flatten())), "Resumed redo must retain later objects.");
                 editor.Undo();
-                editor.Tool = EditorTool.Select;
-                editor.BeginGesture(new Point(100, 90)); editor.EndGesture();
-                object? identity = editor.SelectedIdentity;
-                byte[] cropped = Bytes(editor.Flatten(crop));
-                Require(!overlay.CompleteAsync(completion).GetAwaiter().GetResult() && calls == 1 && ReferenceEquals(dialogOwner, overlay),
-                    "Denied handoff must use the live overlay as dialog owner.");
-                Require(!overlay.IsClosed && ReferenceEquals(editor.Parent, overlay.PreviewRoot) && editor.Clip != null &&
-                    overlay.Selection == crop && ReferenceEquals(identity, editor.SelectedIdentity) && editor.CanUndo && editor.CanRedo &&
-                    first.SequenceEqual(Bytes(editor.Flatten())) && cropped.SequenceEqual(Bytes(editor.Flatten(crop))),
-                    "Denied handoff must retain editor/object identity, crop, exact pixels and both history stacks.");
-
-                permission = Task.FromException<bool>(new InvalidOperationException("offline approval failure"));
-                Require(!overlay.CompleteAsync(completion).GetAwaiter().GetResult() && !overlay.IsClosed && editor.IsEnabled,
-                    "Approval exceptions must be observed and release the gate without closing the session.");
-                var pending = new TaskCompletionSource<bool>();
-                permission = pending.Task;
-                Task<bool> handoff = overlay.CompleteAsync(completion);
-                Require(!handoff.IsCompleted && !editor.IsEnabled && calls == 3, "Delayed approval must hold an input gate.");
-                Require(!overlay.CompleteAsync(completion).GetAwaiter().GetResult() &&
-                    !overlay.CompleteAsync(CaptureCompletion.Copied).GetAwaiter().GetResult() &&
-                    !overlay.CompleteAsync(CaptureCompletion.Saved).GetAwaiter().GetResult() && calls == 3,
-                    "Pending approval must reject duplicate handoffs, copy and save before any side effects.");
-                Require(!overlay.ExecuteOutput(CaptureCompletion.Saved, _ => throw new InvalidOperationException("must not write")) &&
-                    !overlay.BeginFrameGesture(new Point(30, 20)), "Pending approval must block output and frame gestures.");
-                overlay.SetRegion(new Int32Rect(0, 0, 50, 50));
-                editor.BeginGesture(new Point(100, 90)); editor.UpdateGesture(new Point(600, 400)); editor.EndGesture();
-                foreach (Button button in Buttons(overlay.Toolbar)) button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-                overlay.HandleSessionKey(Key.Escape);
-                overlay.HandleSessionKey(Key.Delete);
-                overlay.HandleSessionKey(Key.Z, ModifierKeys.Control);
-                overlay.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Right)
-                    { RoutedEvent = UIElement.PreviewMouseRightButtonDownEvent });
-                Require(!overlay.IsClosed && calls == 3 && overlay.Selection == crop && ReferenceEquals(identity, editor.SelectedIdentity) &&
-                    editor.CanUndo && editor.CanRedo && first.SequenceEqual(Bytes(editor.Flatten())),
-                    "Pending approval must ignore cancellation, object/frame gestures and all toolbar/shortcut edits.");
-                pending.SetResult(false);
-                Require(handoff.IsCompletedSuccessfully && !handoff.Result && editor.IsEnabled && !overlay.IsClosed,
-                    "Delayed denial must keep the session and permit another attempt.");
-                pending = new TaskCompletionSource<bool>(); permission = pending.Task;
-                handoff = overlay.CompleteAsync(completion);
-                pending.SetResult(true);
-                Require(handoff.IsCompletedSuccessfully && handoff.Result && overlay.IsClosed && calls == 4 &&
-                    overlay.Result.ReplacementConfirmed && overlay.Result.Completion == completion && overlay.Result.Region == crop &&
-                    ReferenceEquals(overlay.Result.Editor, editor) && ReferenceEquals(identity, editor.SelectedIdentity) && editor.Parent == null,
-                    "Retry approval must detach exactly once and retain the approved editor/object/crop.");
-                Require(cropped.SequenceEqual(Bytes(editor.Flatten(crop))) && editor.CanUndo && editor.CanRedo,
-                    "Approved handoff must preserve pixels and both history stacks.");
-                editor.Undo();
-                Require(baseline.SequenceEqual(Bytes(editor.Flatten())) && !editor.CanUndo, "Denied/failed/pending approvals must add no undo entries.");
-                editor.Redo();
-                Require(first.SequenceEqual(Bytes(editor.Flatten())), "The original object must survive approval retry history.");
-                editor.Redo();
-                Require(second.SequenceEqual(Bytes(editor.Flatten())), "Existing redo must survive all approval attempts.");
-                Require(!overlay.IsVisible && new System.Windows.Interop.WindowInteropHelper(overlay).Handle == IntPtr.Zero,
-                    "Approval checks must never show a window or allocate a native handle.");
-            }
-            foreach (bool externalClose in new[] { false, true })
-            {
-                var pending = new TaskCompletionSource<bool>();
-                var overlay = Create(background, _ => pending.Task);
-                overlay.SetRegion(new Int32Rect(30, 20, 700, 430));
-                Task<bool> handoff = overlay.CompleteAsync(CaptureCompletion.Workbench);
-                if (externalClose) overlay.Close(); else overlay.Cancel(); // Owner/lifetime cancellation uses Cancel.
-                pending.SetResult(true);
-                Require(handoff.IsCompletedSuccessfully && !handoff.Result && overlay.IsClosed &&
-                    overlay.Result.Completion == CaptureCompletion.Cancelled && overlay.Result.Editor == null &&
-                    !overlay.Result.ReplacementConfirmed && ReferenceEquals(overlay.Editor.Parent, overlay.PreviewRoot),
-                    "A late approval after external close or owner cancellation must never detach/activate the editor.");
+                editor.Tool = EditorTool.Select; editor.BeginGesture(new Point(100, 90)); editor.EndGesture();
+                resumed.SetRegion(new Int32Rect(0, 0, background.PixelWidth, background.PixelHeight));
+                Require(ReferenceEquals(identity, editor.SelectedIdentity) && first.SequenceEqual(Bytes(editor.Flatten())), "Expanding resumed frame must retain all original pixels and objects.");
+                resumed.SetRegion(crop);
+                Require(resumed.ExecuteOutput(completion, image => expected.SequenceEqual(Bytes(image))), "Resumed session must complete again.");
+                session = resumed.Result;
             }
         }
-        finally { SynchronizationContext.SetSynchronizationContext(previous); }
+    }
+
+    private static void CheckOcrMode(BitmapSource background)
+    {
+        var overlay = new RegionOverlay(background, new DrawingRectangle(0, 0, background.PixelWidth, background.PixelHeight), ocrMode: true);
+        Require(overlay.BeginFrameGesture(new Point(20, 30)), "OCR mode must begin a selection.");
+        overlay.UpdateFrameGesture(new Point(400, 300)); overlay.EndFrameGesture();
+        Require(overlay.IsClosed && overlay.Result.Completion == CaptureCompletion.Ocr && overlay.Result.Image?.PixelWidth == 380 && overlay.Result.Region == new Int32Rect(20, 30, 380, 270),
+            "OCR mode must complete immediately on release using the selected image.");
+        Require(!overlay.ExecuteOutput(CaptureCompletion.Ocr, _ => throw new InvalidOperationException("must not run")), "Closed OCR session must reject duplicate output.");
+        var cancel = new RegionOverlay(background, new DrawingRectangle(0, 0, background.PixelWidth, background.PixelHeight), ocrMode: true);
+        cancel.BeginFrameGesture(new Point(20, 30)); cancel.UpdateFrameGesture(new Point(400, 300));
+        cancel.HandleSessionKey(Key.Escape);
+        Require(!cancel.IsClosed && cancel.Selection.IsEmpty, "OCR selection Escape must discard only the active gesture.");
+        cancel.HandleSessionKey(Key.Escape);
+        Require(cancel.IsClosed && cancel.Result.Completion == CaptureCompletion.Cancelled, "OCR idle Escape must cancel without recognition.");
     }
 
     private static void CheckGestureEscape(BitmapSource background)
@@ -326,7 +292,7 @@ public static class OverlaySelfChecks
         var overlay = Create(background);
         overlay.SetRegion(new Int32Rect(80, 70, 760, 410));
         Layout(overlay.PreviewRoot, background.PixelWidth, background.PixelHeight);
-        Button rectangle = Buttons(overlay.Toolbar).Single(b => Equals(b.Content, "Rechteck"));
+        ButtonBase rectangle = Buttons(overlay.Toolbar).Single(b => Equals(b.Tag, EditorTool.Rectangle));
         rectangle.ApplyTemplate();
         DependencyObject source = (DependencyObject?)Descendant<TextBlock>(rectangle) ?? rectangle;
         Require(overlay.IsControlSource(source), "Toolbar content must be recognized by source ancestry.");
@@ -337,15 +303,13 @@ public static class OverlaySelfChecks
         rectangle.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         Require(overlay.Editor.Tool == EditorTool.Rectangle, "Actual toolbar button must activate its editor tool.");
         var colour = Buttons(overlay.Toolbar).First(b => b.ToolTip is string tip && tip.StartsWith("Farbe #7D4BE3", StringComparison.Ordinal));
-        Require(Descendant<TextBlock>(colour)?.Foreground is SolidColorBrush { Color.R: 125, Color.G: 75, Color.B: 227 },
-            "Button content must inherit its own foreground instead of a global TextBlock colour.");
-        Button redo = Buttons(overlay.Toolbar).Single(b => Equals(b.Content, "Wiederholen"));
-        Require(!redo.IsEnabled && Descendant<Border>(redo)?.Background is SolidColorBrush { Color.R: 9, Color.G: 14, Color.B: 19 },
-            "Disabled toolbar controls must retain a dark readable background.");
-        foreach (Button button in Buttons(overlay.Toolbar))
+        Require(colour.Background is SolidColorBrush { Color.R: 125, Color.G: 75, Color.B: 227 }, "Swatch must show its actual colour.");
+        ButtonBase redo = Buttons(overlay.Toolbar).Single(b => Equals(b.Tag, "Redo"));
+        Require(!redo.IsEnabled && redo.ToolTip != null, "Disabled redo must retain its tooltip.");
+        foreach (ButtonBase button in Buttons(overlay.Toolbar))
         {
             Require(button.Foreground is SolidColorBrush { Color.A: 255 }, "Toolbar control foreground must be explicit and opaque.");
-            Require(button.FontSize >= 13 && button.MinHeight >= 30, "Toolbar controls must remain readable and usable.");
+            Require(button.Width >= 24 && button.Height >= 30 && button.ToolTip != null, "Toolbar controls must remain usable and explained.");
         }
         overlay.Editor.Tool = EditorTool.Text;
         overlay.Editor.BeginGesture(new Point(180, 180));
@@ -381,7 +345,7 @@ public static class OverlaySelfChecks
         Require(overlay.Editor.SelectedIdentity == null, "Committing empty text must clear selection before applying style.");
         overlay.Editor.Undo();
         Require(second.SequenceEqual(Bytes(overlay.Editor.Flatten())), "Empty text style path must add only one delete undo step.");
-        Button cancel = Buttons(overlay.Toolbar).Single(b => Equals(b.Content, "Abbrechen"));
+        ButtonBase cancel = Buttons(overlay.Toolbar).Single(b => Equals(b.Tag, "Close"));
         cancel.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         Require(overlay.IsClosed && overlay.Result.Completion == CaptureCompletion.Cancelled, "Actual cancel button must cancel the session.");
     }
@@ -399,24 +363,24 @@ public static class OverlaySelfChecks
             "An output failure must leave the live overlay open.");
         Require(overlay.ExecuteOutput(CaptureCompletion.Copied, image => Bytes(image).SequenceEqual(expected)) && overlay.IsClosed,
             "Copy/save must export the current crop without handles and close only after success.");
-        Require(overlay.Result.Completion == CaptureCompletion.Copied && overlay.Result.Editor == null,
-            "Completed copy should not request the workbench.");
-        foreach (CaptureCompletion completion in new[] { CaptureCompletion.Ocr, CaptureCompletion.Workbench })
+        Require(overlay.Result.Completion == CaptureCompletion.Copied && ReferenceEquals(overlay.Result.Editor, overlay.Editor),
+            "Completed copy must retain the live session for resume.");
+        foreach (CaptureCompletion completion in new[] { CaptureCompletion.Ocr })
         {
             var handoff = Create(background);
             handoff.SetRegion(crop);
             AnnotationCanvas editor = handoff.Editor;
             Draw(editor, EditorTool.Rectangle, new Point(80, 70), new Point(120, 110));
             byte[] edited = Bytes(editor.Flatten(crop));
-            var button = Buttons(handoff.Toolbar).Single(b => Equals(b.Content, completion == CaptureCompletion.Ocr ? "OCR" : "Werkbank"));
+            var button = Buttons(handoff.Toolbar).Single(b => Equals(b.Tag, "Ocr"));
             button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             Require(handoff.IsClosed && handoff.Result.Completion == completion && ReferenceEquals(handoff.Result.Editor, editor) && handoff.Result.Region == crop,
-                "Explicit OCR/workbench must return the same live editor and physical crop.");
+                "Explicit OCR must return the same live editor and physical crop.");
             Require(VisualTreeHelper.GetParent(editor) == null && editor.Parent == null && editor.Clip == null,
                 "The editor must be detached from the overlay before handoff.");
-            Require(edited.SequenceEqual(Bytes(editor.Flatten(crop))) && editor.CanUndo, "Handoff must preserve exact output and history.");
+            Require(edited.SequenceEqual(Bytes(editor.Flatten(crop))) && editor.CanUndo, "Completed session must preserve exact output and history.");
             editor.Undo(); editor.Redo();
-            Require(edited.SequenceEqual(Bytes(editor.Flatten(crop))), "Handoff history must remain live.");
+            Require(edited.SequenceEqual(Bytes(editor.Flatten(crop))), "Completed history must remain live.");
         }
         var escape = Create(background);
         escape.SetRegion(crop);
@@ -467,7 +431,7 @@ public static class OverlaySelfChecks
             overlay.Editor.BeginGesture(new Point(x + 30, y + height * .55));
             ((TextBox)overlay.Editor.Children[0]).Text = "Direkt im aufgenommenen Bildschirm";
             overlay.Editor.CommitText();
-            Buttons(overlay.Toolbar).Single(b => Equals(b.Content, "Auswahl")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Buttons(overlay.Toolbar).Single(b => Equals(b.Tag, EditorTool.Select)).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         }
         BitmapSource bitmap = RenderScene(overlay, background);
         overlay.Cancel();
@@ -490,9 +454,9 @@ public static class OverlaySelfChecks
         root.UpdateLayout();
     }
 
-    private static IEnumerable<Button> Buttons(DependencyObject root)
+    private static IEnumerable<ButtonBase> Buttons(DependencyObject root)
     {
-        if (root is Button button) yield return button;
+        if (root is ButtonBase button) yield return button;
         if (root is Border border && border.Child != null) foreach (var b in Buttons(border.Child)) yield return b;
         else if (root is ContentControl { Content: DependencyObject content }) foreach (var b in Buttons(content)) yield return b;
         else if (root is Panel panel) foreach (UIElement child in panel.Children) foreach (var b in Buttons(child)) yield return b;

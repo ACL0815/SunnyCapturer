@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$DotnetPath,
     [switch]$SkipChecks,
@@ -10,6 +10,11 @@ $kairosRoot = Split-Path -Parent $PSScriptRoot
 $kairosProject = Join-Path $kairosRoot 'src\KairosCapture\KairosCapture.csproj'
 $kairosPrivateDotnet = Join-Path $kairosRoot '.tools\dotnet\dotnet.exe'
 $kairosSdkHintPath = Join-Path $kairosRoot '.tools\dotnet-sdk-path.txt'
+# Git worktrees share the repository's already installed private SDK/cache.
+$kairosCommonGit = & git -C $kairosRoot rev-parse --git-common-dir 2>$null
+$kairosSharedRoot = if ($LASTEXITCODE -eq 0) { Split-Path -Parent ([IO.Path]::GetFullPath($(if ([IO.Path]::IsPathRooted($kairosCommonGit)) { $kairosCommonGit } else { Join-Path $kairosRoot $kairosCommonGit }))) } else { $kairosRoot }
+$kairosSharedHint = Join-Path $kairosSharedRoot '.tools\dotnet-sdk-path.txt'
+if (-not (Test-Path -LiteralPath $kairosSdkHintPath) -and (Test-Path -LiteralPath $kairosSharedHint)) { $kairosSdkHintPath = $kairosSharedHint }
 if ($DotnetPath) {
     $kairosDotnet = (Get-Item -LiteralPath $DotnetPath -ErrorAction Stop).FullName
 }
@@ -28,7 +33,7 @@ else {
 
 $kairosEnvironment = @{
     DOTNET_CLI_HOME = Join-Path $kairosRoot '.tools\dotnet-home'
-    NUGET_PACKAGES = Join-Path $kairosRoot '.tools\nuget-packages'
+    NUGET_PACKAGES = Join-Path $kairosSharedRoot '.tools\nuget-packages'
     DOTNET_ROOT = Split-Path -Parent $kairosDotnet
     DOTNET_CLI_TELEMETRY_OPTOUT = '1'
     DOTNET_SKIP_FIRST_TIME_EXPERIENCE = '1'
@@ -55,12 +60,17 @@ try {
         New-Item -ItemType Directory -Path $kairosChecks -Force | Out-Null
         & $kairosDotnet $kairosAssembly --self-test $kairosChecks
         $kairosCheckExit = $LASTEXITCODE
-        $kairosPreview = Join-Path $kairosChecks 'main-window.png'
-        & $kairosDotnet $kairosAssembly --render-preview $kairosPreview
+        $kairosPreview = Join-Path $kairosChecks 'settings-window.png'
+        & $kairosDotnet $kairosAssembly --render-settings-preview $kairosPreview
         $kairosPreviewExit = $LASTEXITCODE
         $kairosOverlayPreview = Join-Path $kairosChecks 'overlay.png'
         & $kairosDotnet $kairosAssembly --render-overlay-preview $kairosOverlayPreview
         $kairosOverlayExit = $LASTEXITCODE
+        foreach ($kairosExtra in @(@('--render-ocr-preview', 'ocr-result.png'), @('--render-tray-preview', 'tray-menu.png'))) {
+            $kairosExtraPath = Join-Path $kairosChecks $kairosExtra[1]
+            & $kairosDotnet $kairosAssembly $kairosExtra[0] $kairosExtraPath
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $kairosExtraPath)) { throw "Vorschau fehlgeschlagen: $kairosExtraPath" }
+        }
         if ($kairosCheckExit -ne 0) { throw "Offline-Prüfung fehlgeschlagen (Exit $kairosCheckExit). Bericht: $kairosChecks\self-test.json" }
         if ($kairosPreviewExit -ne 0 -or -not (Test-Path -LiteralPath $kairosPreview)) {
             throw "WPF-Vorschau fehlgeschlagen (Exit $kairosPreviewExit)."
@@ -73,7 +83,7 @@ try {
         Write-Host "Offline-Prüfungen bestanden. Aufnahme-Overlay: $kairosOverlayPreview"
     }
     if (-not $BuildOnly) {
-        $kairosOutput = Join-Path $kairosRoot 'artifacts\KairosCapture-0.2.0-win-x64'
+        $kairosOutput = Join-Path $kairosRoot 'artifacts\KairosCapture-0.3.0-win-x64'
         & $kairosDotnet publish $kairosProject -c Release -r win-x64 --self-contained false --no-restore --nologo -o $kairosOutput
         if ($LASTEXITCODE -ne 0) { throw 'Frameworkabhängiger Publish-Build fehlgeschlagen.' }
         Write-Host "Startbereit: $(Join-Path $kairosOutput 'KairosCapture.exe')"

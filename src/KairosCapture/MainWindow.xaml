@@ -1,136 +1,44 @@
 <Window x:Class="KairosCapture.MainWindow"
-        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Kairos Capture" Width="1440" Height="900" MinWidth="1000" MinHeight="640" WindowStartupLocation="CenterScreen"
-        AllowDrop="True" PreviewDragOver="Window_DragOver" Drop="Window_Drop" PreviewKeyDown="Window_KeyDown"
-        UseLayoutRounding="True" SnapsToDevicePixels="True">
-  <Grid Background="{StaticResource BackgroundBrush}" TextElement.Foreground="{StaticResource TextBrush}"
-        TextElement.FontFamily="Segoe UI Variable, Segoe UI" TextElement.FontSize="13">
-    <Grid.RowDefinitions><RowDefinition Height="76" /><RowDefinition Height="*" /><RowDefinition Height="32" /></Grid.RowDefinitions>
-    <Border BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="22,0">
-      <Grid>
-        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-          <Border Width="38" Height="38" CornerRadius="10" Background="#211A32" BorderBrush="{StaticResource DockOutline}" BorderThickness="1" Margin="0,0,12,0">
-            <Grid Margin="9"><Path Stroke="{StaticResource LavenderBrush}" StrokeThickness="1.7" Data="M 0,6 L 0,0 6,0 M 12,0 L 18,0 18,6 M 18,12 L 18,18 12,18 M 6,18 L 0,18 0,12" /><Ellipse Width="5" Height="5" Fill="{StaticResource GoldBrush}" /></Grid>
-          </Border>
-          <StackPanel><TextBlock Text="Kairos Capture" FontSize="20" FontWeight="SemiBold" /><TextBlock Text="Deine Screenshot-Werkbank" Style="{StaticResource MutedText}" Margin="0,2,0,0" /></StackPanel>
-        </StackPanel>
-        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-          <Button x:Name="CaptureButton" Style="{StaticResource PrimaryButton}" Click="Capture_Click" ToolTip="Bereich aufnehmen (Strg+Alt+A)" Margin="0,0,8,0"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE7C5;" Style="{StaticResource Glyph}" Margin="0,0,8,0" /><TextBlock Text="Bereich aufnehmen" /></StackPanel></Button>
-          <Button x:Name="OpenButton" Click="Open_Click" ToolTip="Bild öffnen (Strg+O)" Margin="0,0,8,0"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8E5;" Style="{StaticResource Glyph}" Margin="0,0,8,0" /><TextBlock Text="Bild öffnen" /></StackPanel></Button>
-          <Button x:Name="PasteButton" Click="Paste_Click" ToolTip="Bild einfügen (Strg+V)" AutomationProperties.Name="Bild einfügen" Margin="0,0,8,0" Padding="11,9"><TextBlock Text="&#xE77F;" Style="{StaticResource Glyph}" /></Button>
-          <Button x:Name="CopyButton" Click="Copy_Click" ToolTip="Bild kopieren (Strg+C)" Margin="0,0,8,0"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8C8;" Style="{StaticResource Glyph}" Margin="0,0,8,0" /><TextBlock Text="Kopieren" /></StackPanel></Button>
-          <Button x:Name="SaveButton" Click="Save_Click" ToolTip="Bild speichern (Strg+S)"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE74E;" Style="{StaticResource Glyph}" Margin="0,0,8,0" /><TextBlock Text="Speichern" /></StackPanel></Button>
-        </StackPanel>
-      </Grid>
-    </Border>
-    <Grid Grid.Row="1" Margin="18,18,18,14">
-      <Grid.ColumnDefinitions><ColumnDefinition Width="60" /><ColumnDefinition Width="14" /><ColumnDefinition Width="*" /><ColumnDefinition Width="16" /><ColumnDefinition Width="296" /></Grid.ColumnDefinitions>
-      <StackPanel>
-        <Border CornerRadius="13" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource DockOutline}" BorderThickness="1" Padding="7,8">
-          <StackPanel x:Name="ToolDock" AutomationProperties.Name="Zeichenwerkzeuge">
-            <RadioButton Style="{StaticResource ToolButton}" GroupName="Tools" Tag="Select" IsChecked="True" Checked="Tool_Checked" ToolTip="Auswählen / Verschieben (V)" AutomationProperties.Name="Auswählen"><TextBlock Text="&#xE8B0;" Style="{StaticResource Glyph}" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" /></RadioButton>
-            <Border Height="1" Background="{StaticResource BorderBrush}" Margin="5,7" />
-            <RadioButton Style="{StaticResource ToolButton}" GroupName="Tools" Tag="Arrow" Checked="Tool_Checked" ToolTip="Pfeil (A)" AutomationProperties.Name="Pfeil"><TextBlock Text="&#xE8EA;" Style="{StaticResource Glyph}" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" /></RadioButton>
-            <RadioButton Style="{StaticResource ToolButton}" GroupName="Tools" Tag="Rectangle" Checked="Tool_Checked" ToolTip="Rechteck (R)" AutomationProperties.Name="Rechteck"><TextBlock Text="&#xE739;" Style="{StaticResource Glyph}" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" /></RadioButton>
-            <RadioButton Style="{StaticResource ToolButton}" GroupName="Tools" Tag="Ellipse" Checked="Tool_Checked" ToolTip="Ellipse (E)" AutomationProperties.Name="Ellipse"><TextBlock Text="&#xEA3A;" Style="{StaticResource Glyph}" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" /></RadioButton>
-            <RadioButton Style="{StaticResource ToolButton}" GroupName="Tools" Tag="Pen" Checked="Tool_Checked" ToolTip="Stift (P)" AutomationProperties.Name="Stift"><TextBlock Text="&#xED63;" Style="{StaticResource Glyph}" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" /></RadioButton>
-            <RadioButton Style="{StaticResource ToolButton}" GroupName="Tools" Tag="Text" Checked="Tool_Checked" ToolTip="Text (T) · Strg+Enter übernimmt den Text" AutomationProperties.Name="Text"><TextBlock Text="&#xE8D2;" Style="{StaticResource Glyph}" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" /></RadioButton>
-            <RadioButton Style="{StaticResource ToolButton}" GroupName="Tools" Tag="Highlight" Checked="Tool_Checked" ToolTip="Markieren (H)" AutomationProperties.Name="Markieren"><TextBlock Text="&#xE7E6;" Style="{StaticResource Glyph}" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" /></RadioButton>
-            <RadioButton Style="{StaticResource ToolButton}" GroupName="Tools" Tag="Redact" Checked="Tool_Checked" ToolTip="Schwärzen (B)" AutomationProperties.Name="Schwärzen"><TextBlock Text="&#xE72E;" Style="{StaticResource Glyph}" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" /></RadioButton>
-          </StackPanel>
-        </Border>
-        <TextBlock Text="V · A · R · E&#x0a;P · T · H · B" FontSize="10" LineHeight="17" TextAlignment="Center" Foreground="{StaticResource MutedBrush}" Margin="0,12,0,0" ToolTip="Werkzeug per Tastatur wählen" />
-      </StackPanel>
-      <Border Grid.Column="2" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="11">
-        <Grid>
-          <Grid.RowDefinitions><RowDefinition Height="48" /><RowDefinition Height="*" /><RowDefinition Height="44" /></Grid.RowDefinitions>
-          <Border BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="12,0">
-            <Grid VerticalAlignment="Center">
-              <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-              <StackPanel x:Name="DrawingSettings" Orientation="Horizontal" VerticalAlignment="Center">
-                <RadioButton Style="{StaticResource Swatch}" Background="#7D4BE3" Tag="#7D4BE3" IsChecked="True" Checked="Color_Checked" ToolTip="Violett" GroupName="Colors" AutomationProperties.Name="Violett" />
-                <RadioButton Style="{StaticResource Swatch}" Background="#EF6475" Tag="#EF6475" Checked="Color_Checked" ToolTip="Koralle" GroupName="Colors" AutomationProperties.Name="Koralle" />
-                <RadioButton Style="{StaticResource Swatch}" Background="#D3B576" Tag="#D3B576" Checked="Color_Checked" ToolTip="Gold" GroupName="Colors" AutomationProperties.Name="Gold" />
-                <RadioButton Style="{StaticResource Swatch}" Background="#5FD5BA" Tag="#5FD5BA" Checked="Color_Checked" ToolTip="Mint" GroupName="Colors" AutomationProperties.Name="Mint" />
-                <RadioButton Style="{StaticResource Swatch}" Background="#F4F2FA" Tag="#F4F2FA" Checked="Color_Checked" ToolTip="Weiß" GroupName="Colors" AutomationProperties.Name="Weiß" />
-                <RadioButton Style="{StaticResource Swatch}" Background="#151720" Tag="#151720" Checked="Color_Checked" ToolTip="Schwarz" GroupName="Colors" AutomationProperties.Name="Schwarz" />
-                <Border Width="1" Height="20" Background="{StaticResource BorderBrush}" Margin="10,0" />
-                <ComboBox x:Name="ThicknessPicker" Width="76" SelectedIndex="1" SelectionChanged="Thickness_Changed" ToolTip="Strichstärke in Bildpixeln" AutomationProperties.Name="Strichstärke"><ComboBoxItem Content="2 px" Tag="2" /><ComboBoxItem Content="4 px" Tag="4" /><ComboBoxItem Content="8 px" Tag="8" /><ComboBoxItem Content="12 px" Tag="12" /></ComboBox>
-              </StackPanel>
-              <StackPanel Grid.Column="1" Orientation="Horizontal">
-                <Button x:Name="UndoButton" Style="{StaticResource IconButton}" Click="Undo_Click" ToolTip="Rückgängig (Strg+Z)" AutomationProperties.Name="Rückgängig"><TextBlock Text="&#xE7A7;" Style="{StaticResource Glyph}" /></Button>
-                <Button x:Name="RedoButton" Style="{StaticResource IconButton}" Click="Redo_Click" ToolTip="Wiederholen (Strg+Y)" AutomationProperties.Name="Wiederholen"><TextBlock Text="&#xE7A6;" Style="{StaticResource Glyph}" /></Button>
-              </StackPanel>
-            </Grid>
-          </Border>
-          <Grid Grid.Row="1" x:Name="Stage" ClipToBounds="True">
-            <Grid.Background><DrawingBrush TileMode="Tile" Viewport="0,0,24,24" ViewportUnits="Absolute"><DrawingBrush.Drawing><DrawingGroup><GeometryDrawing Brush="#0E131A" Geometry="M0,0 H24 V24 H0 Z" /><GeometryDrawing Brush="#141923" Geometry="M0,0 H12 V12 H0 Z M12,12 H24 V24 H12 Z" /></DrawingGroup></DrawingBrush.Drawing></DrawingBrush></Grid.Background>
-            <ScrollViewer x:Name="ImageScroll" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" SizeChanged="Stage_SizeChanged" PreviewMouseWheel="ImageScroll_MouseWheel" Visibility="Collapsed" Focusable="False">
-              <Grid Margin="28" HorizontalAlignment="Center" VerticalAlignment="Center"><Viewbox x:Name="ImageViewbox" Stretch="Fill"><Canvas x:Name="CropCanvas" ClipToBounds="True" /></Viewbox></Grid>
-            </ScrollViewer>
-            <Grid x:Name="EmptyState" Margin="26">
-              <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="400">
-                <Border Width="76" Height="76" CornerRadius="22" BorderBrush="{StaticResource DockOutline}" BorderThickness="1" Background="#1C172A" Margin="0,0,0,24"><Grid Margin="22"><Path Stroke="#B097E9" StrokeThickness="1.6" Data="M0,10 L0,0 10,0 M22,0 L32,0 32,10 M32,22 L32,32 22,32 M10,32 L0,32 0,22" /><Ellipse Width="7" Height="7" Fill="#D3B576" /></Grid></Border>
-                <TextBlock Text="Ein Ausschnitt. Alles im Blick." FontSize="24" FontWeight="SemiBold" TextAlignment="Center" TextWrapping="Wrap" />
-                <TextBlock Text="Nimm einen Bereich auf und bearbeite ihn&#x0a;direkt auf dem eingefrorenen Bildschirm." Foreground="{StaticResource MutedBrush}" FontSize="13" LineHeight="22" TextAlignment="Center" Margin="0,12,0,23" />
-                <Button x:Name="EmptyCaptureButton" Content="Bereich aufnehmen" Style="{StaticResource PrimaryButton}" Click="Capture_Click" HorizontalAlignment="Center" Padding="24,12" ToolTip="Strg+Alt+A" />
-                <TextBlock Text="Strg+Alt+A" FontSize="11" Foreground="{StaticResource LavenderBrush}" TextAlignment="Center" Margin="0,9,0,26" />
-                <Border Height="1" Background="{StaticResource BorderBrush}" Margin="28,0" />
-                <TextBlock Text="Bild hier ablegen · Strg+O zum Öffnen&#x0a;Strg+V zum Einfügen aus der Zwischenablage" TextAlignment="Center" FontSize="12" LineHeight="21" Foreground="{StaticResource MutedBrush}" Margin="0,18,0,0" />
-              </StackPanel>
-            </Grid>
-          </Grid>
-          <Border Grid.Row="2" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="12,0">
-            <Grid VerticalAlignment="Center"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-              <TextBlock x:Name="FileNameText" Text="Noch kein Bild" FontSize="12" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,10,0" />
-              <StackPanel Grid.Column="1" x:Name="ZoomControls" Orientation="Horizontal" VerticalAlignment="Center">
-                <Button Style="{StaticResource SmallButton}" Content="Einpassen" Click="Fit_Click" ToolTip="Bild einpassen (Strg+0)" Background="Transparent" BorderThickness="0" />
-                <Button Style="{StaticResource SmallButton}" Content="100 %" Click="ActualSize_Click" ToolTip="100 % (Strg+1)" Background="Transparent" BorderThickness="0" />
-                <Slider x:Name="ZoomSlider" Width="80" Minimum="10" Maximum="300" Value="100" SmallChange="10" LargeChange="25" ValueChanged="Zoom_Changed" VerticalAlignment="Center" Margin="8,0" ToolTip="Zoom · Strg+Mausrad" AutomationProperties.Name="Zoom in Prozent" />
-                <TextBlock x:Name="ZoomText" Text="100 %" Width="42" TextAlignment="Right" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Center" />
-              </StackPanel>
-            </Grid>
-          </Border>
-        </Grid>
-      </Border>
-      <Border Grid.Column="4" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="11" Padding="16">
-        <Grid>
-          <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-          <StackPanel Orientation="Horizontal" Margin="0,0,0,15"><TextBlock Text="&#xE8D2;" Style="{StaticResource Glyph}" Foreground="{StaticResource LavenderBrush}" Margin="0,0,10,0" /><TextBlock Text="Text aus Bild" FontSize="17" FontWeight="SemiBold" /></StackPanel>
-          <Grid Grid.Row="1" Margin="0,0,0,10"><Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-            <TextBlock Text="Modell" Style="{StaticResource MutedText}" Margin="0,0,0,6" />
-            <ComboBox x:Name="ModelPicker" Grid.Row="1" DisplayMemberPath="DisplayName" SelectionChanged="Model_Changed" AutomationProperties.Name="OpenAI-Modell" ToolTip="Aktuelle Modelle des verbundenen Kontos" />
-            <Button x:Name="RefreshModelsButton" Grid.Row="1" Grid.Column="1" Margin="6,0,0,0" Width="32" Padding="7" Click="RefreshModels_Click" ToolTip="Aktuelle Modelle laden" AutomationProperties.Name="Modelle laden"><TextBlock Text="&#xE72C;" Style="{StaticResource Glyph}" FontSize="14" /></Button>
-            <TextBlock x:Name="ModelPlaceholder" Grid.Row="1" Text="Modelle laden" Margin="11,0,30,0" Foreground="{StaticResource MutedBrush}" FontSize="12" VerticalAlignment="Center" IsHitTestVisible="False" />
-          </Grid>
-          <TextBlock Grid.Row="2" Text="Für die Texterkennung wird dieses Bild an OpenAI gesendet." Foreground="{StaticResource MutedBrush}" FontSize="11" LineHeight="17" TextWrapping="Wrap" Margin="0,0,0,10" />
-          <Button x:Name="OcrButton" Grid.Row="3" Content="Text erkennen" Click="Ocr_Click" Style="{StaticResource PrimaryButton}" Margin="0,0,0,12" ToolTip="Texterkennung für das bearbeitete Bild starten" />
-          <Grid Grid.Row="4" MinHeight="60">
-            <TextBox x:Name="OcrText" AcceptsReturn="True" AcceptsTab="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" FontSize="13" TextChanged="OcrText_Changed" AutomationProperties.Name="Erkannter Text" />
-            <TextBlock x:Name="OcrPlaceholder" Text="Erkannter Text erscheint hier.&#x0a;Danach kannst du ihn bearbeiten." Foreground="{StaticResource MutedBrush}" FontSize="12" LineHeight="21" Margin="13" TextWrapping="Wrap" IsHitTestVisible="False" />
-          </Grid>
-          <Grid Grid.Row="5" Margin="0,10,0,14"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="8" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-            <Button x:Name="CopyTextButton" Content="Text kopieren" Style="{StaticResource SmallButton}" Click="CopyText_Click" ToolTip="Erkannten Text kopieren" />
-            <Button x:Name="SaveTextButton" Grid.Column="2" Content="Als .txt speichern" Style="{StaticResource SmallButton}" Click="SaveText_Click" ToolTip="Text als UTF-8-Datei speichern" />
-          </Grid>
-          <Border Grid.Row="6" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="0,12,0,0">
-            <StackPanel>
-              <Grid Margin="0,0,0,7"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock x:Name="AccountStatus" Text="Konto verbinden" FontWeight="SemiBold" FontSize="12" /><Button x:Name="SignOutButton" Grid.Column="1" Content="Abmelden" Click="SignOut_Click" Style="{StaticResource SmallButton}" Padding="0" MinHeight="16" Background="Transparent" BorderThickness="0" FontSize="11" /></Grid>
-              <Grid x:Name="SavedAccountsRow" Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="6" /><ColumnDefinition Width="30" /></Grid.ColumnDefinitions><ComboBox x:Name="AccountPicker" DisplayMemberPath="Label" SelectionChanged="Account_Changed" AutomationProperties.Name="Gespeichertes ChatGPT-Konto" ToolTip="Gespeichertes Konto wählen" FontSize="12" /><Button x:Name="AddAccountButton" Grid.Column="2" Content="+" Style="{StaticResource SmallButton}" Click="AddAccount_Click" Padding="0" FontSize="18" ToolTip="Weiteres ChatGPT-Konto hinzufügen" AutomationProperties.Name="Konto hinzufügen" /></Grid>
-              <Button x:Name="LoginButton" Content="Weiter mit ChatGPT" Click="Login_Click" Background="#F4F4F4" Foreground="#101010" BorderBrush="#FFFFFF" FontWeight="SemiBold" ToolTip="Direkt bei OpenAI mit deinem ChatGPT-Konto anmelden" />
-              <TextBlock x:Name="AccountDetail" Text="Direkt bei OpenAI anmelden" Foreground="{StaticResource MutedBrush}" TextTrimming="CharacterEllipsis" FontSize="10" Margin="0,6,0,0" />
-            </StackPanel>
-          </Border>
-        </Grid>
-      </Border>
-    </Grid>
-    <Border Grid.Row="2" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="20,0">
-      <Grid VerticalAlignment="Center"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-        <TextBlock x:Name="DimensionsText" Text="Kein Bild geladen" FontSize="11" Foreground="{StaticResource MutedBrush}" Margin="0,0,20,0" />
-        <TextBlock x:Name="StatusText" Grid.Column="1" Text="Bereit. Ein Bild bleibt lokal, bis du die Texterkennung startest." TextTrimming="CharacterEllipsis" FontSize="11" Foreground="{StaticResource MutedBrush}" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" AutomationProperties.LiveSetting="Polite" />
-        <TextBlock x:Name="HotkeyText" Grid.Column="2" Text="Strg+Alt+A · Aufnehmen" FontSize="11" Foreground="{StaticResource LavenderBrush}" Margin="14,0,0,0" />
-      </Grid>
-    </Border>
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ Title="Kairos Capture · Einstellungen" Width="560" Height="690" MinWidth="500" MinHeight="550" WindowStartupLocation="CenterScreen" ResizeMode="CanMinimize" Background="#13151E">
+ <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><StackPanel Margin="22,18,22,22">
+  <Grid Margin="4,0,4,17"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+   <StackPanel><TextBlock Text="Kairos Capture" FontSize="24" FontWeight="SemiBold"/><TextBlock Text="Dein Ausschnitt. Dein Arbeitsfluss." Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0"/></StackPanel>
+   <Border Grid.Column="1" Style="{StaticResource GlassPanel}" Padding="10,6" VerticalAlignment="Center"><TextBlock Text="Einstellungen" FontSize="11" Foreground="{StaticResource LavenderBrush}"/></Border>
   </Grid>
+  <Border Style="{StaticResource GlassPanel}" Padding="16" Margin="0,0,0,12"><StackPanel>
+   <StackPanel Orientation="Horizontal" Margin="0,0,0,12"><Path Data="{StaticResource Glyph.Capture}" Style="{StaticResource GlassIcon}" Stroke="{StaticResource LavenderBrush}"/><TextBlock Text="Aufnahme" FontSize="16" FontWeight="SemiBold" Margin="10,0,0,0"/></StackPanel>
+   <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="190"/></Grid.ColumnDefinitions><TextBlock Text="Tastenkürzel" VerticalAlignment="Center"/><TextBox x:Name="HotkeyBox" Grid.Column="1" IsReadOnly="True" Padding="10,7" TextAlignment="Center" PreviewKeyDown="Hotkey_KeyDown" ToolTip="Anklicken und Kombination drücken · Strg, Alt oder Win + Buchstabe/Zahl/F-Taste"/></Grid>
+   <TextBlock Text="Speicherordner" Foreground="{StaticResource MutedBrush}" FontSize="12"/>
+   <Grid Margin="0,5,0,9"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+    <TextBlock x:Name="FolderText" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" FontSize="12" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
+    <Button Grid.Column="1" Content="Ändern…" Click="Folder_Click" Style="{StaticResource SmallButton}" Margin="8,0,4,0"/>
+    <Button Grid.Column="2" Click="OpenFolder_Click" Style="{StaticResource GlassIconButton}" ToolTip="Speicherordner öffnen"><Path Data="{StaticResource Glyph.Folder}" Style="{StaticResource GlassIcon}"/></Button>
+   </Grid>
+   <CheckBox x:Name="AskSave" Content="Beim Speichern jedes Mal fragen" Margin="0,4" Click="Settings_Click"/>
+   <CheckBox x:Name="SaveCopy" Content="Beim Kopieren zusätzlich speichern" Margin="0,4" Click="Settings_Click"/>
+  </StackPanel></Border>
+  <Border Style="{StaticResource GlassPanel}" Padding="16" Margin="0,0,0,12"><StackPanel>
+   <StackPanel Orientation="Horizontal" Margin="0,0,0,10"><Path Data="{StaticResource Glyph.Ocr}" Style="{StaticResource GlassIcon}" Stroke="{StaticResource LavenderBrush}"/><TextBlock Text="Texterkennung" FontSize="16" FontWeight="SemiBold" Margin="10,0,0,0"/><TextBlock Text="OpenAI" Foreground="{StaticResource MutedBrush}" Margin="8,3,0,0"/></StackPanel>
+   <TextBlock x:Name="AccountStatus" TextWrapping="Wrap" FontSize="12" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,8"/>
+   <ComboBox x:Name="AccountPicker" DisplayMemberPath="Label" SelectionChanged="Account_Changed" Margin="0,0,0,8" ToolTip="ChatGPT-Konto wählen"/>
+   <WrapPanel Margin="0,0,0,10">
+    <Button x:Name="LoginButton" Content="Weiter mit ChatGPT" Style="{StaticResource SmallButton}" Click="Login_Click" Margin="0,0,6,0"/>
+    <Button x:Name="AddAccountButton" Content="Konto hinzufügen" Style="{StaticResource SmallButton}" Click="AddAccount_Click" Margin="0,0,6,0"/>
+    <Button x:Name="SignOutButton" Content="Abmelden" Style="{StaticResource SmallButton}" Click="SignOut_Click"/>
+    <Button x:Name="CancelLoginButton" Content="Abbrechen" Visibility="Collapsed" Style="{StaticResource SmallButton}" Click="CancelLogin_Click" Margin="6,0,0,0"/>
+   </WrapPanel>
+   <Grid Margin="0,0,0,7"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+    <ComboBox x:Name="ModelPicker" DisplayMemberPath="DisplayName" SelectionChanged="Model_Changed" ToolTip="Modell für die Texterkennung"/>
+    <Button x:Name="RefreshButton" Grid.Column="1" Content="Aktualisieren" Style="{StaticResource SmallButton}" Click="RefreshModels_Click" Margin="8,0,0,0"/>
+   </Grid>
+   <CheckBox x:Name="AutoCopy" Content="Erkannten Text automatisch kopieren" Margin="0,4" Click="Settings_Click"/>
+  </StackPanel></Border>
+  <Border Style="{StaticResource GlassPanel}" Padding="16"><StackPanel>
+   <StackPanel Orientation="Horizontal" Margin="0,0,0,10"><Path Data="{StaticResource Glyph.Settings}" Style="{StaticResource GlassIcon}" Stroke="{StaticResource LavenderBrush}"/><TextBlock Text="System" FontSize="16" FontWeight="SemiBold" Margin="10,0,0,0"/></StackPanel>
+   <CheckBox x:Name="StartupCheck" Content="Mit Windows starten" Click="Startup_Click" Margin="0,0,0,10"/>
+   <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="Version 0.3.0" Foreground="{StaticResource MutedBrush}" FontSize="12" VerticalAlignment="Center"/><Button Grid.Column="1" Content="Protokollordner öffnen" Click="Logs_Click" Style="{StaticResource SmallButton}"/></Grid>
+  </StackPanel></Border>
+  <TextBlock x:Name="StatusText" TextWrapping="Wrap" Margin="6,10,6,0" Foreground="{StaticResource LavenderBrush}" FontSize="12"/>
+ </StackPanel></ScrollViewer>
 </Window>
