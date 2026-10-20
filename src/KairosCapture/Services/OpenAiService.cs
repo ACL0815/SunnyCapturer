@@ -34,12 +34,14 @@ public sealed partial class OpenAiService : IDisposable
     private readonly TimeSpan _ocrTimeout;
     private readonly TimeSpan _refreshTimeout;
     private readonly TimeSpan _jsonTimeout;
+    private readonly TimeSpan _loadTimeout;
+    private readonly Func<OpenAiState> _readState;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly object _sync = new();
     private readonly CancellationTokenSource _lifetime = new();
     private CancellationTokenSource _session = new();
     private CancellationTokenSource? _pendingSignIn;
-    private OpenAiState _state;
+    private OpenAiState? _state;
     private string? _activeKey;
     private JsonElement? _jwks;
     private DateTimeOffset _jwksAt;
@@ -53,7 +55,8 @@ public sealed partial class OpenAiService : IDisposable
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "KairosCapture")), null, true, App.LogOpenAiDiagnostic) { }
 
     internal OpenAiService(HttpClient http, OpenAiStorage storage, Action<Uri>? openBrowser = null, bool ownsHttp = false,
-        Action<string>? diagnostic = null, TimeSpan? ocrTimeout = null, TimeSpan? refreshTimeout = null, TimeSpan? jsonTimeout = null)
+        Action<string>? diagnostic = null, TimeSpan? ocrTimeout = null, TimeSpan? refreshTimeout = null, TimeSpan? jsonTimeout = null,
+        TimeSpan? loadTimeout = null, Func<OpenAiState>? readState = null)
     {
         _http = http;
         _storage = storage;
@@ -62,27 +65,89 @@ public sealed partial class OpenAiService : IDisposable
         _ocrTimeout = ocrTimeout ?? TimeSpan.FromMinutes(2);
         _refreshTimeout = refreshTimeout ?? TimeSpan.FromSeconds(30);
         _jsonTimeout = jsonTimeout ?? TimeSpan.FromSeconds(30);
+        _loadTimeout = loadTimeout ?? TimeSpan.FromSeconds(35);
+        _readState = readState ?? storage.Load;
         _openBrowser = openBrowser ?? (uri => { Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }); });
-        using (_storage.LockAsync(CancellationToken.None).GetAwaiter().GetResult())
-            _state = LoadState();
-        _activeKey = (_state.Registrations.FirstOrDefault(r => r.Credentials is not null) ?? _state.Registrations.FirstOrDefault())?.Key;
+    }
+
+    public bool IsLoaded { get { lock (_sync) return _state is not null; } }
+
+    public async Task EnsureLoadedAsync(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        lock (_sync)
+        {
+            ThrowIfDisposed();
+            if (_state is not null) return;
+        }
+        using var attempt = CancellationTokenSource.CreateLinkedTokenSource(ct, _lifetime.Token);
+        attempt.CancelAfter(_loadTimeout);
+        bool gateHeld = false;
+        try
+        {
+            await _gate.WaitAsync(attempt.Token).ConfigureAwait(false);
+            gateHeld = true;
+            lock (_sync)
+            {
+                ThrowIfDisposed();
+                if (_state is not null) return;
+            }
+            // LockAsync can complete synchronously. Keep all initial file I/O off the caller's dispatcher.
+            await Task.Run(async () =>
+            {
+                while (true)
+                {
+                    attempt.Token.ThrowIfCancellationRequested();
+                    try
+                    {
+                        using (await LockStorageAsync(attempt.Token).ConfigureAwait(false))
+                        {
+                            OpenAiState state = LoadState();
+                            attempt.Token.ThrowIfCancellationRequested();
+                            lock (_sync)
+                            {
+                                ThrowIfDisposed();
+                                _state = state;
+                                _activeKey = (state.Registrations.FirstOrDefault(r => r.Credentials is not null) ?? state.Registrations.FirstOrDefault())?.Key;
+                            }
+                        }
+                        return;
+                    }
+                    catch (OpenAiUserException ex) when (ex.Error == OpenAiUserError.SessionBusy)
+                    {
+                        await Task.Delay(100, attempt.Token).ConfigureAwait(false);
+                    }
+                }
+            }, attempt.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested && !_lifetime.IsCancellationRequested)
+        {
+            throw SessionError(OpenAiUserError.SessionBusy);
+        }
+        finally { if (gateHeld) _gate.Release(); }
+    }
+
+    public async Task<IReadOnlyList<OpenAiAccount>> GetAccountsAsync(CancellationToken ct)
+    {
+        await EnsureLoadedAsync(ct).ConfigureAwait(false);
+        return Accounts;
     }
 
     public IReadOnlyList<OpenAiAccount> Accounts
     {
-        get { lock (_sync) return Array.AsReadOnly(_state.Registrations.Select(Account).ToArray()); }
+        get { lock (_sync) return _state is { } state ? Array.AsReadOnly(state.Registrations.Select(Account).ToArray()) : Array.Empty<OpenAiAccount>(); }
     }
 
     public OpenAiAccount? ActiveAccount
     {
-        get { lock (_sync) return _state.Registrations.FirstOrDefault(r => r.Key == _activeKey) is { } r ? Account(r) : null; }
+        get { lock (_sync) return _state?.Registrations.FirstOrDefault(r => r.Key == _activeKey) is { } r ? Account(r) : null; }
     }
 
     private static OpenAiAccount Account(OpenAiRegistration r) => new(r.Key, r.Label, r.Email, r.Credentials is not null);
 
     internal bool CanUsePlan
     {
-        get { lock (_sync) return _state.Registrations.FirstOrDefault(r => r.Key == _activeKey)?.Credentials is { } c && OpenAiProtocol.CanInfer(c); }
+        get { lock (_sync) return _state?.Registrations.FirstOrDefault(r => r.Key == _activeKey)?.Credentials is { } c && OpenAiProtocol.CanInfer(c); }
     }
 
     // The catalog's list entries support image input under the current sharing contract.
@@ -90,14 +155,15 @@ public sealed partial class OpenAiService : IDisposable
     internal static OpenAiModel? SelectOcrModel(IReadOnlyList<OpenAiModel> models, string current) =>
         models.FirstOrDefault(m => m.Slug == current) ?? models.FirstOrDefault();
 
-    public void SelectAccount(string key)
+    public async Task SelectAccountAsync(string key, CancellationToken ct)
     {
+        await EnsureLoadedAsync(ct).ConfigureAwait(false);
         CancellationTokenSource previous;
         lock (_sync)
         {
             ThrowIfDisposed();
             if (_signingOut) throw new OpenAiUserException(OpenAiUserError.SigningOut);
-            if (!_state.Registrations.Any(r => r.Key == key)) throw new ArgumentException("Unbekanntes OpenAI-Konto.", nameof(key));
+            if (!_state!.Registrations.Any(r => r.Key == key)) throw new ArgumentException("Unbekanntes OpenAI-Konto.", nameof(key));
             _activeKey = key;
             previous = _session;
             _session = new CancellationTokenSource();
@@ -115,6 +181,7 @@ public sealed partial class OpenAiService : IDisposable
         OpenAiStep step = OpenAiStep.Session;
         try
         {
+            await EnsureLoadedAsync(attempt.Token).ConfigureAwait(false);
             await _gate.WaitAsync(attempt.Token).ConfigureAwait(false);
             gateHeld = true;
             lock (_sync)
@@ -216,6 +283,7 @@ public sealed partial class OpenAiService : IDisposable
         bool gateHeld = false;
         try
         {
+            await EnsureLoadedAsync(ct).ConfigureAwait(false);
             lock (_sync)
             {
                 ThrowIfDisposed();
@@ -292,6 +360,7 @@ public sealed partial class OpenAiService : IDisposable
         CancellationToken session = default;
         try
         {
+            await EnsureLoadedAsync(ct).ConfigureAwait(false);
             using var scope = operation = Operation(ct, TimeSpan.FromSeconds(45), out string key, out session);
             string access = await AccessTokenAsync(key, operation.Token).ConfigureAwait(false);
             using var request = new HttpRequestMessage(HttpMethod.Get, OpenAiProtocol.Resource + "/models");
@@ -337,6 +406,7 @@ public sealed partial class OpenAiService : IDisposable
                 throw new ArgumentException("Der PNG-Ausschnitt darf höchstens 64 Millionen Pixel enthalten.", nameof(png));
             if (string.IsNullOrWhiteSpace(model) || model.Length > 256 || model.Any(char.IsControl))
                 throw new ArgumentException("Bitte ein Modell aus der OpenAI-Modellliste wählen.", nameof(model));
+            await EnsureLoadedAsync(ct).ConfigureAwait(false);
             using var scope = operation = Operation(ct, _ocrTimeout, out string key, out session);
             string access = await AccessTokenAsync(key, operation.Token).ConfigureAwait(false);
             using var request = new HttpRequestMessage(HttpMethod.Post, OpenAiProtocol.Resource + "/responses");
@@ -696,7 +766,7 @@ public sealed partial class OpenAiService : IDisposable
     }
     private OpenAiState LoadState()
     {
-        try { return _storage.Load(); }
+        try { return _readState(); }
         catch (Exception ex) { OpenAiDiagnostics.Mark(ex, OpenAiStep.Persist); throw; }
     }
     private async Task<FileStream> LockStorageAsync(CancellationToken ct)

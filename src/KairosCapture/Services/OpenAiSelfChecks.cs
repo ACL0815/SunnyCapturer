@@ -60,7 +60,11 @@ public static class OpenAiSelfChecks
         Check("Session snapshot recovery invariant", () => StorageRecoveryChecks().GetAwaiter().GetResult());
         Check("Snapshot filesystem failures and crash cuts", () => StorageFaultChecks().GetAwaiter().GetResult());
         Check("Snapshot recovery ordering and cleanup", () => StorageOrderingChecks().GetAwaiter().GetResult());
-        Check("Constructor serializes snapshot recovery", () => StorageConstructorCheck().GetAwaiter().GetResult());
+        Check("Constructor never waits for snapshot recovery on STA", () => StorageConstructorCheck().GetAwaiter().GetResult());
+        Check("Initial load cancellation, deadline and retry", () => InitialLoadRetryChecks().GetAwaiter().GetResult());
+        Check("Concurrent initial loads read once", () => ConcurrentLoadChecks().GetAwaiter().GetResult());
+        Check("Public account operations load on demand", () => OnDemandLoadChecks().GetAwaiter().GetResult());
+        Check("Incomplete first snapshot starts fresh and cleans after save", () => IncompleteFirstSaveChecks().GetAwaiter().GetResult());
         Check("SSE completed text", () => Require(Read(Delta("hello") + Completed) == "hello", "Completed text lost."));
         Check("SSE empty completed", () => Require(Read(Completed) == "", "Empty OCR must be valid."));
         Check("SSE multiline data and comments", () => Require(Read(": keepalive\r\nevent: response.output_text.delta\r\ndata: {\"type\":\"response.output_text.delta\",\r\ndata: \"delta\":\"ä\"}\r\n\r\n" + Completed) == "ä", "SSE framing failed."));
@@ -540,7 +544,7 @@ public static class OpenAiSelfChecks
         Reject(() => fixture.Storage.Load());
         File.Delete(legacyOld);
         File.WriteAllBytes(legacy, new byte[] { 1 });
-        Reject(() => fixture.Storage.Load());
+        Require(fixture.Storage.Load().Registrations.Length == 0, "An incomplete first save must start fresh when no valid snapshot exists.");
         File.Delete(legacy);
         Require(fixture.Storage.Load().Registrations.Length == 0, "An unused store must still start empty.");
 
@@ -583,29 +587,170 @@ public static class OpenAiSelfChecks
     {
         using var fixture = new Fixture();
         using HttpClient http = Client(_ => throw new SelfCheckFailure("Recovery must not reach HTTP."));
-        FileStream gate = await fixture.Storage.LockAsync(CancellationToken.None).ConfigureAwait(false);
-        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        Task<OpenAiService> constructing = Task.Run(() =>
+        using FileStream gate = await fixture.Storage.LockAsync(CancellationToken.None).ConfigureAwait(false);
+        var constructed = new TaskCompletionSource<(OpenAiService? Service, long Milliseconds, Task? Loading, Exception? Failure)>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
         {
-            started.SetResult();
-            return new OpenAiService(http, fixture.Storage);
+            SynchronizationContext.SetSynchronizationContext(new System.Windows.Threading.DispatcherSynchronizationContext());
+            var watch = Stopwatch.StartNew();
+            try
+            {
+                var service = new OpenAiService(http, fixture.Storage);
+                long elapsed = watch.ElapsedMilliseconds;
+                Require(!service.IsLoaded && service.Accounts.Count == 0 && service.ActiveAccount is null && !service.CanUsePlan,
+                    "Synchronous getters must expose the unloaded state without storage I/O.");
+                Task loading = service.EnsureLoadedAsync(CancellationToken.None);
+                Require(watch.ElapsedMilliseconds < 100, "Starting EnsureLoadedAsync blocked the STA dispatcher.");
+                constructed.SetResult((service, elapsed, loading, null));
+            }
+            catch (Exception ex) { constructed.SetResult((null, watch.ElapsedMilliseconds, null, ex)); }
         });
-        OpenAiService? service = null;
-        try
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        var result = await constructed.Task.WaitAsync(TimeSpan.FromSeconds(8)).ConfigureAwait(false);
+        using var service = result.Service;
+        Require(result.Failure is null && result.Milliseconds < 100,
+            "STA constructor must return within 100 ms without storage failure; elapsed=" + result.Milliseconds + " ms failure=" + result.Failure?.GetType().Name);
+        await Task.Delay(5300).ConfigureAwait(false);
+        Require(!result.Loading!.IsCompleted && !service!.IsLoaded, "Initial load must retain the lock and retry beyond its first five-second wait.");
+        File.Move(Path.Combine(fixture.Directory, "openai-session.bin"), PendingPath(fixture.Directory, 1));
+        gate.Dispose();
+        await result.Loading.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        Require(service!.IsLoaded && service.Accounts.Single().IsSignedIn && service.ActiveAccount?.IsSignedIn == true,
+            "Initial load did not recover the session published before the lock was released.");
+        Console.WriteLine("STA constructor=" + result.Milliseconds + " ms; lock held >5300 ms; asynchronous recovery passed.");
+    }
+
+    private static async Task InitialLoadRetryChecks()
+    {
+        foreach (string failure in new[] { "deadline", "caller", "read" })
         {
-            await started.Task.ConfigureAwait(false);
-            await Task.Delay(200).ConfigureAwait(false);
-            bool waited = !constructing.IsCompleted;
-            File.Move(Path.Combine(fixture.Directory, "openai-session.bin"), PendingPath(fixture.Directory, 1));
-            gate.Dispose();
-            service = await constructing.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
-            Require(waited && service.Accounts.Single().IsSignedIn, "Constructor read the session outside the storage lock.");
+            using var fixture = new Fixture();
+            using HttpClient http = Client(_ => throw new SelfCheckFailure("Initial load must not reach HTTP."));
+            int reads = 0;
+            using var service = new OpenAiService(http, fixture.Storage, loadTimeout: TimeSpan.FromMilliseconds(150), readState: () =>
+            {
+                if (Interlocked.Increment(ref reads) == 1 && failure == "read") throw new IOException("Synthetic read failure.");
+                return fixture.Storage.Load();
+            });
+            using FileStream? gate = failure == "read" ? null : await fixture.Storage.LockAsync(CancellationToken.None).ConfigureAwait(false);
+            using var caller = new CancellationTokenSource();
+            if (failure == "caller") caller.CancelAfter(40);
+            Exception? observed = null;
+            try { await service.EnsureLoadedAsync(caller.Token).ConfigureAwait(false); }
+            catch (Exception ex) { observed = ex; }
+            Require(failure switch
+            {
+                "deadline" => observed is OpenAiUserException { Error: OpenAiUserError.SessionBusy },
+                "caller" => observed is OperationCanceledException && caller.IsCancellationRequested,
+                _ => observed is IOException
+            }, "Initial load did not preserve its " + failure + " failure.");
+            Require(!service.IsLoaded && service.Accounts.Count == 0 && service.ActiveAccount is null,
+                "A failed initial load published a partial state.");
+            gate?.Dispose();
+            await service.EnsureLoadedAsync(CancellationToken.None).ConfigureAwait(false);
+            Require(service.IsLoaded && service.ActiveAccount?.IsSignedIn == true && reads == (failure == "read" ? 2 : 1),
+                "A later call could not retry initial load after " + failure + ".");
         }
-        finally
+    }
+
+    private static async Task ConcurrentLoadChecks()
+    {
+        using var fixture = new Fixture();
+        using HttpClient http = Client(_ => throw new SelfCheckFailure("Initial load must not reach HTTP."));
+        int reads = 0;
+        using var service = new OpenAiService(http, fixture.Storage, readState: () =>
         {
+            Require(SynchronizationContext.Current is not System.Windows.Threading.DispatcherSynchronizationContext,
+                "Initial storage read ran on the dispatcher.");
+            Interlocked.Increment(ref reads);
+            return fixture.Storage.Load();
+        });
+        using FileStream gate = await fixture.Storage.LockAsync(CancellationToken.None).ConfigureAwait(false);
+        using var cancelled = new CancellationTokenSource();
+        Task first = service.EnsureLoadedAsync(cancelled.Token);
+        Task[] waiting = Enumerable.Range(0, 16).Select(_ => service.EnsureLoadedAsync(CancellationToken.None)).ToArray();
+        cancelled.Cancel();
+        try { await first.ConfigureAwait(false); throw new SelfCheckFailure("The first load ignored caller cancellation."); }
+        catch (OperationCanceledException) { }
+        Require(reads == 0 && waiting.All(task => !task.IsCompleted), "A reader bypassed the held storage lock.");
+        gate.Dispose();
+        await Task.WhenAll(waiting).WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        using var blockedSnapshot = new FileStream(Path.Combine(fixture.Directory, "openai-session.bin"), FileMode.Open, FileAccess.Read, FileShare.None);
+        await service.EnsureLoadedAsync(CancellationToken.None).ConfigureAwait(false);
+        Require(reads == 1 && service.Accounts.Single().IsSignedIn, "Concurrent or repeated EnsureLoadedAsync calls read more than once.");
+    }
+
+    private static async Task OnDemandLoadChecks()
+    {
+        foreach (string operation in new[] { "accounts", "models", "ocr", "sign-in", "sign-out", "selection" })
+        {
+            using var fixture = new Fixture();
+            string key = fixture.Storage.Load().Registrations.Single().Key;
+            int requests = 0;
+            int browsers = 0;
+            var browserStop = new SelfCheckFailure("Synthetic browser stop.");
+            using HttpClient http = Client(request =>
+            {
+                requests++;
+                return request.RequestUri!.AbsolutePath switch
+                {
+                    "/v1/models" => Json("{\"models\":[{\"slug\":\"test-model\",\"display_name\":\"Test\",\"visibility\":\"list\"}]}"),
+                    "/v1/responses" => Sse(Delta("loaded") + Completed),
+                    "/.well-known/openid-configuration" => Json(JsonSerializer.Serialize(new { issuer = OpenAiProtocol.Issuer,
+                        revocation_endpoint = OpenAiProtocol.Issuer + "/test/revoke" })),
+                    "/test/revoke" => Json("{}"),
+                    _ => throw new SelfCheckFailure("Unexpected fake request for " + operation)
+                };
+            });
+            using var service = new OpenAiService(http, fixture.Storage, _ => { browsers++; throw browserStop; }, loadTimeout: TimeSpan.FromMilliseconds(120));
+            async Task Invoke(CancellationToken ct)
+            {
+                switch (operation)
+                {
+                    case "accounts": Require((await service.GetAccountsAsync(ct).ConfigureAwait(false)).Single().Key == key, "Accounts did not load."); break;
+                    case "models": Require((await service.GetModelsAsync(ct).ConfigureAwait(false)).Single().Slug == "test-model", "Models did not load."); break;
+                    case "ocr": Require(await service.ExtractTextAsync(Png, "test-model", null, ct).ConfigureAwait(false) == "loaded", "OCR did not load."); break;
+                    case "sign-in": await service.SignInAsync(key, ct).ConfigureAwait(false); break;
+                    case "sign-out": await service.SignOutAsync(ct).ConfigureAwait(false); break;
+                    case "selection": await service.SelectAccountAsync(key, ct).ConfigureAwait(false); break;
+                }
+            }
+            using FileStream gate = await fixture.Storage.LockAsync(CancellationToken.None).ConfigureAwait(false);
+            using var safeguard = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            Exception? failure = null;
+            try { await Invoke(safeguard.Token).ConfigureAwait(false); }
+            catch (Exception ex) { failure = ex; }
+            Require(failure is OpenAiUserException { Error: OpenAiUserError.SessionBusy } && !service.IsLoaded && requests == 0 && browsers == 0,
+                operation + " did not await initial load before accessing the account.");
             gate.Dispose();
-            service ??= await constructing.ConfigureAwait(false);
-            service.Dispose();
+            try { await Invoke(CancellationToken.None).ConfigureAwait(false); }
+            catch (Exception ex) when (operation == "sign-in" && ReferenceEquals(ex, browserStop)) { }
+            Require(service.IsLoaded && service.ActiveAccount?.Key == key && (operation != "sign-in" || browsers == 1) &&
+                (operation != "sign-out" || fixture.Storage.Load().Registrations.Single().Credentials is null),
+                operation + " could not retry after the first load failed.");
+        }
+    }
+
+    private static async Task IncompleteFirstSaveChecks()
+    {
+        foreach (byte[] incomplete in new[] { Array.Empty<byte>(), new byte[] { 1, 2, 3 }, EncryptedSnapshot(new OpenAiState("", Array.Empty<OpenAiRegistration>())) })
+        {
+            using var fixture = new Fixture();
+            using FileStream gate = await fixture.Storage.LockAsync(CancellationToken.None).ConfigureAwait(false);
+            File.Delete(Path.Combine(fixture.Directory, "openai-session.bin"));
+            string temp = PendingPath(fixture.Directory, 1);
+            File.WriteAllBytes(temp, incomplete);
+            OpenAiState fresh = fixture.Storage.Load();
+            Require(fresh.HostId.StartsWith("urn:uuid:", StringComparison.Ordinal) && fresh.Registrations.Length == 0 && fresh.PendingClientId is null,
+                "An incomplete first save did not produce a fresh state.");
+            Require(File.Exists(temp), "Load must not clean incomplete candidates before a successful save.");
+            await fixture.Storage.SaveAsync(fresh, CancellationToken.None).ConfigureAwait(false);
+            OpenAiState persisted = fixture.Storage.Load();
+            Require(persisted.HostId == fresh.HostId && persisted.Registrations.Length == 0 && persisted.PendingClientId is null,
+                "The first successful save did not retain the fresh state.");
+            Require(!System.IO.Directory.EnumerateFiles(fixture.Directory, "openai-*.tmp").Any(),
+                "Successful first publication did not clean the incomplete temps.");
         }
     }
 
@@ -906,7 +1051,7 @@ public static class OpenAiSelfChecks
                 await Task.Delay(20).ConfigureAwait(false);
                 var elapsed = Stopwatch.StartNew();
                 if (source == "caller") caller.Cancel();
-                else if (source == "session") service.SelectAccount(service.ActiveAccount!.Key);
+                else if (source == "session") await service.SelectAccountAsync(service.ActiveAccount!.Key, CancellationToken.None).ConfigureAwait(false);
                 else service.Dispose();
                 try { await task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false); }
                 catch (OperationCanceledException ex)
@@ -988,6 +1133,7 @@ public static class OpenAiSelfChecks
             var logs = new List<string>();
             using HttpClient http = Client(_ => Json(TokenResponse().Replace("\"token_type\":\"Bearer\"", "\"token_type\":\"invalid\"", StringComparison.Ordinal)));
             using var service = new OpenAiService(http, fixture.Storage, diagnostic: logs.Add);
+            service.EnsureLoadedAsync(CancellationToken.None).GetAwaiter().GetResult();
             OpenAiState state = fixture.Storage.Load();
             if (scenario != "invalid-token")
             {
@@ -1476,7 +1622,10 @@ public static class OpenAiSelfChecks
             if (scenario is "wrong-subject" or "wrong-state" or "declined")
                 Require(fixture.Storage.Load().Registrations.Single().Credentials!.AccessToken == "test-access", "Rejected login replaced existing credentials.");
             else
+            {
+                await service.EnsureLoadedAsync(timeout.Token).ConfigureAwait(false);
                 Require(service.ActiveAccount!.Key == OpenAiProtocol.AccountKey(clientId, subject) && service.ActiveAccount.IsSignedIn, "Validated account was not retained.");
+            }
         }
     }
 
@@ -1525,8 +1674,8 @@ public static class OpenAiSelfChecks
         Task<IReadOnlyList<OpenAiModel>> request = service.GetModelsAsync(timeout.Token);
         await started.Task.WaitAsync(timeout.Token).ConfigureAwait(false);
         // Switch away and back before the cancelled request resumes. Key equality alone is insufficient.
-        service.SelectAccount(second.Key);
-        service.SelectAccount(first.Key);
+        await service.SelectAccountAsync(second.Key, CancellationToken.None).ConfigureAwait(false);
+        await service.SelectAccountAsync(first.Key, CancellationToken.None).ConfigureAwait(false);
         switched.SetResult();
         try { await request.ConfigureAwait(false); }
         catch (OperationCanceledException) { return; }

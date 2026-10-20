@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Reflection;
+using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -14,6 +15,7 @@ using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using KairosCapture.Capture;
 using KairosCapture.Editor;
 using KairosCapture.Services;
@@ -25,10 +27,10 @@ internal sealed class SelfCheckFailure(string message) : Exception(message);
 internal static class AppDiagnostics
 {
     internal sealed record CheckResult(string Name, string Status, long DurationMs, IReadOnlyList<string> Errors);
-    private sealed class OfflineHandler : HttpMessageHandler
+    private sealed class OfflineHandler(Func<HttpRequestMessage, HttpResponseMessage>? respond = null) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            throw new InvalidOperationException("Network access is disabled in diagnostics mode.");
+            respond is null ? throw new InvalidOperationException("Network access is disabled in diagnostics mode.") : Task.FromResult(respond(request));
     }
 
     internal static OpenAiService CreateIsolatedService() => new(new HttpClient(new OfflineHandler()),
@@ -157,9 +159,85 @@ internal static class AppDiagnostics
                 Require(((CheckBox)window.FindName(name)).Foreground is SolidColorBrush { Color.R: > 180, Color.G: > 180, Color.B: > 180 }, "Settings toggles must retain a readable light foreground.");
             LayoutPreview(window, 500, 550);
             Require(!window.IsVisible && new WindowInteropHelper(window).Handle == IntPtr.Zero, "Shell checks must stay offscreen.");
-            return Array.Empty<string>();
         }
         finally { window.Close(); }
+        CheckOpenAiStartupRetry();
+        return Array.Empty<string>();
+    }
+
+    private static void CheckOpenAiStartupRetry()
+    {
+        foreach (string action in new[] { "models", "ocr", "connect" })
+        {
+            string directory = Path.Combine(Path.GetTempPath(), "KairosCapture-startup-check-" + Guid.NewGuid().ToString("N"));
+            var storage = new OpenAiStorage(directory);
+            var credentials = new OpenAiCredentials("startup-access", "startup-refresh", "startup-id", "startup-nonce",
+                OpenAiProtocol.Scope.Split(' '), DateTimeOffset.UtcNow.AddHours(1), DateTimeOffset.MinValue);
+            var first = new OpenAiRegistration(OpenAiProtocol.AccountKey("oaiapp_first", "first"), "oaiapp_first", "first", "first@example.invalid", "First", credentials);
+            var preferred = first with { Key = OpenAiProtocol.AccountKey("oaiapp_preferred", "preferred"), ClientId = "oaiapp_preferred", Subject = "preferred" };
+            int requests = 0;
+            bool browserOpened = false;
+            using var http = new HttpClient(new OfflineHandler(request =>
+            {
+                requests++;
+                bool models = request.RequestUri!.AbsolutePath == "/v1/models";
+                return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                {
+                    Content = new StringContent(models ? "{\"models\":[{\"slug\":\"startup-model\",\"display_name\":\"Startup\",\"visibility\":\"list\"}]}" :
+                        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"startup text\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n",
+                        Encoding.UTF8, models ? "application/json" : "text/event-stream")
+                };
+            }));
+            MainWindow? window = null;
+            OcrResultWindow? result = null;
+            using var service = new OpenAiService(http, storage, _ => { browserOpened = true; throw new InvalidOperationException("Synthetic browser stop."); },
+                loadTimeout: TimeSpan.FromMilliseconds(150));
+            try
+            {
+                using FileStream gate = storage.LockAsync(CancellationToken.None).GetAwaiter().GetResult();
+                storage.SaveAsync(new OpenAiState("urn:uuid:startup-test", new[] { first, preferred }), CancellationToken.None).GetAwaiter().GetResult();
+                window = new MainWindow(true, service);
+                window.Settings.AccountKey = preferred.Key;
+                window.Settings.AutoCopyOcr = false;
+                Require(!service.IsLoaded && window.AccountStatus.Text.Contains("wird geladen") && window.OcrStatus.Contains("wird geladen"),
+                    "Startup must expose loading status in settings and tray.");
+                AwaitOnDispatcher(window.OpenAiInitialization);
+                Require(ReferenceEquals(window.OpenAi, service) && !service.IsLoaded && window.AccountStatus.Text.Contains("erneut") &&
+                    window.OcrStatus.Contains("erneut") && window.StatusText.Text.Contains("Modelle aktualisieren") && requests == 0,
+                    "A busy startup must retain the service and explain how to retry.");
+                gate.Dispose();
+                if (action == "models")
+                {
+                    window.RefreshButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    async Task Finished() { while (!window.RefreshButton.IsEnabled) await Task.Delay(5); }
+                    AwaitOnDispatcher(Finished());
+                    Require(window.ModelPicker.Items.Count == 1 && requests == 1, "The Models button did not retry startup load.");
+                }
+                else if (action == "ocr")
+                {
+                    result = new OcrResultWindow(window, CreateDemoBitmap(), default, default, diagnostics: true);
+                    AwaitOnDispatcher(result.RecognizeAsync());
+                    Require(result.ResultText.Text == "startup text" && result.HasImage && requests == 2, "OCR click did not retry startup load and retain the image.");
+                }
+                else
+                {
+                    AwaitOnDispatcher(window.ConnectAsync());
+                    Require(browserOpened && requests == 0, "Connect did not retry startup load before opening the fake browser.");
+                }
+                Require(service.IsLoaded && service.ActiveAccount?.Key == preferred.Key && window.AccountPicker.Items.Count == 2 &&
+                    window.AccountStatus.Text.Contains("Mit ChatGPT verbunden") && !window.OcrStatus.Contains("nicht geladen"),
+                    "Retry did not apply the saved account and refresh settings and tray.");
+            }
+            finally
+            {
+                result?.Close();
+                window?.Close();
+                string target = Path.GetFullPath(directory);
+                Require(target.StartsWith(Path.Combine(Path.GetFullPath(Path.GetTempPath()), "KairosCapture-startup-check-"), StringComparison.OrdinalIgnoreCase),
+                    "Startup test cleanup escaped its temporary directory.");
+                if (Directory.Exists(target)) Directory.Delete(target, true);
+            }
+        }
     }
 
     private static IReadOnlyList<string> CheckSettings()
@@ -247,6 +325,7 @@ internal static class AppDiagnostics
                 window.TranslationPicker.SelectedItem is OpenAiTranslation { Language: null }, "OCR must default to transcription with a closed translation whitelist.");
             Require(window.TranslationPicker.SelectedItem.ToString() == "Nicht übersetzen", "Translation selection must display its German label.");
             Task operation = window.RecognizeAsync();
+            AwaitOnDispatcher(operation);
             Require(operation.IsCompletedSuccessfully && window.HasImage && window.Status.Contains("ChatGPT", StringComparison.Ordinal), "Missing account must explain next action and retain image without network.");
             var desktop = new System.Drawing.Rectangle(-1920, -1080, 4480, 2520);
             var work = new System.Drawing.Rectangle(-1920, -1080, 1920, 1040);
@@ -265,6 +344,19 @@ internal static class AppDiagnostics
         finally { window.Close(); settings.Close(); }
         Require(!window.HasImage, "Closing the result must release its image.");
         return Array.Empty<string>();
+    }
+
+    private static void AwaitOnDispatcher(Task operation)
+    {
+        var frame = new DispatcherFrame();
+        var watch = Stopwatch.StartNew();
+        var timer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(5) };
+        timer.Tick += (_, _) => { if (operation.IsCompleted || watch.Elapsed > TimeSpan.FromSeconds(10)) frame.Continue = false; };
+        timer.Start();
+        try { if (!operation.IsCompleted) Dispatcher.PushFrame(frame); }
+        finally { timer.Stop(); }
+        Require(operation.IsCompleted, "Asynchronous UI check exceeded ten seconds.");
+        operation.GetAwaiter().GetResult();
     }
 
     private static IReadOnlyList<string> CheckTray()
