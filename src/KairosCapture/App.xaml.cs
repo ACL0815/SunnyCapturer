@@ -231,6 +231,12 @@ public partial class App : Application
 
     internal static void LogOpenAiDiagnostic(string diagnostic) => AppendLog("OpenAI: " + diagnostic);
 
+    internal static void LogOverlayDiagnostic(string diagnostic)
+    {
+        if (Current is App { _diagnostics: true }) return;
+        AppendLog("Overlay " + diagnostic);
+    }
+
     private static void AppendLog(string diagnostic)
     {
         try
