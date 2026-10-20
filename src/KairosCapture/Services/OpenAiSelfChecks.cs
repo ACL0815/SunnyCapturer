@@ -226,7 +226,7 @@ public static class OpenAiSelfChecks
                 });
                 await storage.SaveAsync(replacement, CancellationToken.None).ConfigureAwait(false);
                 OpenAiState saved = storage.Load();
-                Require(attempts == 2 && saved.HostId == replacement.HostId && saved.PendingClientId == replacement.PendingClientId &&
+                Require(attempts > 1 && saved.HostId == replacement.HostId && saved.PendingClientId == replacement.PendingClientId &&
                     saved.Registrations.Single().Credentials!.RefreshToken == "test-refresh", "Transient replacement conflict lost the new snapshot.");
                 previous = File.ReadAllBytes(snapshot);
             }

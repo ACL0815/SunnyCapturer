@@ -107,9 +107,22 @@ internal sealed class OpenAiStorage
                 await file.FlushAsync(ct).ConfigureAwait(false);
                 file.Flush(true);
             }
-            ct.ThrowIfCancellationRequested();
-            if (File.Exists(StatePath)) _replaceFile(temp, StatePath);
-            else File.Move(temp, StatePath);
+            long deadline = Environment.TickCount64 + 5000;
+            while (true)
+            {
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    if (File.Exists(StatePath)) _replaceFile(temp, StatePath);
+                    else File.Move(temp, StatePath);
+                    break;
+                }
+                // ERROR_UNABLE_TO_REMOVE_REPLACED retains both file names, so retry the same encrypted source.
+                catch (IOException ex) when ((ex.HResult & 0xffff) is 32 or 1175 && Environment.TickCount64 < deadline)
+                {
+                    await Task.Delay(100, ct).ConfigureAwait(false);
+                }
+            }
         }
         finally
         {
