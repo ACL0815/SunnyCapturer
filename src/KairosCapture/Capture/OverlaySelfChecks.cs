@@ -38,10 +38,13 @@ public static class OverlaySelfChecks
         CheckGestureEscape(background);
         CheckRendering(background);
         var failures = new List<string>();
-        foreach (Action check in new Action[] { () => CheckFrameReleasePosition(background), CheckFrameInputRecovery, () => CheckOverlayTrace(background) })
+        foreach (Action check in new Action[] { () => CheckFrameReleasePosition(background), CheckFrameInputRecovery,
+            () => CheckRoutedFrameInput(background), () => CheckSynchronousCaptureRelease(background),
+            () => CheckInterruptedFrameInput(background), () => CheckReleaseModes(background),
+            () => CheckOverlayTrace(background), () => CheckDiagnosticLogGuard(background), () => CheckClosingFrameInput(background) })
         {
             try { check(); }
-            catch (InvalidOperationException error) { failures.Add(error.Message); }
+            catch (SelfCheckFailure error) { failures.Add(error.Message); }
         }
         Require(failures.Count == 0, string.Join(Environment.NewLine, failures));
     }
@@ -51,6 +54,230 @@ public static class OverlaySelfChecks
 
     private enum FrameInput { Release, LostCapture, Deactivate, Escape, RightClick, OutsideRelease, SecondPress, ChildLostCapture, ReleasedMove }
     private enum FrameFixture { New, Move, Resize, ResumedMove }
+
+    private sealed class FramePointer
+    {
+        internal Point? Position = new Point(100, 100);
+        internal MouseButtonState LeftButton = MouseButtonState.Pressed;
+        internal bool Captured, CaptureSucceeds = true;
+        internal int Releases;
+        internal Action? OnRelease;
+
+        internal RegionOverlay Create(BitmapSource background, bool editing = true, bool ocr = false,
+            Action<string>? log = null, AnnotationCanvas? editor = null) => new(background,
+            new DrawingRectangle(-1600, -900, background.PixelWidth, background.PixelHeight), editing: editing,
+            ocrMode: ocr, editor: editor, logState: log, readCursor: () => Position, readLeftButton: () => LeftButton,
+            captureMouse: () => Captured = CaptureSucceeds, hasCapture: () => Captured,
+            releaseCapture: () => { Captured = false; Releases++; OnRelease?.Invoke(); });
+    }
+
+    private static void RaiseMove(RegionOverlay overlay) => overlay.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0)
+        { RoutedEvent = Mouse.PreviewMouseMoveEvent, Source = overlay });
+
+    private static void RaiseLeftButton(RegionOverlay overlay, bool down) =>
+        overlay.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left)
+        { RoutedEvent = down ? UIElement.PreviewMouseLeftButtonDownEvent : UIElement.PreviewMouseLeftButtonUpEvent, Source = overlay });
+
+    private static void InterruptFrame(RegionOverlay overlay, bool deactivate)
+    {
+        if (deactivate)
+            typeof(Window).GetMethod("OnDeactivated", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .Invoke(overlay, new object[] { EventArgs.Empty });
+        else overlay.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0)
+            { RoutedEvent = Mouse.LostMouseCaptureEvent, Source = overlay });
+    }
+
+    private static void CheckRoutedFrameInput(BitmapSource background)
+    {
+        foreach (bool mouseUp in new[] { false, true })
+        {
+            var pointer = new FramePointer();
+            var overlay = pointer.Create(background);
+            try
+            {
+                RaiseLeftButton(overlay, down: true);
+                pointer.Position = new Point(400, 300);
+                RaiseMove(overlay);
+                Require(overlay.IsFrameGestureActive && overlay.Selection == new Int32Rect(100, 100, 300, 200) &&
+                    !overlay.ToolbarVisible && !ChipVisible(overlay), "Routed pressed move must update the active frame and hide its controls.");
+                pointer.Position = new Point(500, 400);
+                pointer.LeftButton = MouseButtonState.Released;
+                if (mouseUp) RaiseLeftButton(overlay, down: false); else RaiseMove(overlay);
+                Require(!overlay.IsFrameGestureActive && overlay.Selection == new Int32Rect(100, 100, 400, 300) &&
+                    FrameControlsVisible(overlay, background), mouseUp
+                    ? "Routed MouseUp must finish the active gesture at the release position."
+                    : "Routed released move must finish the active gesture using the injected button state.");
+            }
+            finally { overlay.Cancel(); }
+        }
+    }
+
+    private static void CheckSynchronousCaptureRelease(BitmapSource background)
+    {
+        foreach (bool ocr in new[] { false, true })
+        {
+            var pointer = new FramePointer();
+            var flushes = new List<string>();
+            var overlay = pointer.Create(background, ocr: ocr, log: flushes.Add);
+            var original = new Int32Rect(100, 100, 400, 300);
+            var expected = new Int32Rect(150, 140, 400, 300);
+            overlay.SetRegion(original);
+            int completions = 0;
+            overlay.Closed += (_, _) => { if (overlay.Result.Completion == CaptureCompletion.Ocr) completions++; };
+            pointer.OnRelease = () => InterruptFrame(overlay, deactivate: false);
+            try
+            {
+                pointer.Position = new Point(300, 250);
+                RaiseLeftButton(overlay, down: true);
+                pointer.Position = new Point(350, 290);
+                // A synchronous capture-loss notification can still observe the previous pressed state.
+                RaiseLeftButton(overlay, down: false);
+                Require(overlay.Selection == expected && !overlay.IsFrameGestureActive && pointer.Releases == 1 &&
+                    (ocr ? overlay.IsClosed && completions == 1 && overlay.Result.Region == expected : FrameControlsVisible(overlay, background)),
+                    "Synchronous capture loss during release must preserve the final crop and complete OCR exactly once.");
+                InterruptFrame(overlay, deactivate: false);
+                RaiseLeftButton(overlay, down: false);
+                Require(completions == (ocr ? 1 : 0) && overlay.Selection == expected,
+                    "Late capture loss and MouseUp must not replace the final crop or repeat OCR.");
+            }
+            finally { overlay.Cancel(); }
+            Require(flushes.Count == 0, "Expected synchronous capture loss after release must not flush a normal trace.");
+        }
+    }
+
+    private static void CheckInterruptedFrameInput(BitmapSource background)
+    {
+        foreach (bool deactivate in new[] { false, true })
+        foreach (MouseButtonState button in Enum.GetValues<MouseButtonState>())
+        foreach (bool captured in new[] { false, true })
+        foreach (bool missingCursor in new[] { false, true })
+        {
+            var pointer = new FramePointer();
+            var overlay = pointer.Create(background);
+            var original = new Int32Rect(100, 100, 400, 300);
+            overlay.SetRegion(original);
+            try
+            {
+                overlay.BeginFrameGesture(new Point(300, 250));
+                overlay.UpdateFrameGesture(new Point(320, 260));
+                pointer.Position = missingCursor ? null : new Point(350, 290);
+                pointer.LeftButton = button;
+                pointer.Captured = captured;
+                InterruptFrame(overlay, deactivate);
+                bool stillDragging = button == MouseButtonState.Pressed && captured;
+                Int32Rect expected = button == MouseButtonState.Pressed
+                    ? stillDragging ? new Int32Rect(120, 110, 400, 300) : original
+                    : missingCursor ? new Int32Rect(120, 110, 400, 300) : new Int32Rect(150, 140, 400, 300);
+                Require(!overlay.IsClosed && overlay.Failure == null && overlay.IsFrameGestureActive == stillDragging && overlay.Selection == expected &&
+                    (stillDragging ? !overlay.ToolbarVisible && !ChipVisible(overlay) : FrameControlsVisible(overlay, background)),
+                    $"Interruption semantics failed for deactivate={deactivate}, button={button}, capture={captured}, missingCursor={missingCursor}.");
+                if (stillDragging)
+                {
+                    pointer.Position = new Point(350, 290);
+                    pointer.LeftButton = MouseButtonState.Released;
+                    RaiseLeftButton(overlay, down: false);
+                    Require(!overlay.IsFrameGestureActive && overlay.Selection == new Int32Rect(150, 140, 400, 300) &&
+                        FrameControlsVisible(overlay, background), "Retained capture must allow the later MouseUp to finish normally.");
+                }
+            }
+            finally { overlay.Cancel(); }
+        }
+    }
+
+    private static void CheckReleaseModes(BitmapSource background)
+    {
+        foreach (bool raw in new[] { false, true })
+        foreach (string end in new[] { "releasedMove", "deactivated", "captureLost", "escape", "lostPressed", "deactivatedPressed" })
+        {
+            var pointer = new FramePointer();
+            var overlay = pointer.Create(background, editing: !raw, ocr: !raw);
+            int completions = 0;
+            overlay.Closed += (_, _) => completions++;
+            try
+            {
+                RaiseLeftButton(overlay, down: true);
+                pointer.Position = new Point(400, 300);
+                RaiseMove(overlay);
+                pointer.Position = new Point(500, 400);
+                bool cancel = end is "escape" or "lostPressed" or "deactivatedPressed";
+                pointer.LeftButton = cancel ? MouseButtonState.Pressed : MouseButtonState.Released;
+                if (end == "releasedMove") RaiseMove(overlay);
+                else if (end == "escape") overlay.HandleSessionKey(Key.Escape);
+                else
+                {
+                    pointer.Captured = false;
+                    InterruptFrame(overlay, end.StartsWith("deactivated", StringComparison.Ordinal));
+                }
+                if (cancel)
+                    Require(overlay.Result.Completion == CaptureCompletion.Cancelled && overlay.Selection.IsEmpty &&
+                        !overlay.IsFrameGestureActive && completions == (raw && end == "escape" ? 1 : 0),
+                        "Aborted frame gestures must never start OCR or accept a raw crop: " + end);
+                else
+                {
+                    var expected = new Int32Rect(100, 100, 400, 300);
+                    Require(overlay.IsClosed && completions == 1 && overlay.Selection == expected &&
+                        (raw ? overlay.Result.Completion == CaptureCompletion.Cancelled : overlay.Result.Completion == CaptureCompletion.Ocr &&
+                            overlay.Result.Region == expected && overlay.Result.Image?.PixelWidth == 400 && overlay.Result.Image.PixelHeight == 300),
+                        "Released gestures must accept raw captures or finish OCR exactly once: " + end);
+                    RaiseMove(overlay);
+                    RaiseLeftButton(overlay, down: false);
+                    InterruptFrame(overlay, deactivate: true);
+                    Require(completions == 1, "A finished OCR/raw capture must ignore late input.");
+                }
+            }
+            finally { overlay.Cancel(); }
+        }
+        foreach (string end in new[] { "escape", "captureLost", "deactivated" })
+        {
+            var pointer = new FramePointer();
+            var overlay = pointer.Create(background, ocr: true);
+            var original = new Int32Rect(100, 100, 400, 300);
+            overlay.SetRegion(original);
+            try
+            {
+                overlay.BeginFrameGesture(new Point(300, 250));
+                overlay.UpdateFrameGesture(new Point(350, 290));
+                pointer.Position = new Point(350, 290);
+                if (end == "escape") overlay.HandleSessionKey(Key.Escape);
+                else InterruptFrame(overlay, end == "deactivated");
+                Require(!overlay.IsClosed && overlay.Result.Completion == CaptureCompletion.Cancelled &&
+                    !overlay.IsFrameGestureActive && overlay.Selection == original && FrameControlsVisible(overlay, background),
+                    "Aborting an OCR gesture with a valid previous crop must restore it without starting OCR: " + end);
+            }
+            finally { overlay.Cancel(); }
+            Require(overlay.Result.Completion == CaptureCompletion.Cancelled, "Cancelling a retained OCR crop must never emit OCR output.");
+        }
+    }
+
+    private static void CheckClosingFrameInput(BitmapSource background)
+    {
+        foreach (MouseButtonState button in Enum.GetValues<MouseButtonState>())
+        {
+            var pointer = new FramePointer { Captured = true, LeftButton = button };
+            var overlay = pointer.Create(background, ocr: true);
+            int completions = 0;
+            overlay.Closed += (_, _) => completions++;
+            try
+            {
+                overlay.BeginFrameGesture(new Point(100, 100));
+                overlay.UpdateFrameGesture(new Point(500, 400));
+                pointer.Position = new Point(500, 400);
+                typeof(Window).GetMethod("OnClosing", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                    .Invoke(overlay, new object[] { new System.ComponentModel.CancelEventArgs() });
+                pointer.Captured = false;
+                InterruptFrame(overlay, deactivate: false);
+                InterruptFrame(overlay, deactivate: true);
+                RaiseLeftButton(overlay, down: false);
+                RaiseMove(overlay);
+                Require(!overlay.IsFrameGestureActive && overlay.Selection.IsEmpty && completions == 0 &&
+                    overlay.Result.Completion == CaptureCompletion.Cancelled && overlay.Failure == null,
+                    "Capture loss between Closing and Closed must never retain a cancelled crop or start OCR.");
+            }
+            finally { overlay.Close(); }
+            Require(completions == 1 && overlay.Result.Completion == CaptureCompletion.Cancelled,
+                "Closing an active frame must cancel once despite capture-loss and pointer notifications.");
+        }
+    }
 
     private static void CheckFrameReleasePosition(BitmapSource background)
     {
@@ -108,13 +335,14 @@ public static class OverlaySelfChecks
         foreach (FrameFixture fixture in Enum.GetValues<FrameFixture>())
         foreach (FrameInput input in Enum.GetValues<FrameInput>())
         {
-            RegionOverlay overlay = Create(background);
+            var pointer = new FramePointer();
+            RegionOverlay overlay = pointer.Create(background);
             if (fixture != FrameFixture.New) overlay.SetRegion(original);
             if (fixture == FrameFixture.ResumedMove)
             {
                 Require(overlay.ExecuteOutput(CaptureCompletion.Copied, _ => true), "Resume fixture must retain a completed session.");
                 CaptureSessionResult session = overlay.Result;
-                overlay = new RegionOverlay(session.Screenshot!, session.Bounds, editor: session.Editor);
+                overlay = pointer.Create(session.Screenshot!, editor: session.Editor);
                 overlay.SetRegion(session.Region);
                 Require(FrameControlsVisible(overlay, background), "Resume must start with all frame controls visible.");
             }
@@ -213,46 +441,112 @@ public static class OverlaySelfChecks
     private static void CheckOverlayTrace(BitmapSource background)
     {
         const string sensitive = "private annotation and exception message";
-        var entries = new List<string>();
-        var overlay = new RegionOverlay(background, new DrawingRectangle(0, 0, background.PixelWidth, background.PixelHeight),
-            copyImage: _ => throw new InvalidOperationException(sensitive), logState: entries.Add) { Title = sensitive };
         var region = new Int32Rect(100, 100, 400, 300);
+        foreach (string anomaly in new[] { "normal", "escape", "deactivated", "captureLost", "releasedMove", "cancelActive",
+            "closeActive", "toolbarHidden", "chipHidden", "captureFailure", "cursorFailure" })
+        {
+            var pointer = new FramePointer();
+            var flushes = new List<string>();
+            var overlay = pointer.Create(background, log: flushes.Add);
+            overlay.Title = sensitive;
+            try
+            {
+                RaiseLeftButton(overlay, down: true);
+                pointer.Position = new Point(500, 400);
+                pointer.LeftButton = MouseButtonState.Released;
+                RaiseLeftButton(overlay, down: false);
+                overlay.Editor.Tool = EditorTool.Text;
+                overlay.Editor.BeginGesture(new Point(180, 180));
+                ((TextBox)overlay.Editor.Children[0]).Text = sensitive;
+                overlay.Editor.CommitText();
+                Require(!overlay.ExecuteOutput(CaptureCompletion.Copied, _ => throw new InvalidOperationException(sensitive)),
+                    "Trace privacy fixture must exercise output failure.");
+                overlay.Editor.Tool = EditorTool.Select;
+                for (int i = 0; i < 30; i++)
+                {
+                    overlay.BeginFrameGesture(overlay.FrameHandles()[2].Center);
+                    overlay.EndFrameGesture();
+                }
+                Require(flushes.Count == 0, "Normal gestures must stay in memory without log writes.");
+                if (anomaly is "toolbarHidden" or "chipHidden")
+                {
+                    if (anomaly == "toolbarHidden") overlay.Toolbar.Visibility = Visibility.Collapsed;
+                    else ((Canvas)overlay.PreviewRoot).Children.OfType<Border>().Single(b => b.Child is TextBlock).Visibility = Visibility.Collapsed;
+                }
+                else if (anomaly is "captureFailure" or "cursorFailure")
+                {
+                    pointer.CaptureSucceeds = false;
+                    pointer.Position = anomaly == "cursorFailure" ? null : new Point(500, 400);
+                    RaiseLeftButton(overlay, down: true);
+                }
+                else if (anomaly != "normal")
+                {
+                    overlay.BeginFrameGesture(new Point(300, 250));
+                    overlay.UpdateFrameGesture(new Point(350, 290));
+                    pointer.Position = new Point(350, 290);
+                    if (anomaly == "escape") overlay.HandleSessionKey(Key.Escape);
+                    else if (anomaly == "deactivated") InterruptFrame(overlay, deactivate: true);
+                    else if (anomaly == "captureLost") InterruptFrame(overlay, deactivate: false);
+                    else if (anomaly == "releasedMove") RaiseMove(overlay);
+                    else if (anomaly == "cancelActive") overlay.Cancel();
+                    else if (anomaly == "closeActive") overlay.Close();
+                }
+                if (!overlay.IsClosed) Require(flushes.Count == 0, "Anomaly traces must flush once at close, not on each event.");
+            }
+            finally { overlay.Cancel(); }
+            Require(overlay.IsClosed && !overlay.IsFrameGestureActive && !overlay.ToolbarVisible && !ChipVisible(overlay),
+                "Closing must clear the gesture and hide all frame controls.");
+            if (anomaly is "normal" or "escape")
+            {
+                Require(flushes.Count == 0, "A normal capture or explicit gesture Escape must write zero log lines.");
+                continue;
+            }
+            Require(flushes.Count == 1, "Each anomalous overlay must flush exactly once: " + anomaly);
+            string[] entries = flushes[0].Split(Environment.NewLine);
+            Require(entries.Length == 20 && entries[^1].Contains("event=Closed ", StringComparison.Ordinal) &&
+                entries[^1].Contains("toolbar=Collapsed chip=Collapsed chrome=Closed handles=0", StringComparison.Ordinal),
+                "The ring buffer must keep only its latest 20 lines and end with consistent closed chrome.");
+            if (anomaly is "cancelActive" or "closeActive")
+                Require(entries[^1].Contains("gesture=Move selection=150,140,400,300", StringComparison.Ordinal) && overlay.Selection.IsEmpty,
+                    "Closed trace must retain the active gesture and selection from before reset.");
+            if (anomaly is "toolbarHidden" or "chipHidden")
+                Require(entries[^2].Contains("event=Closing ", StringComparison.Ordinal) && entries[^2].Contains("chrome=Ready", StringComparison.Ordinal) &&
+                    entries[^2].Contains(anomaly == "toolbarHidden" ? "toolbar=Collapsed" : "chip=Collapsed", StringComparison.Ordinal),
+                    "Closing trace must retain unexpectedly missing controls before hiding the closed chrome.");
+            Require(entries.All(line => new[] { " gesture=", " capture=", " active=", " toolbar=", " chip=", " chrome=", " end=", " point=", " promoted=", " chipBounds=" }
+                .All(field => line.Contains(field, StringComparison.Ordinal))), "Overlay trace must include gesture, capture, activation and chrome geometry.");
+            Require(entries.All(line => !line.Contains(sensitive, StringComparison.Ordinal) &&
+                System.Text.RegularExpressions.Regex.IsMatch(line, @"^([A-Za-z]+=[A-Za-z0-9,.\-]+)( [A-Za-z]+=[A-Za-z0-9,.\-]+)*$")),
+                "Overlay trace must contain only fixed keys, enum values and numbers, never annotation, title or exception text.");
+        }
+    }
+
+    private static void CheckDiagnosticLogGuard(BitmapSource background)
+    {
+        string directory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "kairos-overlay-log-" + Guid.NewGuid().ToString("N"));
+        string path = System.IO.Path.Combine(directory, "application.log");
+        const string variable = "KAIROS_DIAGNOSTIC_LOG_DIRECTORY", sentinel = "unchanged diagnostic log";
+        string? previous = Environment.GetEnvironmentVariable(variable);
+        System.IO.Directory.CreateDirectory(directory);
+        System.IO.File.WriteAllText(path, sentinel);
         try
         {
-            overlay.HandlePointerDown(new Point(100, 100));
-            overlay.HandlePointerMove(new Point(500, 400), MouseButtonState.Pressed);
-            Require(overlay.IsFrameGestureActive && overlay.Selection == region, "A pressed move must continue the frame gesture.");
-            overlay.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = Mouse.GotMouseCaptureEvent, Source = overlay });
-            typeof(Window).GetMethod("OnDeactivated", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
-                .Invoke(overlay, new object[] { EventArgs.Empty });
-            overlay.SetRegion(region);
-            overlay.HandlePointerDown(new Point(300, 250));
-            overlay.HandlePointerMove(new Point(310, 260), MouseButtonState.Released);
-            overlay.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = Mouse.LostMouseCaptureEvent, Source = overlay.Editor });
-            overlay.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left)
-                { RoutedEvent = UIElement.PreviewMouseLeftButtonUpEvent });
-            overlay.Editor.Tool = EditorTool.Text;
-            overlay.Editor.BeginGesture(new Point(180, 180));
-            ((TextBox)overlay.Editor.Children[0]).Text = sensitive;
-            overlay.Editor.CommitText();
-            Require(!overlay.CompleteAsync(CaptureCompletion.Copied).GetAwaiter().GetResult(), "Trace privacy fixture must exercise output failure.");
-            foreach (string expected in new[] { "Created", "GestureBegan", "CaptureGained", "Deactivated", "GestureCancelled",
-                "RegionChanged", "ReleasedMove", "GestureEnded", "CaptureLost", "PointerUpIdle" })
-                Require(entries.Any(line => line.Contains("event=" + expected + " ", StringComparison.Ordinal)), "Overlay trace must include " + expected);
-            Require(entries.All(line => new[] { " gesture=", " capture=", " active=", " toolbar=", " chip=", " chrome=", " end=", " point=", " promoted=", " chipBounds=" }
-                .All(field => line.Contains(field, StringComparison.Ordinal))), "Overlay trace must include gesture, capture, activation, visibility reason, end reason, pointer and chip geometry.");
-            for (int i = 0; i < 30; i++)
-            {
-                overlay.HandlePointerDown(overlay.FrameHandles()[2].Center);
-                overlay.EndFrameGesture();
-            }
+            Environment.SetEnvironmentVariable(variable, directory);
+            App.LogOverlayDiagnostic("guard-check");
+            var pointer = new FramePointer();
+            var overlay = pointer.Create(background);
+            overlay.BeginFrameGesture(new Point(100, 100));
+            overlay.UpdateFrameGesture(new Point(500, 400));
+            overlay.Cancel();
+            Require(System.IO.File.ReadAllText(path) == sentinel,
+                "Diagnostic mode must suppress the production overlay log hook, including anomalous overlay flushes.");
         }
-        finally { overlay.Cancel(); }
-        Require(entries.Count == 20 && entries[^1].Contains("event=Closed ", StringComparison.Ordinal),
-            "Overlay trace must reserve its twentieth and last line for the final state.");
-        Require(entries.All(line => !line.Contains(sensitive, StringComparison.Ordinal) &&
-            System.Text.RegularExpressions.Regex.IsMatch(line, @"^([A-Za-z]+=[A-Za-z0-9,.\-]+)( [A-Za-z]+=[A-Za-z0-9,.\-]+)*$")),
-            "Overlay trace must contain only fixed keys, enum values and numbers, never annotation, title or exception text.");
+        finally
+        {
+            Environment.SetEnvironmentVariable(variable, previous);
+            System.IO.File.Delete(path);
+            System.IO.Directory.Delete(directory);
+        }
     }
 
     private static void CheckDoubleClick(BitmapSource background)

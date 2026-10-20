@@ -29,12 +29,18 @@ internal sealed class RegionOverlay : Window
     private enum GestureEnd { None, Released, ReleasedMove, MouseUp, Deactivated, CaptureLost, Escape }
     private enum FrameChromeState { Closed, Raw, Dragging, Empty, Ready }
     private enum OverlayEvent { Created, Activated, Deactivated, ContentRendered, GestureBegan, GestureEnded, GestureCancelled,
-        ReleasedMove, CaptureRequested, CaptureGained, CaptureLost, RegionChanged, ToolbarMeasured, PointerUpIdle, SecondPress, CursorReadFailed, Closed }
+        ReleasedMove, CaptureRequested, CaptureGained, CaptureLost, RegionChanged, ToolbarMeasured, PointerUpIdle, SecondPress, CursorReadFailed, Closing, Closed }
     private enum InputSource { None, Overlay, Editor, Control, Other }
     private static int _nextTraceId;
     private readonly int _traceId = Interlocked.Increment(ref _nextTraceId);
     private readonly Action<string> _logState;
-    private int _traceLines, _traceDropped;
+    private readonly Queue<string> _trace = new(20);
+    private int _traceDropped;
+    private bool _traceAnomaly;
+    private readonly Func<Point?> _readCursor;
+    private readonly Func<MouseButtonState> _readLeftButton;
+    private readonly Func<bool> _captureMouse, _hasCapture;
+    private readonly Action _releaseCapture;
     private readonly DrawingRectangle _bounds;
     private readonly bool _editing;
     private readonly BitmapSource _screenshot;
@@ -76,7 +82,8 @@ internal sealed class RegionOverlay : Window
     internal RegionOverlay(BitmapSource screenshot, DrawingRectangle bounds, bool editing = true,
         AppSettings? settings = null, bool ocrMode = false, AnnotationCanvas? editor = null,
         Func<BitmapSource, Window, AppSettings, string?>? saveImage = null, Action<BitmapSource>? copyImage = null,
-        Action<string>? logState = null)
+        Action<string>? logState = null, Func<Point?>? readCursor = null, Func<MouseButtonState>? readLeftButton = null,
+        Func<bool>? captureMouse = null, Func<bool>? hasCapture = null, Action? releaseCapture = null)
     {
         ArgumentNullException.ThrowIfNull(screenshot);
         CaptureGeometry.ValidateSize(bounds.Width, bounds.Height);
@@ -90,6 +97,11 @@ internal sealed class RegionOverlay : Window
         _saveImage = saveImage ?? ((image, parent, preferences) => ImageOutput.Save(image, parent, preferences));
         _copyImage = copyImage ?? ImageOutput.Copy;
         _logState = logState ?? App.LogOverlayDiagnostic;
+        _readCursor = readCursor ?? ReadPhysicalCursor;
+        _readLeftButton = readLeftButton ?? (() => Mouse.LeftButton);
+        _captureMouse = captureMouse ?? CaptureMouse;
+        _hasCapture = hasCapture ?? (() => IsMouseCaptured);
+        _releaseCapture = releaseCapture ?? ReleaseMouseCapture;
         Title = "Kairos Capture – auf dem Bildschirm bearbeiten";
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize;
@@ -297,7 +309,7 @@ internal sealed class RegionOverlay : Window
     protected override void OnPreviewMouseLeftButtonDown(MouseButtonEventArgs e)
     {
         base.OnPreviewMouseLeftButtonDown(e);
-        if (_outputPending) { e.Handled = true; return; }
+        if (_closed || _outputPending) { e.Handled = true; return; }
         if (IsControlSource(e.OriginalSource as DependencyObject)) return;
         if (!ReadCursor(out Point point)) return;
         _pointerPromoted = e.StylusDevice != null;
@@ -305,7 +317,7 @@ internal sealed class RegionOverlay : Window
         e.Handled = true;
         if (_gesture == FrameGesture.None) return;
         Focus();
-        bool captured = CaptureMouse();
+        bool captured = _captureMouse();
         TraceState(OverlayEvent.CaptureRequested, data: Convert.ToInt32(captured));
         if (!captured) Cancel();
     }
@@ -313,9 +325,10 @@ internal sealed class RegionOverlay : Window
     protected override void OnPreviewMouseMove(MouseEventArgs e)
     {
         base.OnPreviewMouseMove(e);
+        if (_closed) return;
         if (_gesture != FrameGesture.None)
         {
-            if (ReadCursor(out Point point)) HandlePointerMove(point, e.LeftButton);
+            if (ReadCursor(out Point point)) HandlePointerMove(point, _readLeftButton());
             e.Handled = true;
         }
         else if (!IsControlSource(e.OriginalSource as DependencyObject) && ReadCursor(out Point point))
@@ -334,7 +347,7 @@ internal sealed class RegionOverlay : Window
     {
         base.OnPreviewMouseLeftButtonUp(e);
         if (_gesture == FrameGesture.None) { TraceState(OverlayEvent.PointerUpIdle, e.OriginalSource as DependencyObject); return; }
-        if (ReadCursor(out Point point)) FinishFrameGesture(GestureEnd.MouseUp, point);
+        if (ReadCursor(out Point point, useLastPoint: true)) FinishFrameGesture(GestureEnd.MouseUp, point);
         e.Handled = true;
     }
 
@@ -468,7 +481,19 @@ internal sealed class RegionOverlay : Window
     private void FinishFrameGesture(GestureEnd reason, Point? position = null)
     {
         if (_gesture == FrameGesture.None) return;
-        bool cancel = reason is GestureEnd.Escape or GestureEnd.Deactivated or GestureEnd.CaptureLost;
+        bool cancel = reason == GestureEnd.Escape;
+        if (reason is GestureEnd.Deactivated or GestureEnd.CaptureLost)
+        {
+            bool pressed = _readLeftButton() == MouseButtonState.Pressed;
+            if (pressed && _hasCapture()) return;
+            cancel = pressed;
+            if (!cancel && position == null)
+            {
+                ReadCursor(out Point current, useLastPoint: true);
+                position = current;
+            }
+        }
+        _traceAnomaly |= reason is GestureEnd.Deactivated or GestureEnd.CaptureLost or GestureEnd.ReleasedMove;
         if (!cancel && position is Point point) UpdateFrameGesture(point);
         _lastGestureEnd = reason;
         if (reason == GestureEnd.ReleasedMove) TraceState(OverlayEvent.ReleasedMove);
@@ -477,7 +502,7 @@ internal sealed class RegionOverlay : Window
         if (Selection.Width < 2 || Selection.Height < 2) Selection = Int32Rect.Empty;
         RefreshRegion(cancel ? OverlayEvent.GestureCancelled : OverlayEvent.GestureEnded);
         // ReleaseMouseCapture synchronously raises capture loss and can synthesize a move.
-        if (IsMouseCaptured) ReleaseMouseCapture();
+        if (_hasCapture()) _releaseCapture();
         if (!_editing && !cancel && !Selection.IsEmpty)
         {
             _rawAccepted = true;
@@ -616,56 +641,80 @@ internal sealed class RegionOverlay : Window
     {
         if (_closed) return;
         Result = new CaptureSessionResult(CaptureCompletion.Cancelled);
-        Selection = Int32Rect.Empty;
-        _gesture = FrameGesture.None;
         Close();
+    }
+
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        base.OnClosing(e);
+        if (!e.Cancel) PrepareClose();
+    }
+
+    private void PrepareClose()
+    {
+        if (_closed) return;
+        _traceAnomaly |= _gesture != FrameGesture.None ||
+            (ChromeState == FrameChromeState.Ready && (!ToolbarVisible || _chip.Visibility != Visibility.Visible));
+        TraceState(OverlayEvent.Closing);
+        _closed = true;
+        _toolbar.Visibility = _chip.Visibility = Visibility.Collapsed;
+        Editor.IsHitTestVisible = false;
+        _chrome.InvalidateVisual();
+        TraceState(OverlayEvent.Closed);
+        // Window destruction can release capture before OnClosed arrives.
+        _gesture = FrameGesture.None;
+        if (!_rawAccepted && Result.Completion == CaptureCompletion.Cancelled) Selection = Int32Rect.Empty;
     }
 
     protected override void OnClosed(EventArgs e)
     {
-        _closed = true;
+        PrepareClose();
         Editor.Changed -= OnEditorChanged;
         Editor.EndGesture(); Editor.CommitText();
         if (Editor.IsMouseCaptured) Editor.ReleaseMouseCapture();
         _scene.Children.Remove(Editor);
         Editor.Clip = null;
-        _gesture = FrameGesture.None;
-        if (!_rawAccepted && Result.Completion == CaptureCompletion.Cancelled) Selection = Int32Rect.Empty;
-        if (IsMouseCaptured) ReleaseMouseCapture();
-        TraceState(OverlayEvent.Closed);
+        if (_hasCapture()) _releaseCapture();
+        if (_traceAnomaly) _logState(string.Join(Environment.NewLine, _trace));
+        _trace.Clear();
         base.OnClosed(e);
     }
 
     private void TraceState(OverlayEvent reason, DependencyObject? source = null, int data = 0)
     {
-        if (_traceLines >= 20 || (_traceLines >= 19 && reason != OverlayEvent.Closed)) { _traceDropped++; return; }
-        _traceLines++;
+        if (_closed && reason != OverlayEvent.Closed) return;
+        _traceAnomaly |= reason == OverlayEvent.CursorReadFailed || (reason == OverlayEvent.CaptureRequested && data == 0);
+        if (_trace.Count == 20) { _trace.Dequeue(); _traceDropped++; }
         InputSource origin = source == null ? InputSource.None : source == this ? InputSource.Overlay :
             source == Editor ? InputSource.Editor : IsControlSource(source) ? InputSource.Control : InputSource.Other;
-        _logState(string.Create(CultureInfo.InvariantCulture,
+        _trace.Enqueue(string.Create(CultureInfo.InvariantCulture,
             $"id={_traceId} event={reason} source={origin} gesture={_gesture} selection={Selection.X},{Selection.Y},{Selection.Width},{Selection.Height} " +
             $"toolbar={_toolbar.Visibility} chip={_chip.Visibility} chrome={ChromeState} handles={(ChromeState == FrameChromeState.Ready ? 8 : 0)} " +
             $"end={_lastGestureEnd} point={_lastPoint.X},{_lastPoint.Y} promoted={Convert.ToInt32(_pointerPromoted)} " +
             $"bounds={ToolbarBounds.X},{ToolbarBounds.Y},{ToolbarBounds.Width},{ToolbarBounds.Height} " +
             $"chipBounds={Canvas.GetLeft(_chip)},{Canvas.GetTop(_chip)},{_chip.ActualWidth},{_chip.ActualHeight} " +
-            $"actual={_toolbar.ActualWidth},{_toolbar.ActualHeight} active={Convert.ToInt32(IsActive)} capture={Convert.ToInt32(IsMouseCaptured)} " +
+            $"actual={_toolbar.ActualWidth},{_toolbar.ActualHeight} active={Convert.ToInt32(IsActive)} capture={Convert.ToInt32(_hasCapture())} " +
             $"editorGesture={Convert.ToInt32(Editor.HasActiveGesture)} editing={Convert.ToInt32(_editing)} ocr={Convert.ToInt32(_ocrMode)} dropped={_traceDropped} data={data}"));
     }
 
-    private bool ReadCursor(out Point cursor)
+    private bool ReadCursor(out Point cursor, bool useLastPoint = false)
     {
-        if (!GetPhysicalCursorPos(out NativePoint point))
+        if (_readCursor() is not Point point)
         {
             int error = Marshal.GetLastWin32Error();
             TraceState(OverlayEvent.CursorReadFailed, data: error);
+            cursor = _lastPoint;
+            if (useLastPoint) return true;
             Failure = new Win32Exception(error, "Die Zeigerposition konnte nicht gelesen werden.");
-            cursor = default;
             Cancel();
             return false;
         }
-        cursor = new Point((long)point.X - _bounds.X, (long)point.Y - _bounds.Y);
+        cursor = point;
         return true;
     }
+
+    private Point? ReadPhysicalCursor() => GetPhysicalCursorPos(out NativePoint point)
+        ? new Point((long)point.X - _bounds.X, (long)point.Y - _bounds.Y) : null;
 
     [StructLayout(LayoutKind.Sequential)] private struct NativePoint { public int X, Y; }
     [StructLayout(LayoutKind.Sequential)] private struct NativeRect { public int Left, Top, Right, Bottom; }

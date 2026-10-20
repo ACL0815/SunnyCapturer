@@ -33,6 +33,10 @@ Native Screenshot-Anwendung für Windows 11, geschrieben in C# mit WPF und .NET 
 
 Pins erscheinen ohne Aktivierung (`ShowActivated=false`, `SWP_NOACTIVATE`); nach dem Overlay versucht Kairos, den vorherigen Vordergrund wiederherzustellen. Ein bewusster Klick darf den Pin aktivieren, damit Esc lokal funktioniert. Es gibt keinen globalen Tastatur-Hook. Bildposition und Originalgröße sind physische Pixel; eine Viewbox gleicht den WPF-DPI-Maßstab aus. Der Schatten liegt als separate Fläche dahinter, damit die Bildpixel bei 100 % keinen Effekt-Zwischenpuffer durchlaufen; skalierte Ansichten verwenden hochwertige Interpolation. `WM_GETMINMAXINFO` hebt die Desktop-Standardgrenze für Pin-Größen bis 32768 px je Seite inklusive Schatten an; die tatsächliche Clientfläche wird nach jeder Platzierung geprüft. Native Fokus- und Mixed-DPI-Hardwaretests stehen noch aus. Siehe [Microsoft: SetWindowPos](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwindowpos).
 
+Bei Deaktivierung oder Capture-Verlust prüft das Overlay die linke Maustaste. Ist sie losgelassen, endet die Rahmengeste an der aktuellen Cursorposition, ersatzweise an der zuletzt bekannten Position. Die Auswahl bleibt erhalten; im OCR-Modus startet die Erkennung genau einmal. Bei gedrückter Taste und gehaltener Capture läuft die Geste bis MouseUp weiter. Bei gedrückter Taste ohne Capture stellt das Overlay die vorherige Auswahl wieder her. Escape verwirft die Geste weiterhin.
+
+Eine fehlende MouseUp-Meldung wird auch beim nächsten Move mit losgelassener Taste aufgefangen. Dabei gilt die dann gelesene Cursorposition. Die genaue Loslassposition ist ohne die fehlende Meldung nicht bekannt.
+
 ## Einstellungen
 
 Tastenkürzel (Kombination direkt drücken; ist sie belegt, bleibt das alte aktiv), Speicherordner, „Ohne Nachfrage direkt im Ordner speichern“, „Beim Kopieren zusätzlich speichern“, ChatGPT-Konten und OCR-Modell, „Erkannten Text automatisch kopieren“, „Mit Windows starten“. Änderungen gelten sofort und landen in `%LOCALAPPDATA%\KairosCapture\settings.json`.
@@ -54,6 +58,10 @@ Das Skript baut Release, führt neun Offline-Prüfsuiten aus und erzeugt eine kl
 Die Overlay-Suite prüft außerdem die vier rechten Aktionen, Dialogabbruch, den Pin-Handoff samt Flatten-Bild und fortsetzbarer Sitzung sowie Resize-/Zoom-Verhältnis, Mindestgröße und DPI-Layout (100–300 %). Unsichtbare HWNDs prüfen die nativen Positionen und Größen bei hohen und breiten Bildern; ein 20000-px-Original prüft die Zoomrichtung oberhalb der früheren 16384-px-Grenze. Die Settings-Suite ersetzt den Speicherdialog durch eine injizierte Funktion. `KairosCapture --render-pin test-results/pin.png` rendert den echten Pin-Inhalt mit Schatten auf neutralem Hintergrund, ohne ein Fenster anzuzeigen.
 
 Doppelklick-Regressionen verwenden dieselbe Gestenroute wie der Fenster-Handler (`ClickCount=2`) und eine injizierte Kopierfunktion ohne Zugriff auf die echte Zwischenablage. Sie prüfen Copy-Completion, Textbearbeitung, Klicks außerhalb, fehlgeschlagene Ausgabe und erneute Toolbar-Vermessung mit Blur-Hintergrund. Das Hintergrundbild liegt in einem Canvas und bestimmt dadurch nicht die automatische Toolbar-Höhe.
+
+Die Overlay-Suite prüft MouseMove und MouseUp über echte WPF-Handler mit injiziertem Cursor, Tastenstatus und Capture. Ein synchrones LostMouseCapture während der Freigabe darf die endgültige Auswahl nicht verändern. OCR- und Raw-Abschlüsse, alle Deaktivierungsfälle und der Schutz des Log-Hooks in Diagnoseläufen sind ebenfalls geprüft.
+
+Die Zustandsspur hält die letzten höchstens 20 Zeilen pro Overlay im Speicher. Eine normale Aufnahme schreibt keine Spur. Nur bei auffälligem Gestenende durch Deactivated, CaptureLost oder ReleasedMove, Schließen mit aktiver Geste, unerwartet fehlender Leiste oder fehlendem Chip sowie Capture- oder Cursorfehlern wird beim Schließen einmal geschrieben. `Closing` hält den Zustand vor dem Schließen fest. `Closed` behält Geste und Auswahl vor dem Zurücksetzen bei und zeigt Leiste, Chip und Chrome konsistent als geschlossen. Diagnoseläufe unterdrücken diesen Log-Hook. Für isolierte Gegenproben leitet `KAIROS_DIAGNOSTIC_LOG_DIRECTORY` sämtliche App-Logs in das angegebene Verzeichnis um.
 
 ```powershell
 # Nur bauen und prüfen
