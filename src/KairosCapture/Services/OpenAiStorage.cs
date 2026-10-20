@@ -23,9 +23,14 @@ internal sealed record OpenAiState(string HostId, OpenAiRegistration[] Registrat
 internal sealed class OpenAiStorage
 {
     private readonly string _directory;
+    private readonly Action<string, string> _replaceFile;
     private string StatePath => Path.Combine(_directory, "openai-session.bin");
 
-    internal OpenAiStorage(string directory) => _directory = directory;
+    internal OpenAiStorage(string directory, Action<string, string>? replaceFile = null)
+    {
+        _directory = directory;
+        _replaceFile = replaceFile ?? ((source, destination) => File.Replace(source, destination, null));
+    }
 
     internal async Task<FileStream> LockAsync(CancellationToken ct)
     {
@@ -102,9 +107,22 @@ internal sealed class OpenAiStorage
                 await file.FlushAsync(ct).ConfigureAwait(false);
                 file.Flush(true);
             }
-            ct.ThrowIfCancellationRequested();
-            if (File.Exists(StatePath)) File.Replace(temp, StatePath, null);
-            else File.Move(temp, StatePath);
+            long deadline = Environment.TickCount64 + 5000;
+            while (true)
+            {
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    if (File.Exists(StatePath)) _replaceFile(temp, StatePath);
+                    else File.Move(temp, StatePath);
+                    break;
+                }
+                // ERROR_UNABLE_TO_REMOVE_REPLACED retains both file names, so retry the same encrypted source.
+                catch (IOException ex) when ((ex.HResult & 0xffff) is 32 or 1175 && Environment.TickCount64 < deadline)
+                {
+                    await Task.Delay(100, ct).ConfigureAwait(false);
+                }
+            }
         }
         finally
         {
