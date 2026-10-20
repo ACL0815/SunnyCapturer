@@ -46,6 +46,9 @@
     <Button x:Name="SignOutButton" Content="Abmelden" Style="{StaticResource SmallButton}" Click="SignOut_Click"/>
     <Button x:Name="CancelLoginButton" Content="Abbrechen" Visibility="Collapsed" Style="{StaticResource SmallButton}" Click="CancelLogin_Click" Margin="6,0,0,0"/>
    </WrapPanel>
+   <Button x:Name="ResetSessionButton" Content="Gespeicherte Anmeldung zurücksetzen" Visibility="Collapsed" HorizontalAlignment="Left"
+    Style="{StaticResource SmallButton}" Click="ResetSession_Click" Margin="0,0,0,10"
+    ToolTip="Verschiebt die gespeicherten Sitzungsdateien in einen Sicherungsordner. Danach können Sie sich neu anmelden."/>
    <Grid Margin="0,0,0,7"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
     <ComboBox x:Name="ModelPicker" DisplayMemberPath="DisplayName" SelectionChanged="Model_Changed" ToolTip="Modell für die Texterkennung"/>
     <Button x:Name="RefreshButton" Grid.Column="1" Content="Aktualisieren" Style="{StaticResource SmallButton}" Click="RefreshModels_Click" Margin="8,0,0,0"/>

@@ -133,6 +133,45 @@ public sealed partial class OpenAiService : IDisposable
         return Accounts;
     }
 
+    // Only the explicit reset action may bypass initial loading of unreadable credentials.
+    public async Task<string> ResetStoredSessionAsync(CancellationToken ct)
+    {
+        using var attempt = CancellationTokenSource.CreateLinkedTokenSource(ct, _lifetime.Token);
+        attempt.CancelAfter(_loadTimeout);
+        lock (_sync)
+        {
+            ThrowIfDisposed();
+            _pendingSignIn?.Cancel();
+        }
+        await _gate.WaitAsync(attempt.Token).ConfigureAwait(false);
+        try
+        {
+            return await Task.Run(async () =>
+            {
+                using (await LockStorageAsync(attempt.Token).ConfigureAwait(false))
+                {
+                    attempt.Token.ThrowIfCancellationRequested();
+                    CancellationTokenSource previous;
+                    lock (_sync)
+                    {
+                        ThrowIfDisposed();
+                        _state = null;
+                        _activeKey = null;
+                        previous = _session;
+                        _session = new CancellationTokenSource();
+                    }
+                    previous.Cancel();
+                    previous.Dispose();
+                    string backup = _storage.Reset(attempt.Token);
+                    Publish(LoadState());
+                    return backup;
+                }
+            }, attempt.Token).ConfigureAwait(false);
+        }
+        catch (Exception ex) { OpenAiDiagnostics.Mark(ex, OpenAiStep.Persist); throw; }
+        finally { _gate.Release(); }
+    }
+
     public IReadOnlyList<OpenAiAccount> Accounts
     {
         get { lock (_sync) return _state is { } state ? Array.AsReadOnly(state.Registrations.Select(Account).ToArray()) : Array.Empty<OpenAiAccount>(); }

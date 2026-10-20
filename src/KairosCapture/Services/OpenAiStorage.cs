@@ -28,18 +28,21 @@ internal sealed class OpenAiStorage
     private readonly Action<string, string> _replaceFile;
     private readonly Action<string, string> _moveFile;
     private readonly Func<long> _tickCount;
+    private readonly Func<byte[], byte[]> _unprotect;
     private readonly Action<OpenAiStoragePoint, string>? _checkpoint;
     private string StatePath => Path.Combine(_directory, "openai-session.bin");
+    private string ResetPath => Path.Combine(_directory, "session-reset.pending");
 
     internal OpenAiStorage(string directory, Action<string, string>? replaceFile = null,
         Action<string, string>? moveFile = null, Func<long>? tickCount = null,
-        Action<OpenAiStoragePoint, string>? checkpoint = null)
+        Action<OpenAiStoragePoint, string>? checkpoint = null, Func<byte[], byte[]>? unprotect = null)
     {
         _directory = directory;
         _replaceFile = replaceFile ?? ((source, destination) => File.Replace(source, destination, null));
         _moveFile = moveFile ?? File.Move;
         _tickCount = tickCount ?? (() => Environment.TickCount64);
         _checkpoint = checkpoint;
+        _unprotect = unprotect ?? OpenAiProtection.Unprotect;
     }
 
     internal async Task<FileStream> LockAsync(CancellationToken ct)
@@ -66,36 +69,55 @@ internal sealed class OpenAiStorage
     // Caller must hold LockAsync, including readers, so publication and cleanup cannot race recovery.
     internal OpenAiState Load()
     {
+        ThrowIfResetPending();
         try { return ReadState(StatePath); }
         catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException) { }
 
-        bool unreadable = false;
         if (Directory.Exists(_directory))
         {
-            foreach (var group in Directory.EnumerateFiles(_directory, "openai-*.tmp")
-                .GroupBy(path => TempOrder(path) ?? long.MinValue).OrderByDescending(g => g.Key))
+            var candidates = Directory.EnumerateFiles(_directory, "openai-*.tmp")
+                .Where(path => new FileInfo(path).Length != 0)
+                .Select(path => new { Path = path, Order = TempOrder(path) })
+                .OrderByDescending(candidate => candidate.Order).ToArray();
+            if (candidates.Length > 0)
             {
-                OpenAiState? recovered = null;
-                foreach (string temp in group)
-                {
-                    // An empty temp is a crash right after creation and never held a session.
-                    if (new FileInfo(temp).Length == 0) continue;
-                    OpenAiState candidate;
-                    // A non-empty temp that cannot be read now may be the only copy (e.g. a passing DPAPI failure).
-                    try { candidate = ReadState(temp); }
-                    catch (OpenAiUserException) { unreadable = true; continue; }
-                    // Legacy file timestamps cannot prove write order, even when they differ.
-                    if (recovered is not null) throw new OpenAiUserException(OpenAiUserError.CredentialsUnreadable);
-                    recovered = candidate;
-                }
-                if (recovered is not null) return recovered;
+                // Neither a legacy name nor equal orders prove which non-empty snapshot is newer.
+                if (candidates.Length > 1 && (candidates.Any(candidate => candidate.Order is null) ||
+                    candidates[0].Order == candidates[1].Order))
+                    throw new OpenAiUserException(OpenAiUserError.CredentialsUnreadable);
+                // Failure to decrypt cannot distinguish damage from a temporarily inaccessible session.
+                return ReadState(candidates[0].Path);
             }
         }
-        if (unreadable) throw new OpenAiUserException(OpenAiUserError.CredentialsUnreadable);
         return new OpenAiState("urn:uuid:" + Guid.NewGuid().ToString("D"), Array.Empty<OpenAiRegistration>());
     }
 
-    private static OpenAiState ReadState(string path)
+    // Caller must hold LockAsync. The directory also records an interrupted explicit reset.
+    internal string Reset(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        Directory.CreateDirectory(ResetPath);
+        string[] files = Directory.EnumerateFiles(_directory, "openai-*.tmp")
+            .Concat(Directory.EnumerateFiles(_directory, "openai-session.bin")).ToArray();
+        foreach (string file in files)
+        {
+            ct.ThrowIfCancellationRequested();
+            _moveFile(file, Path.Combine(ResetPath, Path.GetFileName(file)));
+        }
+        ct.ThrowIfCancellationRequested();
+        string backup = Path.Combine(_directory, "session-backup-" +
+            DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fffffff", CultureInfo.InvariantCulture) + "-" + Guid.NewGuid().ToString("N"));
+        Directory.Move(ResetPath, backup);
+        return backup;
+    }
+
+    private void ThrowIfResetPending()
+    {
+        if (Directory.Exists(ResetPath))
+            throw new OpenAiUserException(OpenAiUserError.CredentialsUnreadable);
+    }
+
+    private OpenAiState ReadState(string path)
     {
         byte[]? plain = null;
         try
@@ -105,7 +127,7 @@ internal sealed class OpenAiStorage
                 throw new InvalidDataException();
             byte[] encrypted = new byte[checked((int)file.Length)];
             file.ReadExactly(encrypted);
-            plain = OpenAiProtection.Unprotect(encrypted);
+            plain = _unprotect(encrypted);
             OpenAiState state = JsonSerializer.Deserialize<OpenAiState>(plain) ?? throw new InvalidDataException();
             if (string.IsNullOrWhiteSpace(state.HostId) || state.Registrations is null ||
                 (state.PendingClientId is not null && !OpenAiProtocol.IsIssuedClient(state.PendingClientId)) ||
@@ -137,6 +159,7 @@ internal sealed class OpenAiStorage
     internal async Task SaveAsync(OpenAiState state, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
+        ThrowIfResetPending();
         byte[] plain = JsonSerializer.SerializeToUtf8Bytes(state);
         byte[] encrypted;
         try { encrypted = OpenAiProtection.Protect(plain); }

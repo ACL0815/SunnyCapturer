@@ -60,11 +60,15 @@ public static class OpenAiSelfChecks
         Check("Session snapshot recovery invariant", () => StorageRecoveryChecks().GetAwaiter().GetResult());
         Check("Snapshot filesystem failures and crash cuts", () => StorageFaultChecks().GetAwaiter().GetResult());
         Check("Snapshot recovery ordering and cleanup", () => StorageOrderingChecks().GetAwaiter().GetResult());
+        Check("Unreadable newest snapshot never rolls back", () => TransientRecoveryCheck().GetAwaiter().GetResult());
+        Check("Explicit session reset preserves files across interruption", () => StorageResetChecks().GetAwaiter().GetResult());
+        Check("Session reset waits for the store lock and allows sign-in", () => ServiceResetChecks().GetAwaiter().GetResult());
+        Check("Reset invalidates cached accounts and active requests", () => LoadedSessionResetCheck().GetAwaiter().GetResult());
         Check("Constructor never waits for snapshot recovery on STA", () => StorageConstructorCheck().GetAwaiter().GetResult());
         Check("Initial load cancellation, deadline and retry", () => InitialLoadRetryChecks().GetAwaiter().GetResult());
         Check("Concurrent initial loads read once", () => ConcurrentLoadChecks().GetAwaiter().GetResult());
         Check("Public account operations load on demand", () => OnDemandLoadChecks().GetAwaiter().GetResult());
-        Check("Incomplete first snapshot starts fresh and cleans after save", () => IncompleteFirstSaveChecks().GetAwaiter().GetResult());
+        Check("Only empty first-save temps permit a fresh session", () => IncompleteFirstSaveChecks().GetAwaiter().GetResult());
         Check("SSE completed text", () => Require(Read(Delta("hello") + Completed) == "hello", "Completed text lost."));
         Check("SSE empty completed", () => Require(Read(Completed) == "", "Empty OCR must be valid."));
         Check("SSE multiline data and comments", () => Require(Read(": keepalive\r\nevent: response.output_text.delta\r\ndata: {\"type\":\"response.output_text.delta\",\r\ndata: \"delta\":\"ä\"}\r\n\r\n" + Completed) == "ä", "SSE framing failed."));
@@ -491,9 +495,9 @@ public static class OpenAiSelfChecks
         }
         string corrupt = PendingPath(fixture.Directory, DateTime.MaxValue.Ticks);
         File.WriteAllBytes(corrupt, new byte[] { 1, 2, 3 });
-        RequireSnapshot(fixture.Storage.Load(), replacement, "newer invalid temp is skipped");
+        RequireUnreadable(() => fixture.Storage.Load(), "Non-empty newest temp must block fallback, even when it looks truncated.");
         File.WriteAllBytes(corrupt, EncryptedSnapshot(replacement with { HostId = "" }));
-        RequireSnapshot(fixture.Storage.Load(), replacement, "decryptable invalid state is skipped");
+        RequireUnreadable(() => fixture.Storage.Load(), "Unreadable newest structure must not authorize an older snapshot.");
 
         bool closed = false;
         var cancelledSave = new OpenAiStorage(fixture.Directory, checkpoint: (point, _) =>
@@ -583,6 +587,218 @@ public static class OpenAiSelfChecks
         finally { cleanupBlocker?.Dispose(); }
         await fixture.Storage.SaveAsync(replacement, CancellationToken.None).ConfigureAwait(false);
         Require(!System.IO.Directory.EnumerateFiles(fixture.Directory, "openai-*.tmp").Any(), "A later valid publication did not remove abandoned temps.");
+    }
+
+    private static async Task TransientRecoveryCheck()
+    {
+        using var fixture = new Fixture();
+        OpenAiState original = fixture.Storage.Load();
+        OpenAiRegistration second = original.Registrations[0] with
+        {
+            Key = OpenAiProtocol.AccountKey("oaiapp_second", "second"), ClientId = "oaiapp_second", Subject = "second"
+        };
+        OpenAiState replacement = original with { Registrations = original.Registrations.Append(second).ToArray() };
+        string snapshot = Path.Combine(fixture.Directory, "openai-session.bin");
+        string older = PendingPath(fixture.Directory, 1);
+        string newer = PendingPath(fixture.Directory, 2);
+        byte[] newestBytes = EncryptedSnapshot(replacement);
+        File.Move(snapshot, older);
+        File.WriteAllBytes(newer, newestBytes);
+        bool failOnce = true;
+        var storage = new OpenAiStorage(fixture.Directory, unprotect: encrypted =>
+        {
+            if (encrypted.SequenceEqual(newestBytes) && failOnce)
+            {
+                failOnce = false;
+                throw new CryptographicException("Synthetic transient DPAPI failure.");
+            }
+            return OpenAiProtection.Unprotect(encrypted);
+        });
+        using HttpClient http = Client(_ => throw new SelfCheckFailure("Recovery must not reach HTTP."));
+        using var service = new OpenAiService(http, storage);
+        Exception? failure = null;
+        try { await service.EnsureLoadedAsync(CancellationToken.None).ConfigureAwait(false); }
+        catch (Exception ex) { failure = ex; }
+        Require(failure is OpenAiUserException { Error: OpenAiUserError.CredentialsUnreadable } && !service.IsLoaded,
+            "W2: a transient DPAPI failure on the newest snapshot loaded an older account set.");
+        Require(!File.Exists(snapshot) && File.ReadAllBytes(newer).SequenceEqual(newestBytes) && File.Exists(older),
+            "W2: failed loading modified recovery evidence.");
+        await service.EnsureLoadedAsync(CancellationToken.None).ConfigureAwait(false);
+        Require(service.Accounts.Count == 2 && service.Accounts.Any(a => a.Key == second.Key),
+            "W2: retry did not recover the newer two-account snapshot.");
+        using var gate = await storage.LockAsync(CancellationToken.None).ConfigureAwait(false);
+        File.WriteAllBytes(older, new byte[] { 1 });
+        Require(storage.Load().Registrations.Length == 2, "An unreadable older ordered temp blocked the readable newest snapshot.");
+        File.WriteAllBytes(PendingPath(fixture.Directory, 3), Array.Empty<byte>());
+        Require(storage.Load().Registrations.Length == 2, "An empty newer temp blocked recovery.");
+        string tied = PendingPath(fixture.Directory, 2);
+        File.WriteAllBytes(tied, EncryptedSnapshot(original));
+        RequireUnreadable(() => storage.Load(), "Equal non-empty orders must not choose an arbitrary account set.");
+        File.Delete(tied);
+        string legacy = Path.Combine(fixture.Directory, "openai-legacy.tmp");
+        File.WriteAllBytes(legacy, newestBytes);
+        RequireUnreadable(() => storage.Load(), "Legacy and ordered candidates have no provable shared order.");
+        File.WriteAllBytes(legacy, new byte[] { 1 });
+        RequireUnreadable(() => storage.Load(), "An unreadable legacy candidate cannot be assumed older.");
+        File.WriteAllBytes(legacy, Array.Empty<byte>());
+        Require(storage.Load().Registrations.Length == 2, "An empty legacy temp must not create ordering ambiguity.");
+    }
+
+    private static async Task StorageResetChecks()
+    {
+        foreach (int cut in Enumerable.Range(0, 7))
+        {
+            using var fixture = new Fixture();
+            using var gate = await fixture.Storage.LockAsync(CancellationToken.None).ConfigureAwait(false);
+            OpenAiState original = fixture.Storage.Load();
+            string snapshot = Path.Combine(fixture.Directory, "openai-session.bin");
+            string older = PendingPath(fixture.Directory, 1);
+            string newer = PendingPath(fixture.Directory, 2);
+            File.WriteAllBytes(older, EncryptedSnapshot(original));
+            File.WriteAllBytes(newer, new byte[] { 1 });
+            var evidence = new[] { snapshot, older, newer }.ToDictionary(path => Path.GetFileName(path)!, File.ReadAllBytes);
+            string unrelated = Path.Combine(fixture.Directory, "settings.json");
+            File.WriteAllText(unrelated, "unrelated");
+            int moves = 0;
+            var interrupted = new OpenAiStorage(fixture.Directory, moveFile: (source, destination) =>
+            {
+                int boundary = ++moves * 2;
+                if (cut == boundary - 1) throw new IOException("Synthetic failure before reset move.");
+                File.Move(source, destination);
+                if (cut == boundary) throw new IOException("Synthetic failure after reset move.");
+            });
+            using var cancelled = new CancellationTokenSource();
+            cancelled.Cancel();
+            Exception? cancellation = null;
+            try { interrupted.Reset(cancelled.Token); }
+            catch (Exception ex) { cancellation = ex; }
+            Require(cancellation is OperationCanceledException && !System.IO.Directory.Exists(Path.Combine(fixture.Directory, "session-reset.pending")),
+                "Cancelled reset created a transaction.");
+            string? backup = null;
+            Exception? failure = null;
+            try { backup = interrupted.Reset(CancellationToken.None); }
+            catch (IOException ex) { failure = ex; }
+            Require(cut == 0 ? failure is null : failure is not null, "Reset interruption did not reach its requested move boundary.");
+            if (cut != 0)
+            {
+                var restarted = new OpenAiStorage(fixture.Directory);
+                RequireUnreadable(() => restarted.Load(), "An interrupted reset exposed a partial or older session.");
+                Exception? saveFailure = null;
+                try { await restarted.SaveAsync(original, CancellationToken.None).ConfigureAwait(false); }
+                catch (Exception ex) { saveFailure = ex; }
+                Require(saveFailure is OpenAiUserException { Error: OpenAiUserError.CredentialsUnreadable },
+                    "A save bypassed an interrupted reset and could delete remaining evidence.");
+                foreach (var file in evidence)
+                {
+                    string live = Path.Combine(fixture.Directory, file.Key!);
+                    string pending = Path.Combine(fixture.Directory, "session-reset.pending", file.Key!);
+                    Require(File.Exists(live) != File.Exists(pending) &&
+                        File.ReadAllBytes(File.Exists(live) ? live : pending).SequenceEqual(file.Value),
+                        "Reset interruption lost or duplicated encrypted evidence.");
+                }
+                backup = restarted.Reset(CancellationToken.None);
+            }
+            Require(backup is not null && Path.GetFileName(backup).StartsWith("session-backup-", StringComparison.Ordinal) &&
+                evidence.All(file => File.ReadAllBytes(Path.Combine(backup!, file.Key!)).SequenceEqual(file.Value)) &&
+                File.ReadAllText(unrelated) == "unrelated", "Reset did not move every original byte to the announced backup.");
+            Require(!File.Exists(snapshot) && !System.IO.Directory.EnumerateFiles(fixture.Directory, "openai-*.tmp").Any() &&
+                !System.IO.Directory.Exists(Path.Combine(fixture.Directory, "session-reset.pending")), "Completed reset retained live candidates.");
+            OpenAiState fresh = fixture.Storage.Load();
+            Require(fresh.Registrations.Length == 0 && fresh.HostId != original.HostId, "Explicit reset did not start fresh.");
+            await fixture.Storage.SaveAsync(fresh, CancellationToken.None).ConfigureAwait(false);
+            Require(evidence.All(file => File.ReadAllBytes(Path.Combine(backup!, file.Key!)).SequenceEqual(file.Value)),
+                "Later publication changed the reset backup.");
+        }
+    }
+
+    private static async Task ServiceResetChecks()
+    {
+        foreach (bool canonical in new[] { false, true })
+        {
+            using var fixture = new Fixture();
+            string snapshot = Path.Combine(fixture.Directory, "openai-session.bin");
+            string damagedPath = canonical ? snapshot : PendingPath(fixture.Directory, 1);
+            byte[] damaged = { 1 };
+            using (await fixture.Storage.LockAsync(CancellationToken.None).ConfigureAwait(false))
+            {
+                File.Delete(snapshot);
+                File.WriteAllBytes(damagedPath, damaged);
+            }
+            bool browser = false;
+            using HttpClient http = Client(_ => throw new SelfCheckFailure("Reset must not reach HTTP."));
+            using var signInStop = new CancellationTokenSource();
+            using var service = new OpenAiService(http, fixture.Storage, _ => { browser = true; signInStop.Cancel(); });
+            Exception? loadFailure = null;
+            try { await service.EnsureLoadedAsync(CancellationToken.None).ConfigureAwait(false); }
+            catch (Exception ex) { loadFailure = ex; }
+            Require(loadFailure is OpenAiUserException { Error: OpenAiUserError.CredentialsUnreadable } && !service.IsLoaded,
+                "A damaged canonical or sole temp snapshot must remain an explicit load failure.");
+            using var gate = await fixture.Storage.LockAsync(CancellationToken.None).ConfigureAwait(false);
+            using var cancelled = new CancellationTokenSource();
+            Task<string> reset = service.ResetStoredSessionAsync(cancelled.Token);
+            await Task.Delay(120).ConfigureAwait(false);
+            Require(!reset.IsCompleted && File.ReadAllBytes(damagedPath).SequenceEqual(damaged),
+                "Reset bypassed the store lock.");
+            cancelled.Cancel();
+            Exception? cancellation = null;
+            try { await reset.ConfigureAwait(false); }
+            catch (Exception ex) { cancellation = ex; }
+            Require(cancellation is OperationCanceledException && !service.IsLoaded && File.Exists(damagedPath),
+                "Reset cancellation was swallowed or modified the blocked store.");
+            gate.Dispose();
+            string backup = await service.ResetStoredSessionAsync(CancellationToken.None).ConfigureAwait(false);
+            Require(service.IsLoaded && service.Accounts.Count == 0 && service.ActiveAccount is null &&
+                File.ReadAllBytes(Path.Combine(backup, Path.GetFileName(damagedPath))).SequenceEqual(damaged),
+                "Reset did not preserve unreadable credentials and publish a fresh service state.");
+            bool propagated = false;
+            try { await service.SignInAsync(null, signInStop.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException) { propagated = true; }
+            Require(browser && propagated && File.Exists(snapshot), "Fresh sign-in could not reach the fake browser after reset.");
+        }
+    }
+
+    private static async Task LoadedSessionResetCheck()
+    {
+        using var fixture = new Fixture();
+        bool failMove = true;
+        var storage = new OpenAiStorage(fixture.Directory, moveFile: (source, destination) =>
+        {
+            if (failMove) throw new IOException("Synthetic reset failure.");
+            File.Move(source, destination);
+        });
+        var requested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using HttpClient http = new(new FakeHttp(async (_, token) =>
+        {
+            requested.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, token).ConfigureAwait(false);
+            throw new SelfCheckFailure("The reset did not cancel the old account request.");
+        }));
+        using var service = new OpenAiService(http, storage);
+        using var safeguard = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        Task<string> ocr = service.ExtractTextAsync(Png, "test-model", null, safeguard.Token);
+        await requested.Task.WaitAsync(safeguard.Token).ConfigureAwait(false);
+        Exception? failure = null;
+        try { await service.ResetStoredSessionAsync(CancellationToken.None).ConfigureAwait(false); }
+        catch (Exception ex) { failure = ex; }
+        Require(failure is IOException && !service.IsLoaded && service.Accounts.Count == 0 && service.ActiveAccount is null,
+            "An interrupted reset kept usable cached accounts.");
+        Exception? cancelled = null;
+        try { await ocr.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false); }
+        catch (Exception ex) { cancelled = ex; }
+        Require(cancelled is OperationCanceledException && !safeguard.IsCancellationRequested,
+            "Reset did not cancel the old session request.");
+        failMove = false;
+        string backup = await service.ResetStoredSessionAsync(CancellationToken.None).ConfigureAwait(false);
+        Require(service.IsLoaded && service.Accounts.Count == 0 && File.Exists(Path.Combine(backup, "openai-session.bin")),
+            "Retry did not finish the interrupted reset.");
+    }
+
+    private static void RequireUnreadable(Action read, string message)
+    {
+        Exception? failure = null;
+        try { read(); }
+        catch (Exception ex) { failure = ex; }
+        Require(failure is OpenAiUserException { Error: OpenAiUserError.CredentialsUnreadable }, message);
     }
 
     private static async Task StorageConstructorCheck()

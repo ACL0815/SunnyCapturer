@@ -161,6 +161,7 @@ internal static class AppDiagnostics
             Require(!window.IsVisible && new WindowInteropHelper(window).Handle == IntPtr.Zero, "Shell checks must stay offscreen.");
         }
         finally { window.Close(); }
+        CheckOpenAiReset();
         CheckOpenAiStartupRetry();
         return Array.Empty<string>();
     }
@@ -208,10 +209,14 @@ internal static class AppDiagnostics
                 using (var cancelled = new CancellationTokenSource())
                 {
                     cancelled.Cancel();
+                    bool propagated = false;
                     try { AwaitOnDispatcher(window.EnsureOpenAiLoadedAsync(cancelled.Token)); }
-                    catch (OperationCanceledException) { }
-                    Require(!window.OcrStatus.Contains("nicht geladen") && window.OcrStatus.Contains("wird geladen"),
-                        "A cancelled load attempt must not be reported as a load failure.");
+                    catch (OperationCanceledException) { propagated = true; }
+                    Require(propagated, "M6: the UI load boundary swallowed caller cancellation.");
+                    Require(window.OcrStatus.Contains("nicht geladen") && window.OcrStatus.Contains("erneut versuchen") &&
+                        window.AccountStatus.Text.Contains("nicht geladen") && !window.AccountStatus.Text.Contains("wird geladen") &&
+                        window.StatusText.Text.Contains("nicht geladen"),
+                        "A cancelled load attempt must offer retry instead of claiming to still load.");
                 }
                 gate.Dispose();
                 if (action == "models")
@@ -248,6 +253,46 @@ internal static class AppDiagnostics
                     "Startup test cleanup escaped its temporary directory.");
                 if (Directory.Exists(target)) Directory.Delete(target, true);
             }
+        }
+    }
+
+    private static void CheckOpenAiReset()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "KairosCapture-reset-ui-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        byte[] damaged = { 1 };
+        string temp = Path.Combine(directory, "openai-0000000000000000001-broken.tmp");
+        File.WriteAllBytes(temp, damaged);
+        bool browserOpened = false;
+        using var http = new HttpClient(new OfflineHandler());
+        using var service = new OpenAiService(http, new OpenAiStorage(directory),
+            _ => { browserOpened = true; throw new InvalidOperationException("Synthetic browser stop."); });
+        var window = new MainWindow(true, service);
+        try
+        {
+            AwaitOnDispatcher(window.OpenAiInitialization);
+            var reset = window.FindName("ResetSessionButton") as Button;
+            Require(!service.IsLoaded && reset is { Visibility: Visibility.Visible, IsEnabled: true } &&
+                window.AccountStatus.Text.Contains("Gespeicherte Anmeldung zurücksetzen") &&
+                window.AccountStatus.Text.Contains("session-backup-"),
+                "W1: unreadable credentials provide no usable reset action and backup location.");
+            reset!.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            async Task Finished() { while (!reset.IsEnabled) await Task.Delay(5); }
+            AwaitOnDispatcher(Finished());
+            string backup = Directory.GetDirectories(directory, "session-backup-*").Single();
+            Require(service.IsLoaded && service.Accounts.Count == 0 && !File.Exists(temp) &&
+                File.ReadAllBytes(Path.Combine(backup, Path.GetFileName(temp))).SequenceEqual(damaged) &&
+                window.StatusText.Text.Contains(backup) && reset.Visibility == Visibility.Collapsed,
+                "W1: reset must preserve the encrypted file and expose a fresh usable session and backup path.");
+            AwaitOnDispatcher(window.ConnectAsync());
+            Require(browserOpened, "W1: Connect remained trapped in EnsureLoadedAsync after reset.");
+        }
+        finally
+        {
+            window.Close();
+            Require(Path.GetFullPath(directory).StartsWith(Path.Combine(Path.GetFullPath(Path.GetTempPath()), "KairosCapture-reset-ui-"),
+                StringComparison.OrdinalIgnoreCase), "Reset fixture cleanup escaped its temporary directory.");
+            Directory.Delete(directory, true);
         }
     }
 

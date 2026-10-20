@@ -16,7 +16,10 @@ internal sealed class OpenAiUserException(OpenAiUserError error) : InvalidOperat
     OpenAiUserError.SigningOut => "Die OpenAI-Abmeldung läuft noch.",
     OpenAiUserError.SessionExpired => "Die OpenAI-Sitzung kann nicht verwendet oder erneuert werden. Bitte dieses Konto erneut anmelden.",
     OpenAiUserError.SessionBusy => "Eine andere Kairos-Instanz bearbeitet die OpenAI-Sitzung. Bitte später erneut versuchen.",
-    OpenAiUserError.CredentialsUnreadable => "Die geschützten OpenAI-Kontodaten sind nicht lesbar. Die Datei wurde nicht verändert.",
+    OpenAiUserError.CredentialsUnreadable => "Die geschützten OpenAI-Kontodaten sind nicht lesbar oder ein Zurücksetzen wurde unterbrochen. " +
+        "Bitte erneut versuchen oder in den Einstellungen „Gespeicherte Anmeldung zurücksetzen“ wählen. " +
+        "Dabei werden die bisherigen Dateien ohne Löschung nach %LOCALAPPDATA%\\KairosCapture\\session-backup-<Zeitstempel> verschoben. " +
+        "Ein unterbrochenes Zurücksetzen bleibt in session-reset.pending erhalten und kann mit derselben Aktion fortgesetzt werden.",
     OpenAiUserError.PlanPermissionMissing => "Das Konto ist angemeldet, aber die Freigabe zur Nutzung des ChatGPT-Plans fehlt. Für OCR bitte dieses Konto erneut anmelden und die Plannutzung erlauben.",
     OpenAiUserError.PlanPermissionRevoked => "OpenAI hat die Freigabe zur Nutzung des ChatGPT-Plans zurückgenommen. Bitte dieses Konto erneut anmelden.",
     OpenAiUserError.RefreshTooEarly => "OpenAI erlaubt die Sitzungserneuerung noch nicht. Bitte später erneut versuchen.",
