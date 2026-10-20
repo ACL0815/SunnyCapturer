@@ -63,7 +63,8 @@ public sealed partial class OpenAiService : IDisposable
         _refreshTimeout = refreshTimeout ?? TimeSpan.FromSeconds(30);
         _jsonTimeout = jsonTimeout ?? TimeSpan.FromSeconds(30);
         _openBrowser = openBrowser ?? (uri => { Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }); });
-        _state = LoadState();
+        using (_storage.LockAsync(CancellationToken.None).GetAwaiter().GetResult())
+            _state = LoadState();
         _activeKey = (_state.Registrations.FirstOrDefault(r => r.Credentials is not null) ?? _state.Registrations.FirstOrDefault())?.Key;
     }
 
