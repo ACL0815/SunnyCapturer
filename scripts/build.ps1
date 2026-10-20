@@ -51,6 +51,8 @@ $kairosEnvironment = @{
     DOTNET_SKIP_FIRST_TIME_EXPERIENCE = '1'
     DOTNET_GENERATE_ASPNET_CERTIFICATE = 'false'
     DOTNET_NOLOGO = '1'
+    # Self-tests and previews must never append to the personal application.log, even after a regression.
+    KAIROS_DIAGNOSTIC_LOG_DIRECTORY = Join-Path $kairosRoot 'test-results\diagnostic-logs'
 }
 $kairosPreviousEnvironment = @{}
 foreach ($kairosName in $kairosEnvironment.Keys) {
@@ -70,8 +72,6 @@ try {
     if (-not $SkipChecks) {
         $kairosChecks = Join-Path $kairosRoot 'test-results'
         New-Item -ItemType Directory -Path $kairosChecks -Force | Out-Null
-        # Self-tests and previews must never append to the personal application.log, even after a regression.
-        $env:KAIROS_DIAGNOSTIC_LOG_DIRECTORY = Join-Path $kairosChecks 'diagnostic-logs'
         & $kairosDotnet $kairosAssembly --self-test $kairosChecks
         $kairosCheckExit = $LASTEXITCODE
         $kairosPreview = Join-Path $kairosChecks 'settings-window.png'
