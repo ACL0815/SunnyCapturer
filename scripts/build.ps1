@@ -70,6 +70,8 @@ try {
     if (-not $SkipChecks) {
         $kairosChecks = Join-Path $kairosRoot 'test-results'
         New-Item -ItemType Directory -Path $kairosChecks -Force | Out-Null
+        # Self-tests and previews must never append to the personal application.log, even after a regression.
+        $env:KAIROS_DIAGNOSTIC_LOG_DIRECTORY = Join-Path $kairosChecks 'diagnostic-logs'
         & $kairosDotnet $kairosAssembly --self-test $kairosChecks
         $kairosCheckExit = $LASTEXITCODE
         $kairosPreview = Join-Path $kairosChecks 'settings-window.png'

@@ -683,7 +683,8 @@ internal sealed class RegionOverlay : Window
     private void TraceState(OverlayEvent reason, DependencyObject? source = null, int data = 0)
     {
         if (_closed && reason != OverlayEvent.Closed) return;
-        _traceAnomaly |= reason == OverlayEvent.CursorReadFailed || (reason == OverlayEvent.CaptureRequested && data == 0);
+        _traceAnomaly |= reason is OverlayEvent.CursorReadFailed or OverlayEvent.SecondPress ||
+            (reason == OverlayEvent.CaptureRequested && data == 0);
         if (_trace.Count == 20) { _trace.Dequeue(); _traceDropped++; }
         InputSource origin = source == null ? InputSource.None : source == this ? InputSource.Overlay :
             source == Editor ? InputSource.Editor : IsControlSource(source) ? InputSource.Control : InputSource.Other;

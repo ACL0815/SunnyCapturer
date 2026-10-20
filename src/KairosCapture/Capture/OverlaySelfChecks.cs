@@ -110,6 +110,39 @@ public static class OverlaySelfChecks
             }
             finally { overlay.Cancel(); }
         }
+
+        // An unreadable cursor at release must keep the frame at its last known point instead of ending the session.
+        var unreadable = new FramePointer();
+        var keep = unreadable.Create(background);
+        try
+        {
+            RaiseLeftButton(keep, down: true);
+            unreadable.Position = new Point(400, 300);
+            RaiseMove(keep);
+            unreadable.Position = null;
+            unreadable.LeftButton = MouseButtonState.Released;
+            RaiseLeftButton(keep, down: false);
+            Require(!keep.IsClosed && !keep.IsFrameGestureActive && keep.Selection == new Int32Rect(100, 100, 300, 200) &&
+                FrameControlsVisible(keep, background), "An unreadable cursor at MouseUp must finish the frame at its last known point.");
+        }
+        finally { keep.Cancel(); }
+
+        // A second press while a frame is still active is the visible symptom of a lost release and must be traced.
+        var stuck = new FramePointer();
+        var flushes = new List<string>();
+        var again = stuck.Create(background, log: flushes.Add);
+        try
+        {
+            RaiseLeftButton(again, down: true);
+            stuck.Position = new Point(400, 300);
+            RaiseMove(again);
+            RaiseLeftButton(again, down: true);
+            stuck.LeftButton = MouseButtonState.Released;
+            RaiseLeftButton(again, down: false);
+            Require(!again.IsFrameGestureActive && FrameControlsVisible(again, background), "The second click must still finish the stuck frame.");
+        }
+        finally { again.Cancel(); }
+        Require(flushes.Count == 1, "A second press during an active frame must flush its trace exactly once.");
     }
 
     private static void CheckSynchronousCaptureRelease(BitmapSource background)
