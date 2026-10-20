@@ -56,6 +56,7 @@ public static class OpenAiSelfChecks
 
         Check("OIDC signed claims and negative cases", IdentityChecks);
         Check("DPAPI current-user snapshot", StorageChecks);
+        Check("Atomic snapshot replacement contention", () => StorageContentionChecks().GetAwaiter().GetResult());
         Check("SSE completed text", () => Require(Read(Delta("hello") + Completed) == "hello", "Completed text lost."));
         Check("SSE empty completed", () => Require(Read(Completed) == "", "Empty OCR must be valid."));
         Check("SSE multiline data and comments", () => Require(Read(": keepalive\r\nevent: response.output_text.delta\r\ndata: {\"type\":\"response.output_text.delta\",\r\ndata: \"delta\":\"ä\"}\r\n\r\n" + Completed) == "ä", "SSE framing failed."));
@@ -200,6 +201,76 @@ public static class OpenAiSelfChecks
         snapshot[snapshot.Length / 2] ^= 1;
         File.WriteAllBytes(Path.Combine(fixture.Directory, "openai-session.bin"), snapshot);
         Reject(() => fixture.Storage.Load());
+    }
+
+    private static async Task StorageContentionChecks()
+    {
+        using var fixture = new Fixture();
+        OpenAiState original = fixture.Storage.Load();
+        OpenAiState replacement = original with { PendingClientId = "oaiapp_replacement" };
+        string snapshot = Path.Combine(fixture.Directory, "openai-session.bin");
+        byte[] previous = File.ReadAllBytes(snapshot);
+        using (await fixture.Storage.LockAsync(CancellationToken.None).ConfigureAwait(false))
+        {
+            foreach (int code in new[] { 32, 1175 })
+            {
+                int attempts = 0;
+                string? firstTemp = null;
+                var storage = new OpenAiStorage(fixture.Directory, (temp, destination) =>
+                {
+                    firstTemp ??= temp;
+                    Require(temp == firstTemp && destination == snapshot, "A replacement retry changed the snapshot paths.");
+                    if (++attempts == 1) throw new IOException("Synthetic replacement conflict.", unchecked((int)0x80070000) | code);
+                    Require(File.ReadAllBytes(snapshot).SequenceEqual(previous), "Failed replacement changed the previous snapshot.");
+                    File.Replace(temp, destination, null);
+                });
+                await storage.SaveAsync(replacement, CancellationToken.None).ConfigureAwait(false);
+                OpenAiState saved = storage.Load();
+                Require(attempts == 2 && saved.HostId == replacement.HostId && saved.PendingClientId == replacement.PendingClientId &&
+                    saved.Registrations.Single().Credentials!.RefreshToken == "test-refresh", "Transient replacement conflict lost the new snapshot.");
+                previous = File.ReadAllBytes(snapshot);
+            }
+
+            var blocked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var nativeStorage = new OpenAiStorage(fixture.Directory, (temp, destination) =>
+            {
+                try { File.Replace(temp, destination, null); }
+                catch (IOException ex) when ((ex.HResult & 0xffff) == 32) { blocked.TrySetResult(); throw; }
+            });
+            var reader = new FileStream(snapshot, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            Task saving = nativeStorage.SaveAsync(original, CancellationToken.None);
+            try { await blocked.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false); }
+            finally
+            {
+                reader.Dispose();
+                await saving.ConfigureAwait(false);
+            }
+            Require(nativeStorage.Load().PendingClientId == original.PendingClientId, "A temporary reader prevented snapshot publication.");
+            previous = File.ReadAllBytes(snapshot);
+
+            foreach (string scenario in new[] { "permanent", "cancelled", "unrelated" })
+            {
+                using var cancellation = new CancellationTokenSource();
+                int attempts = 0;
+                var conflict = new IOException("Synthetic publication failure.", unchecked((int)0x80070000) | (scenario == "unrelated" ? 112 : 1175));
+                var storage = new OpenAiStorage(fixture.Directory, (_, _) =>
+                {
+                    attempts++;
+                    if (scenario == "cancelled") cancellation.Cancel();
+                    throw conflict;
+                });
+                var elapsed = Stopwatch.StartNew();
+                Exception? failure = null;
+                try { await storage.SaveAsync(replacement, cancellation.Token).ConfigureAwait(false); }
+                catch (Exception ex) { failure = ex; }
+                Require(scenario == "cancelled" ? failure is OperationCanceledException : ReferenceEquals(failure, conflict),
+                    "Replacement failure was swallowed or changed its error category.");
+                Require(scenario == "permanent" ? attempts > 1 && elapsed.Elapsed < TimeSpan.FromSeconds(8) : attempts == 1,
+                    "Replacement retries must be bounded, cancellable, and restricted to the concrete Windows conflict.");
+                Require(File.ReadAllBytes(snapshot).SequenceEqual(previous), "Failed or cancelled publication changed the old snapshot.");
+                Require(!System.IO.Directory.EnumerateFiles(fixture.Directory, "*.tmp").Any(), "Failed publication left a temporary credential file.");
+            }
+        }
     }
 
     private static void RequestChecks()

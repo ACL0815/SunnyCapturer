@@ -23,9 +23,14 @@ internal sealed record OpenAiState(string HostId, OpenAiRegistration[] Registrat
 internal sealed class OpenAiStorage
 {
     private readonly string _directory;
+    private readonly Action<string, string> _replaceFile;
     private string StatePath => Path.Combine(_directory, "openai-session.bin");
 
-    internal OpenAiStorage(string directory) => _directory = directory;
+    internal OpenAiStorage(string directory, Action<string, string>? replaceFile = null)
+    {
+        _directory = directory;
+        _replaceFile = replaceFile ?? ((source, destination) => File.Replace(source, destination, null));
+    }
 
     internal async Task<FileStream> LockAsync(CancellationToken ct)
     {
@@ -103,7 +108,7 @@ internal sealed class OpenAiStorage
                 file.Flush(true);
             }
             ct.ThrowIfCancellationRequested();
-            if (File.Exists(StatePath)) File.Replace(temp, StatePath, null);
+            if (File.Exists(StatePath)) _replaceFile(temp, StatePath);
             else File.Move(temp, StatePath);
         }
         finally
