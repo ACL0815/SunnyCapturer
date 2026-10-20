@@ -21,11 +21,18 @@ Stand 19.10.2026, Version 0.4.0. Kairos startet im Tray; MainWindow enthält die
 | Anpinnen oder I wählen | Der markierte Ausschnitt erscheint rahmenlos im Vordergrund. Mehrere Pins sind möglich; sie lassen sich bewegen und proportional skalieren. P bleibt das Stiftwerkzeug. |
 | Letzte Aufnahme fortsetzen | Derselbe eingefrorene Bildschirm, Rahmen, Editor und beide History-Stacks werden wieder geöffnet. |
 | Escape bei aktiver Text-, Zeichen- oder Rahmengeste | Nur die aktuelle Eingabe/Geste wird verworfen; der vorherige Ausschnitt und ältere Markierungen bleiben erhalten. Ohne aktive Geste wird zunächst ein ausgewähltes Objekt abgewählt, danach beendet Escape die Sitzung. |
+| Deaktivierung oder Capture-Verlust bei losgelassener linker Taste | Geste an der aktuellen bzw. letzten bekannten Cursorposition abschließen. Auswahl und Rahmenbedienung bleiben erhalten. OCR startet wie bei normaler Freigabe genau einmal; Raw nimmt die Auswahl an. |
+| Deaktivierung bei gedrückter linker Taste und gehaltener Capture | Geste weiterführen und das spätere MouseUp normal verarbeiten. |
+| Deaktivierung oder Capture-Verlust bei gedrückter linker Taste ohne Capture | Geste abbrechen und die vorherige Auswahl mit konsistenter Rahmenbedienung wiederherstellen. Keine OCR starten. |
 | Abbrechen / Rechtsklick oder Escape ohne aktive Geste und Objektauswahl | Sitzung endet ohne Ausgabe. Keine Eingabe wird versehentlich als neuer Auswahlrahmen aufgefasst. |
 
 ## Aktuelle Offline-Prüfung
 
 `scripts/build.ps1` baut Release, führt neun Suiten (`capture`, `editor`, `overlay`, `openai`, `shell`, `settings`, `hotkey`, `ocr-result`, `tray`) aus und rendert `overlay.png`, `settings-window.png`, `ocr-result.png` sowie `tray-menu.png` unter `test-results`. Die Aufruf- und Startdetails stehen in [KAIROS.md](../../KAIROS.md). Offline-Prüfungen und Offscreen-Vorschauen belegen keine reale Maus-/Tastaturbedienung, Mixed-DPI-Hardware oder einen echten OpenAI-Login.
+
+Die Ergänzung vom 20.10.2026 prüft die echten MouseMove- und MouseUp-Handler mit synthetischen WPF-Events. Injizierte Cursor-, Tasten- und Capture-Funktionen prüfen auch eine synchrone Capture-Freigabe sowie OCR- und Raw-Abschlüsse. Beim Schließen wird die Geste bereits in `OnClosing` inaktiv. Capture-Verlust zwischen `Closing` und `Closed` darf keinen OCR-Abschluss auslösen. Bei ReleasedMove wird die erste danach bekannte Cursorposition verwendet, weil die ursprüngliche Loslassmeldung fehlt.
+
+Die Spur ist ein Ringpuffer mit höchstens 20 Zeilen. Normale Aufnahmen schreiben nichts. Auffällige Gestenenden, Schließen mit aktiver Geste, unerwartet fehlende Rahmenbedienung sowie Capture- und Cursorfehler führen zu genau einem Flush beim Schließen. `Closing` bewahrt den vorherigen Zustand, `Closed` zeigt geschlossene Bedienelemente und die Geste samt Auswahl vor dem Zurücksetzen. Ein Test prüft den echten App-Log-Hook mit umgeleitetem Ziel und erkennt einen entfernten Diagnose-Guard. Für Gegenproben ist `KAIROS_DIAGNOSTIC_LOG_DIRECTORY` gesetzt; das persönliche Nutzer-Log wird dabei nicht beschrieben.
 
 ## Historische Belegarten: Version 0.2.0 vom 18.10.2026
 
