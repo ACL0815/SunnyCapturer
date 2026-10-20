@@ -476,7 +476,7 @@ public static class OpenAiSelfChecks
                 throw new SelfCheckFailure("Stream did not wait for its supplied token.");
             });
             using HttpClient http = Client(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(stream) });
-            using (var service = new OpenAiService(http, fixture.Storage, diagnostic: logs.Add, ocrTimeout: TimeSpan.FromSeconds(2)))
+            using (var service = new OpenAiService(http, fixture.Storage, diagnostic: logs.Add, ocrTimeout: TimeSpan.FromSeconds(10)))
             {
                 Task<string> task = service.ExtractTextAsync(Png, "test-model", null, caller.Token);
                 await waiting.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
@@ -538,7 +538,7 @@ public static class OpenAiSelfChecks
                 throw new SelfCheckFailure("Refresh did not wait for its supplied token.");
             }));
             using var service = new OpenAiService(http, fixture.Storage, diagnostic: logs.Add,
-                refreshTimeout: lifetime ? TimeSpan.FromSeconds(2) : TimeSpan.FromMilliseconds(200));
+                refreshTimeout: lifetime ? TimeSpan.FromSeconds(10) : TimeSpan.FromMilliseconds(200));
             Task task = service.ExtractTextAsync(Png, "test-model", null, caller.Token);
             await waiting.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
             await Task.Delay(20).ConfigureAwait(false);
@@ -646,7 +646,8 @@ public static class OpenAiSelfChecks
 
     private static async Task SignOutBoundaryChecks()
     {
-        foreach (bool cancel in new[] { false, true })
+        // 0: remote timeout, 1: caller cancels while revocation waits, 2: caller cancels right after a confirmed revocation.
+        foreach (int mode in new[] { 0, 1, 2 })
         {
             using var fixture = new Fixture();
             using var caller = new CancellationTokenSource();
@@ -654,26 +655,33 @@ public static class OpenAiSelfChecks
             var logs = new List<string>();
             using HttpClient http = new(new FakeHttp(async (request, token) =>
             {
-                if (cancel && request.Method == HttpMethod.Get) return Json(JsonSerializer.Serialize(new
+                if (mode > 0 && request.Method == HttpMethod.Get) return Json(JsonSerializer.Serialize(new
                     { issuer = OpenAiProtocol.Issuer, revocation_endpoint = OpenAiProtocol.Issuer + "/test/revoke" }));
+                if (mode == 2) { caller.Cancel(); return new HttpResponseMessage(HttpStatusCode.OK); }
                 waiting.SetResult();
                 await Task.Delay(Timeout.InfiniteTimeSpan, token).ConfigureAwait(false);
                 throw new SelfCheckFailure("Logout did not wait for its supplied token.");
             }));
             using var service = new OpenAiService(http, fixture.Storage, diagnostic: logs.Add, jsonTimeout: TimeSpan.FromMilliseconds(200));
             Task<string?> task = service.SignOutAsync(caller.Token);
-            await waiting.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
-            if (cancel) caller.Cancel();
-            try
+            if (mode < 2) await waiting.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            if (mode == 1) caller.Cancel();
+            string? warning = await task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            if (mode == 0)
             {
-                string? warning = await task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
-                Require(!cancel && warning is not null, "Unconfirmed logout must retain its local-clearing warning.");
+                Require(warning is not null, "Unconfirmed logout must retain its local-clearing warning.");
                 RequireLogSequence(logs, "Discovery/Started", "Discovery/Failed/Timeout");
             }
-            catch (OperationCanceledException)
+            else if (mode == 1)
             {
-                Require(cancel && task.IsCanceled, "Caller-cancelled logout must finish Canceled after local clearing.");
+                Require(warning is not null && task.IsCompletedSuccessfully,
+                    "A cancelled remote revocation must still report local logout with the ChatGPT disconnect hint.");
                 RequireLogSequence(logs, "Discovery/Started", "Discovery/Response", "Revoke/Started", "Revoke/Cancelled/Cancelled");
+            }
+            else
+            {
+                Require(warning is null && task.IsCompletedSuccessfully, "A confirmed revocation must not turn into a cancel or warning.");
+                RequireLogSequence(logs, "Discovery/Started", "Discovery/Response", "Revoke/Started", "Revoke/Response", "Revoke/Succeeded");
             }
             Require(fixture.Storage.Load().Registrations.Single().Credentials is null, "Remote timeout or cancellation must still clear local tokens.");
         }

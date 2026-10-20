@@ -243,9 +243,8 @@ public sealed partial class OpenAiService : IDisposable
                     state = state with { Registrations = state.Registrations.Select(r => r.Key == key ? r with { Credentials = null } : r).ToArray() };
                     await SaveAsync(state, CancellationToken.None).ConfigureAwait(false);
                 }
-                if (revocationFailure is OperationCanceledException && (ct.IsCancellationRequested || _lifetime.IsCancellationRequested))
-                    throw revocationFailure;
-                ct.ThrowIfCancellationRequested();
+                // Local tokens are already gone here, so a caller cancel only ends the remote wait and must keep the warning.
+                if (revocationFailure is OperationCanceledException && _lifetime.IsCancellationRequested) throw revocationFailure;
                 _lifetime.Token.ThrowIfCancellationRequested();
                 if (revocationFailure is null) Report(OpenAiStep.Revoke, OpenAiOutcome.Succeeded);
                 else FinishFailure(revocationFailure, OpenAiStep.Revoke, ct);
@@ -568,6 +567,7 @@ public sealed partial class OpenAiService : IDisposable
             try { return await SendJsonAsync(request, ct).ConfigureAwait(false); }
             catch (HttpRequestException ex) when (!ct.IsCancellationRequested && OpenAiDiagnostics.MayRetryToken(ex, attempt))
             {
+                Report(OpenAiStep.Token, OpenAiOutcome.Retrying, ex);
                 await Task.Delay(250, ct).ConfigureAwait(false);
             }
         }
