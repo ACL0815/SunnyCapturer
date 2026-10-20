@@ -23,14 +23,19 @@ public partial class MainWindow : Window
     private GlobalHotkey? _hotkey;
     private bool _refreshing, _closed, _exiting;
     private IReadOnlyList<OpenAiModel> _models = Array.Empty<OpenAiModel>();
+    private bool _accountPreferenceApplied;
+    private string? _loadFailure;
     internal AppSettings Settings { get; }
-    internal OpenAiService? OpenAi { get; }
+    internal OpenAiService OpenAi { get; }
+    internal Task OpenAiInitialization { get; }
     internal event Action? SettingsChanged;
     internal event Action<CaptureCompletion, string?>? CaptureCompleted;
-    internal string OcrStatus => OpenAi?.ActiveAccount is { IsSignedIn: true } account
+    internal string OcrStatus => !OpenAi.IsLoaded ? (_loadFailure is null ? "OCR: OpenAI-Konto wird geladen…" : "OCR: Konto nicht geladen · erneut versuchen") : OpenAi.ActiveAccount is { IsSignedIn: true } account
         ? $"OCR: {(account.Email.Length > 0 ? account.Email : account.Label)} · {(!OpenAi.CanUsePlan ? "Planfreigabe fehlt" : Settings.Model.Length > 0 ? Settings.Model : "Modell fehlt")}" : "OCR: nicht verbunden";
 
-    public MainWindow(bool diagnosticsMode = false)
+    public MainWindow(bool diagnosticsMode = false) : this(diagnosticsMode, null) { }
+
+    internal MainWindow(bool diagnosticsMode, OpenAiService? openAi)
     {
         _diagnosticsMode = diagnosticsMode;
         Settings = diagnosticsMode ? new() : AppSettings.Load();
@@ -40,12 +45,7 @@ public partial class MainWindow : Window
         AskSave.IsChecked = Settings.SaveWithoutDialog;
         SaveCopy.IsChecked = Settings.SaveOnCopy;
         AutoCopy.IsChecked = Settings.AutoCopyOcr;
-        try
-        {
-            OpenAi = diagnosticsMode ? AppDiagnostics.CreateIsolatedService() : new OpenAiService();
-            if (OpenAi.Accounts.Any(a => a.Key == Settings.AccountKey)) OpenAi.SelectAccount(Settings.AccountKey);
-        }
-        catch (Exception ex) { ReportError("OpenAI-Konto konnte nicht geladen werden", ex); }
+        OpenAi = openAi ?? (diagnosticsMode ? AppDiagnostics.CreateIsolatedService() : new OpenAiService());
         RefreshAccounts();
         if (!diagnosticsMode)
         {
@@ -55,9 +55,52 @@ public partial class MainWindow : Window
         SourceInitialized += (_, _) => GlassWindow.Apply(this);
         IsVisibleChanged += async (_, _) =>
         {
-            if (IsVisible && !_diagnosticsMode && OpenAi?.ActiveAccount?.IsSignedIn == true && _models.Count == 0)
+            if (IsVisible && !_diagnosticsMode && OpenAi.ActiveAccount?.IsSignedIn == true && _models.Count == 0)
                 await RunAccountActionAsync(LoadModelsAsync);
         };
+        OpenAiInitialization = InitializeOpenAiAsync();
+    }
+
+    private async Task InitializeOpenAiAsync()
+    {
+        try
+        {
+            await EnsureOpenAiLoadedAsync(_lifetime.Token);
+            if (_closed) return;
+            SetStatus(OpenAi.ActiveAccount?.IsSignedIn == true ? "Mit ChatGPT verbunden." : "Mit ChatGPT verbinden, um Text zu erkennen.");
+            if (!_diagnosticsMode && IsVisible && OpenAi.ActiveAccount?.IsSignedIn == true)
+                await RunAccountActionAsync(LoadModelsAsync);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { App.LogException("OpenAI-Konto laden", ex); if (!_closed) SetStatus(_loadFailure!); }
+    }
+
+    internal async Task EnsureOpenAiLoadedAsync(CancellationToken ct)
+    {
+        if (!OpenAi.IsLoaded)
+        {
+            _loadFailure = null;
+            SetStatus("OpenAI-Konto wird geladen…");
+            RefreshAccounts();
+        }
+        try
+        {
+            await OpenAi.EnsureLoadedAsync(ct);
+            if (_closed) return;
+            if (!_accountPreferenceApplied)
+            {
+                if (OpenAi.Accounts.Any(a => a.Key == Settings.AccountKey)) await OpenAi.SelectAccountAsync(Settings.AccountKey, ct);
+                _accountPreferenceApplied = true;
+            }
+            _loadFailure = null;
+        }
+        catch (Exception ex)
+        {
+            _loadFailure = "OpenAI-Konto konnte nicht geladen werden. " + OpenAiDiagnostics.UserMessage(ex) +
+                " Bitte Verbinden, Modelle aktualisieren oder Texterkennung erneut wählen.";
+            throw;
+        }
+        finally { if (!_closed) RefreshAccounts(); }
     }
 
     internal void InitializeHotkey()
@@ -132,9 +175,9 @@ public partial class MainWindow : Window
     private void RefreshAccounts()
     {
         _refreshing = true;
-        AccountPicker.ItemsSource = OpenAi?.Accounts;
-        AccountPicker.SelectedItem = OpenAi?.Accounts.FirstOrDefault(a => a.Key == OpenAi.ActiveAccount?.Key);
-        AccountStatus.Text = OpenAi is null ? "OpenAI ist derzeit nicht verfügbar. Aufnahme und Bearbeitung bleiben verfügbar." :
+        AccountPicker.ItemsSource = OpenAi.Accounts;
+        AccountPicker.SelectedItem = OpenAi.Accounts.FirstOrDefault(a => a.Key == OpenAi.ActiveAccount?.Key);
+        AccountStatus.Text = !OpenAi.IsLoaded ? _loadFailure ?? "OpenAI-Konto wird geladen…" :
             OpenAi.ActiveAccount?.IsSignedIn == true ? (OpenAi.CanUsePlan ? "Mit ChatGPT verbunden" : "Mit ChatGPT verbunden · Freigabe zur Nutzung des Plans fehlt") :
                 "Mit ChatGPT verbinden, um Text aus Aufnahmen zu erkennen.";
         _refreshing = false;
@@ -143,13 +186,16 @@ public partial class MainWindow : Window
 
     private async void Account_Changed(object sender, SelectionChangedEventArgs e)
     {
-        if (_refreshing || OpenAi == null || AccountPicker.SelectedItem is not OpenAiAccount account || _accountCts != null) return;
-        OpenAi.SelectAccount(account.Key);
-        Settings.AccountKey = account.Key;
-        _models = Array.Empty<OpenAiModel>();
-        ModelPicker.ItemsSource = _models;
-        SaveSettings(); RefreshAccounts();
-        if (account.IsSignedIn) await RunAccountActionAsync(LoadModelsAsync);
+        if (_refreshing || AccountPicker.SelectedItem is not OpenAiAccount account || _accountCts != null) return;
+        await RunAccountActionAsync(async ct =>
+        {
+            await OpenAi.SelectAccountAsync(account.Key, ct);
+            Settings.AccountKey = account.Key;
+            _models = Array.Empty<OpenAiModel>();
+            ModelPicker.ItemsSource = _models;
+            SaveSettings(); RefreshAccounts();
+            if (account.IsSignedIn) await LoadModelsAsync(ct);
+        });
     }
     private async Task RunAccountActionAsync(Func<CancellationToken, Task> action)
     {
@@ -158,7 +204,7 @@ public partial class MainWindow : Window
         _accountCts = operation;
         AccountPicker.IsEnabled = LoginButton.IsEnabled = AddAccountButton.IsEnabled = SignOutButton.IsEnabled = RefreshButton.IsEnabled = false;
         CancelLoginButton.Visibility = Visibility.Visible;
-        try { await action(operation.Token); }
+        try { await EnsureOpenAiLoadedAsync(operation.Token); await action(operation.Token); }
         catch (OperationCanceledException) { if (!_closed) SetStatus("Vorgang abgebrochen."); }
         catch (Exception ex) { App.LogException("OpenAI", ex); if (!_closed) SetStatus(OpenAiDiagnostics.UserMessage(ex)); }
         finally
@@ -174,7 +220,6 @@ public partial class MainWindow : Window
     }
     internal async Task ConnectAsync(bool addAccount = false)
     {
-        if (OpenAi == null) { ShowFromTray(); SetStatus("OpenAI konnte nicht initialisiert werden. Protokolle prüfen und Kairos neu starten."); return; }
         await RunAccountActionAsync(async ct =>
         {
             SetStatus("Anmeldung im Browser abschließen…");
@@ -199,14 +244,15 @@ public partial class MainWindow : Window
     private void CancelLogin_Click(object sender, RoutedEventArgs e) => _accountCts?.Cancel();
     private async void SignOut_Click(object sender, RoutedEventArgs e) => await RunAccountActionAsync(async ct =>
     {
-        string? warning = OpenAi == null ? null : await OpenAi.SignOutAsync(ct);
+        string? warning = await OpenAi.SignOutAsync(ct);
         _models = Array.Empty<OpenAiModel>(); ModelPicker.ItemsSource = _models;
         SetStatus(warning ?? "Abgemeldet.");
     });
     private async void RefreshModels_Click(object sender, RoutedEventArgs e) => await RunAccountActionAsync(LoadModelsAsync);
     private async Task LoadModelsAsync(CancellationToken ct)
     {
-        if (OpenAi?.ActiveAccount?.IsSignedIn != true) { SetStatus("Zuerst mit ChatGPT verbinden."); return; }
+        await EnsureOpenAiLoadedAsync(ct);
+        if (OpenAi.ActiveAccount?.IsSignedIn != true) { SetStatus("Zuerst mit ChatGPT verbinden."); return; }
         var models = await OpenAi.GetModelsAsync(ct);
         if (_closed) return;
         _models = models;
@@ -278,7 +324,7 @@ public partial class MainWindow : Window
     }
     protected override void OnClosed(EventArgs e)
     {
-        _closed = true; _lifetime.Cancel(); _accountCts?.Cancel(); _hotkey?.Dispose(); OpenAi?.Dispose();
+        _closed = true; _lifetime.Cancel(); _accountCts?.Cancel(); _hotkey?.Dispose(); OpenAi.Dispose();
         base.OnClosed(e);
     }
 }

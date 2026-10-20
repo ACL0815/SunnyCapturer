@@ -132,7 +132,8 @@ public sealed partial class OpenAiService
         {
             using var service = new OpenAiService(CreateHttpClient(), new OpenAiStorage(AppSettings.DirectoryPath),
                 _ => throw new InvalidOperationException(), true);
-            if (service.Accounts.Any(a => a.Key == accountKey)) service.SelectAccount(accountKey);
+            await service.EnsureLoadedAsync(CancellationToken.None).ConfigureAwait(false);
+            if (service.Accounts.Any(a => a.Key == accountKey)) await service.SelectAccountAsync(accountKey, CancellationToken.None).ConfigureAwait(false);
             string text = await service.ExtractTextCoreAsync(syntheticPng, model, null, CancellationToken.None, null, trace).ConfigureAwait(false);
             bool passed = text.Trim() == OpenAiOcrTrace.SyntheticText;
             trace.Lines.Add(passed ? "result=" + OpenAiOcrTrace.SyntheticText : "result=<unexpected-text>");

@@ -69,7 +69,6 @@ internal sealed class OpenAiStorage
         try { return ReadState(StatePath); }
         catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException) { }
 
-        bool invalid = false;
         if (Directory.Exists(_directory))
         {
             foreach (var group in Directory.EnumerateFiles(_directory, "openai-*.tmp")
@@ -80,7 +79,7 @@ internal sealed class OpenAiStorage
                 {
                     OpenAiState candidate;
                     try { candidate = ReadState(temp); }
-                    catch (OpenAiUserException) { invalid = true; continue; }
+                    catch (OpenAiUserException) { continue; }
                     // Legacy file timestamps cannot prove write order, even when they differ.
                     if (recovered is not null) throw new OpenAiUserException(OpenAiUserError.CredentialsUnreadable);
                     recovered = candidate;
@@ -88,7 +87,6 @@ internal sealed class OpenAiStorage
                 if (recovered is not null) return recovered;
             }
         }
-        if (invalid) throw new OpenAiUserException(OpenAiUserError.CredentialsUnreadable);
         return new OpenAiState("urn:uuid:" + Guid.NewGuid().ToString("D"), Array.Empty<OpenAiRegistration>());
     }
 

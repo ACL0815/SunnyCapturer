@@ -116,13 +116,15 @@ internal sealed class OcrResultWindow : Window
         string? language = (_translation.SelectedItem as OpenAiTranslation)?.Language;
         string cacheKey = language ?? "";
         if (_translations.TryGetValue(cacheKey, out string? cached)) { ShowResult(cached, language); return; }
-        if (_settings.OpenAi?.ActiveAccount?.IsSignedIn != true)
-        { ShowFailure("Mit ChatGPT verbinden, dann erneut versuchen. Deine Aufnahme bleibt hier erhalten."); return; }
         using var operation = new CancellationTokenSource(); _operation = operation;
         bool Current() => !_closed && ReferenceEquals(_operation, operation) && !operation.IsCancellationRequested;
         SetActions(true, false); _text.Clear(); _status.Text = language is null ? "Text wird erkannt…" : "Text wird erkannt und übersetzt…";
         try
         {
+            await _settings.EnsureOpenAiLoadedAsync(operation.Token);
+            if (!Current()) return;
+            if (_settings.OpenAi.ActiveAccount?.IsSignedIn != true)
+            { ShowFailure("Mit ChatGPT verbinden, dann erneut versuchen. Deine Aufnahme bleibt hier erhalten."); return; }
             var models = await _settings.OpenAi.GetModelsAsync(operation.Token);
             if (!Current()) return;
             var model = OpenAiService.SelectOcrModel(models, _settings.Settings.Model);
