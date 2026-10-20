@@ -544,7 +544,9 @@ public static class OpenAiSelfChecks
         Reject(() => fixture.Storage.Load());
         File.Delete(legacyOld);
         File.WriteAllBytes(legacy, new byte[] { 1 });
-        Require(fixture.Storage.Load().Registrations.Length == 0, "An incomplete first save must start fresh when no valid snapshot exists.");
+        Reject(() => fixture.Storage.Load());
+        File.WriteAllBytes(legacy, Array.Empty<byte>());
+        Require(fixture.Storage.Load().Registrations.Length == 0, "An empty first-save temp must start fresh when no valid snapshot exists.");
         File.Delete(legacy);
         Require(fixture.Storage.Load().Registrations.Length == 0, "An unused store must still start empty.");
 
@@ -734,7 +736,21 @@ public static class OpenAiSelfChecks
 
     private static async Task IncompleteFirstSaveChecks()
     {
-        foreach (byte[] incomplete in new[] { Array.Empty<byte>(), new byte[] { 1, 2, 3 }, EncryptedSnapshot(new OpenAiState("", Array.Empty<OpenAiRegistration>())) })
+        // A non-empty unreadable temp may be a real session that DPAPI cannot open right now; it must block, not vanish.
+        foreach (byte[] unreadable in new[] { new byte[] { 1, 2, 3 }, EncryptedSnapshot(new OpenAiState("", Array.Empty<OpenAiRegistration>())) })
+        {
+            using var fixture = new Fixture();
+            using FileStream gate = await fixture.Storage.LockAsync(CancellationToken.None).ConfigureAwait(false);
+            File.Delete(Path.Combine(fixture.Directory, "openai-session.bin"));
+            string temp = PendingPath(fixture.Directory, 1);
+            File.WriteAllBytes(temp, unreadable);
+            Exception? failure = null;
+            try { fixture.Storage.Load(); }
+            catch (Exception ex) { failure = ex; }
+            Require(failure is OpenAiUserException && File.Exists(temp) && File.ReadAllBytes(temp).SequenceEqual(unreadable),
+                "A non-empty unreadable temp without a snapshot must be reported and kept, never replaced by a fresh state.");
+        }
+        foreach (byte[] incomplete in new[] { Array.Empty<byte>() })
         {
             using var fixture = new Fixture();
             using FileStream gate = await fixture.Storage.LockAsync(CancellationToken.None).ConfigureAwait(false);

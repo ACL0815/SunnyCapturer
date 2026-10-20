@@ -205,6 +205,14 @@ internal static class AppDiagnostics
                 Require(ReferenceEquals(window.OpenAi, service) && !service.IsLoaded && window.AccountStatus.Text.Contains("erneut") &&
                     window.OcrStatus.Contains("erneut") && window.StatusText.Text.Contains("Modelle aktualisieren") && requests == 0,
                     "A busy startup must retain the service and explain how to retry.");
+                using (var cancelled = new CancellationTokenSource())
+                {
+                    cancelled.Cancel();
+                    try { AwaitOnDispatcher(window.EnsureOpenAiLoadedAsync(cancelled.Token)); }
+                    catch (OperationCanceledException) { }
+                    Require(!window.OcrStatus.Contains("nicht geladen") && window.OcrStatus.Contains("wird geladen"),
+                        "A cancelled load attempt must not be reported as a load failure.");
+                }
                 gate.Dispose();
                 if (action == "models")
                 {
@@ -227,6 +235,9 @@ internal static class AppDiagnostics
                 Require(service.IsLoaded && service.ActiveAccount?.Key == preferred.Key && window.AccountPicker.Items.Count == 2 &&
                     window.AccountStatus.Text.Contains("Mit ChatGPT verbunden") && !window.OcrStatus.Contains("nicht geladen"),
                     "Retry did not apply the saved account and refresh settings and tray.");
+                AwaitOnDispatcher(service.SelectAccountAsync(first.Key, CancellationToken.None));
+                AwaitOnDispatcher(window.EnsureOpenAiLoadedAsync(CancellationToken.None));
+                Require(service.ActiveAccount?.Key == first.Key, "The saved account preference must be applied only once, never over a later choice.");
             }
             finally
             {

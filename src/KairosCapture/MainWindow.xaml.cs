@@ -94,7 +94,7 @@ public partial class MainWindow : Window
             }
             _loadFailure = null;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _loadFailure = "OpenAI-Konto konnte nicht geladen werden. " + OpenAiDiagnostics.UserMessage(ex) +
                 " Bitte Verbinden, Modelle aktualisieren oder Texterkennung erneut wählen.";
