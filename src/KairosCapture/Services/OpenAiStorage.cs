@@ -31,7 +31,9 @@ internal sealed class OpenAiStorage
     private readonly Func<byte[], byte[]> _unprotect;
     private readonly Action<OpenAiStoragePoint, string>? _checkpoint;
     private string StatePath => Path.Combine(_directory, "openai-session.bin");
-    private string ResetPath => Path.Combine(_directory, "session-reset.pending");
+    internal string ResetPath => Path.Combine(_directory, "session-reset.pending");
+    internal string DirectoryPath => _directory;
+    internal bool ResetPending => Directory.Exists(ResetPath);
 
     internal OpenAiStorage(string directory, Action<string, string>? replaceFile = null,
         Action<string, string>? moveFile = null, Func<long>? tickCount = null,
@@ -95,6 +97,16 @@ internal sealed class OpenAiStorage
     // Caller must hold LockAsync. The directory also records an interrupted explicit reset.
     internal string Reset(CancellationToken ct)
     {
+        try { return MoveSessionToBackup(ct); }
+        catch (Exception ex)
+        {
+            if (ResetPending) OpenAiDiagnostics.MarkResetPending(ex, ResetPath);
+            throw;
+        }
+    }
+
+    private string MoveSessionToBackup(CancellationToken ct)
+    {
         ct.ThrowIfCancellationRequested();
         Directory.CreateDirectory(ResetPath);
         string[] files = Directory.EnumerateFiles(_directory, "openai-*.tmp")
@@ -113,8 +125,12 @@ internal sealed class OpenAiStorage
 
     private void ThrowIfResetPending()
     {
-        if (Directory.Exists(ResetPath))
-            throw new OpenAiUserException(OpenAiUserError.CredentialsUnreadable);
+        if (ResetPending)
+        {
+            var ex = new OpenAiUserException(OpenAiUserError.CredentialsUnreadable);
+            OpenAiDiagnostics.MarkResetPending(ex, ResetPath);
+            throw ex;
+        }
     }
 
     private OpenAiState ReadState(string path)

@@ -27,6 +27,11 @@ internal static class OpenAiDiagnostics
 {
     private const string StepKey = "Kairos.OpenAi.Step";
     private const string StatusKey = "Kairos.OpenAi.Status";
+    private const string ResetPendingKey = "Kairos.OpenAi.ResetPending";
+    internal static void MarkResetPending(Exception ex, string path) => ex.Data[ResetPendingKey] = path;
+    internal static string ResetPendingMessage(Exception ex) => ex.Data[ResetPendingKey] is string path
+        ? " Das Zurücksetzen ist unvollständig. Die bisherigen Dateien bleiben im Sitzungsordner und in „" + path +
+            "“ erhalten. Mit „Gespeicherte Anmeldung zurücksetzen“ fortsetzen." : "";
     internal static void Mark(Exception ex, OpenAiStep step, int? status = null)
     {
         if (ex.Data[StepKey] is not OpenAiStep) ex.Data[StepKey] = step;
@@ -97,7 +102,9 @@ internal static class OpenAiDiagnostics
     internal static string Event(OpenAiStep step, OpenAiOutcome outcome, Exception? ex = null, int? status = null) =>
         ex is null ? $"step={step} outcome={outcome} status={status}" : $"outcome={outcome} {Describe(ex)}";
 
-    internal static string UserMessage(Exception ex)
+    internal static string UserMessage(Exception ex) => FailureMessage(ex) + ResetPendingMessage(ex);
+
+    private static string FailureMessage(Exception ex)
     {
         if (ex is OpenAiUserException or OpenAiOcrProtocolException) return ex.Message;
         string context = Step(ex) switch

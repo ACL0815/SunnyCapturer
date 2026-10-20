@@ -162,6 +162,8 @@ internal static class AppDiagnostics
         }
         finally { window.Close(); }
         CheckOpenAiReset();
+        CheckOpenAiRecoveredReset();
+        CheckOpenAiStoreStatus();
         CheckOpenAiStartupRetry();
         return Array.Empty<string>();
     }
@@ -204,7 +206,8 @@ internal static class AppDiagnostics
                     "Startup must expose loading status in settings and tray.");
                 AwaitOnDispatcher(window.OpenAiInitialization);
                 Require(ReferenceEquals(window.OpenAi, service) && !service.IsLoaded && window.AccountStatus.Text.Contains("erneut") &&
-                    window.OcrStatus.Contains("erneut") && window.StatusText.Text.Contains("Modelle aktualisieren") && requests == 0,
+                    window.OcrStatus.Contains("erneut") && window.StatusText.Text.Contains("Modelle aktualisieren") && requests == 0 &&
+                    !service.StoredSessionUnreadable && window.ResetSessionButton.Visibility == Visibility.Collapsed,
                     "A busy startup must retain the service and explain how to retry.");
                 using (var cancelled = new CancellationTokenSource())
                 {
@@ -267,7 +270,9 @@ internal static class AppDiagnostics
         using var http = new HttpClient(new OfflineHandler());
         using var service = new OpenAiService(http, new OpenAiStorage(directory),
             _ => { browserOpened = true; throw new InvalidOperationException("Synthetic browser stop."); });
-        var window = new MainWindow(true, service);
+        bool confirmed = false;
+        string? confirmation = null;
+        var window = new MainWindow(true, service, message => { confirmation = message; return confirmed; });
         try
         {
             AwaitOnDispatcher(window.OpenAiInitialization);
@@ -276,13 +281,23 @@ internal static class AppDiagnostics
                 window.AccountStatus.Text.Contains("Gespeicherte Anmeldung zurücksetzen") &&
                 window.AccountStatus.Text.Contains("session-backup-"),
                 "W1: unreadable credentials provide no usable reset action and backup location.");
+            window.Settings.AccountKey = "previous-account";
+            window.Settings.Model = "previous-model";
+            AwaitOnDispatcher(window.ResetStoredSessionAsync());
+            Require(confirmation is not null && confirmation.Contains(directory, StringComparison.Ordinal) &&
+                confirmation.Contains("neue Anmeldung", StringComparison.Ordinal) && confirmation.Contains("session-backup-", StringComparison.Ordinal) &&
+                File.ReadAllBytes(temp).SequenceEqual(damaged) && !Directory.EnumerateDirectories(directory).Any() &&
+                !service.IsLoaded && window.Settings.AccountKey == "previous-account" && window.Settings.Model == "previous-model",
+                "W-A: declining the confirmation changed files, session or account preferences, or the dialog omitted folder and consequence.");
+            confirmed = true;
             reset!.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             async Task Finished() { while (!reset.IsEnabled) await Task.Delay(5); }
             AwaitOnDispatcher(Finished());
             string backup = Directory.GetDirectories(directory, "session-backup-*").Single();
             Require(service.IsLoaded && service.Accounts.Count == 0 && !File.Exists(temp) &&
                 File.ReadAllBytes(Path.Combine(backup, Path.GetFileName(temp))).SequenceEqual(damaged) &&
-                window.StatusText.Text.Contains(backup) && reset.Visibility == Visibility.Collapsed,
+                window.StatusText.Text.Contains(backup) && reset.Visibility == Visibility.Collapsed &&
+                window.Settings.AccountKey == "" && window.Settings.Model == "",
                 "W1: reset must preserve the encrypted file and expose a fresh usable session and backup path.");
             AwaitOnDispatcher(window.ConnectAsync());
             Require(browserOpened, "W1: Connect remained trapped in EnsureLoadedAsync after reset.");
@@ -293,6 +308,93 @@ internal static class AppDiagnostics
             Require(Path.GetFullPath(directory).StartsWith(Path.Combine(Path.GetFullPath(Path.GetTempPath()), "KairosCapture-reset-ui-"),
                 StringComparison.OrdinalIgnoreCase), "Reset fixture cleanup escaped its temporary directory.");
             Directory.Delete(directory, true);
+        }
+    }
+
+    private static void CheckOpenAiRecoveredReset()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "KairosCapture-recovered-ui-" + Guid.NewGuid().ToString("N"));
+        var storage = new OpenAiStorage(directory);
+        using var http = new HttpClient(new OfflineHandler());
+        using var service = new OpenAiService(http, storage);
+        Directory.CreateDirectory(directory);
+        string snapshot = Path.Combine(directory, "openai-session.bin");
+        File.WriteAllBytes(snapshot, new byte[] { 1 });
+        var window = new MainWindow(true, service, _ => true);
+        try
+        {
+            AwaitOnDispatcher(window.OpenAiInitialization);
+            var credentials = new OpenAiCredentials("recovered-access", "recovered-refresh", "recovered-id", "recovered-nonce",
+                OpenAiProtocol.Scope.Split(' '), DateTimeOffset.UtcNow.AddHours(1), DateTimeOffset.MinValue);
+            var account = new OpenAiRegistration(OpenAiProtocol.AccountKey("oaiapp_recovered", "recovered"), "oaiapp_recovered", "recovered",
+                "recovered@example.invalid", "Recovered", credentials);
+            using (storage.LockAsync(CancellationToken.None).GetAwaiter().GetResult())
+                storage.SaveAsync(new OpenAiState("urn:uuid:recovered", new[] { account }), CancellationToken.None).GetAwaiter().GetResult();
+            byte[] before = File.ReadAllBytes(snapshot);
+            window.Settings.Model = "keep-model";
+            AwaitOnDispatcher(window.ResetStoredSessionAsync());
+            Require(window.StatusText.Text == "Die gespeicherte Anmeldung ist wieder lesbar." && service.ActiveAccount?.Key == account.Key &&
+                window.Settings.AccountKey == account.Key && window.Settings.Model == "keep-model" &&
+                window.ResetSessionButton.Visibility == Visibility.Collapsed && File.ReadAllBytes(snapshot).SequenceEqual(before) &&
+                !Directory.EnumerateDirectories(directory).Any(), "W-A: recovered reset did not adopt the valid account and explain recovery without moving files.");
+        }
+        finally { window.Close(); Directory.Delete(directory, true); }
+    }
+
+    private static void CheckOpenAiStoreStatus()
+    {
+        foreach (string action in new[] { "ocr", "models" })
+        foreach (bool pending in new[] { false, true })
+        {
+            string directory = Path.Combine(Path.GetTempPath(), "KairosCapture-store-status-ui-" + Guid.NewGuid().ToString("N"));
+            var storage = new OpenAiStorage(directory);
+            var credentials = new OpenAiCredentials("status-access", "status-refresh", "status-id", "status-nonce",
+                OpenAiProtocol.Scope.Split(' '), DateTimeOffset.UtcNow.AddHours(1), DateTimeOffset.MinValue);
+            var account = new OpenAiRegistration(OpenAiProtocol.AccountKey("oaiapp_status", "status"), "oaiapp_status", "status",
+                "status@example.invalid", "Status", credentials);
+            using (storage.LockAsync(CancellationToken.None).GetAwaiter().GetResult())
+                storage.SaveAsync(new OpenAiState("urn:uuid:status", new[] { account }), CancellationToken.None).GetAwaiter().GetResult();
+            using var http = new HttpClient(new OfflineHandler(_ => new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                { Content = new StringContent("{\"models\":[]}", Encoding.UTF8, "application/json") }));
+            using var service = new OpenAiService(http, storage);
+            var window = new MainWindow(true, service);
+            OcrResultWindow? result = null;
+            try
+            {
+                AwaitOnDispatcher(window.OpenAiInitialization);
+                Require(window.ResetSessionButton.Visibility == Visibility.Collapsed && !service.StoredSessionUnreadable,
+                    "Readable credentials must not offer reset.");
+                string snapshot = Path.Combine(directory, "openai-session.bin");
+                byte[] original = File.ReadAllBytes(snapshot);
+                if (pending) Directory.CreateDirectory(storage.ResetPath);
+                else File.WriteAllBytes(snapshot, new byte[] { 1 });
+                if (action == "ocr")
+                {
+                    result = new OcrResultWindow(window, CreateDemoBitmap(), default, default, diagnostics: true);
+                    AwaitOnDispatcher(result.RecognizeAsync());
+                }
+                else
+                {
+                    window.RefreshButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    async Task Finished() { while (!window.RefreshButton.IsEnabled) await Task.Delay(5); }
+                    AwaitOnDispatcher(Finished());
+                    Require(window.AccountStatus.Text.Contains("geschützten OpenAI-Kontodaten", StringComparison.Ordinal),
+                        "X2: settings lost the account action's unreadable credentials error.");
+                }
+                using var tray = new TrayMenu(window, _ => { });
+                tray.Refresh(false, false, 0);
+                Require(service.StoredSessionUnreadable && window.ResetSessionButton.Visibility == Visibility.Visible &&
+                    window.OcrStatus.Contains("nicht lesbar", StringComparison.Ordinal) &&
+                    tray.Menu.Items.Cast<System.Windows.Forms.ToolStripItem>().Any(item => item.Text?.Contains("nicht lesbar", StringComparison.Ordinal) == true),
+                    "W-B: an unreadable store in the " + action + " path did not show reset in settings and unreadable status in tray.");
+                if (pending) Directory.Delete(storage.ResetPath);
+                else File.WriteAllBytes(snapshot, original);
+                AwaitOnDispatcher(service.GetModelsAsync(CancellationToken.None));
+                window.RefreshAccounts();
+                Require(!service.StoredSessionUnreadable && window.ResetSessionButton.Visibility == Visibility.Collapsed &&
+                    !window.OcrStatus.Contains("nicht lesbar", StringComparison.Ordinal), "W-B: successful loading did not clear the recovery action and tray status.");
+            }
+            finally { result?.Close(); window.Close(); Directory.Delete(directory, true); }
         }
     }
 

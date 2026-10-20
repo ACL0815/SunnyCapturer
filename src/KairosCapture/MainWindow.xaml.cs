@@ -27,19 +27,24 @@ public partial class MainWindow : Window
     private int _loadingAccounts;
     private Exception? _loadError;
     private string? _loadFailure;
+    private readonly Func<string, bool> _confirmReset;
     internal AppSettings Settings { get; }
     internal OpenAiService OpenAi { get; }
     internal Task OpenAiInitialization { get; }
     internal event Action? SettingsChanged;
     internal event Action<CaptureCompletion, string?>? CaptureCompleted;
-    internal string OcrStatus => !OpenAi.IsLoaded ? (_loadingAccounts > 0 ? "OCR: OpenAI-Konto wird geladen…" : "OCR: Konto nicht geladen · erneut versuchen") : OpenAi.ActiveAccount is { IsSignedIn: true } account
+    internal string OcrStatus => OpenAi.StoredSessionUnreadable ? "OCR: gespeicherte Anmeldung nicht lesbar · Einstellungen öffnen" :
+        !OpenAi.IsLoaded ? (_loadingAccounts > 0 ? "OCR: OpenAI-Konto wird geladen…" : "OCR: Konto nicht geladen · erneut versuchen") : OpenAi.ActiveAccount is { IsSignedIn: true } account
         ? $"OCR: {(account.Email.Length > 0 ? account.Email : account.Label)} · {(!OpenAi.CanUsePlan ? "Planfreigabe fehlt" : Settings.Model.Length > 0 ? Settings.Model : "Modell fehlt")}" : "OCR: nicht verbunden";
 
     public MainWindow(bool diagnosticsMode = false) : this(diagnosticsMode, null) { }
 
-    internal MainWindow(bool diagnosticsMode, OpenAiService? openAi)
+    internal MainWindow(bool diagnosticsMode, OpenAiService? openAi, Func<string, bool>? confirmReset = null)
     {
         _diagnosticsMode = diagnosticsMode;
+        _confirmReset = confirmReset ?? (diagnosticsMode ? _ => false : message =>
+            MessageBox.Show(this, message, "Gespeicherte Anmeldung zurücksetzen", MessageBoxButton.YesNo,
+                MessageBoxImage.Warning, MessageBoxResult.No) == MessageBoxResult.Yes);
         Settings = diagnosticsMode ? new() : AppSettings.Load();
         InitializeComponent();
         HotkeyBox.Text = Settings.Hotkey;
@@ -57,6 +62,7 @@ public partial class MainWindow : Window
         SourceInitialized += (_, _) => GlassWindow.Apply(this);
         IsVisibleChanged += async (_, _) =>
         {
+            if (IsVisible) RefreshAccounts();
             if (IsVisible && !_diagnosticsMode && OpenAi.ActiveAccount?.IsSignedIn == true && _models.Count == 0)
                 await RunAccountActionAsync(LoadModelsAsync);
         };
@@ -184,16 +190,18 @@ public partial class MainWindow : Window
         catch (Exception ex) { StartupCheck.IsChecked = !(StartupCheck.IsChecked == true); ReportError("Autostart konnte nicht geändert werden", ex); }
     }
 
-    private void RefreshAccounts()
+    internal void RefreshAccounts()
     {
         _refreshing = true;
         AccountPicker.ItemsSource = OpenAi.Accounts;
         AccountPicker.SelectedItem = OpenAi.Accounts.FirstOrDefault(a => a.Key == OpenAi.ActiveAccount?.Key);
-        AccountStatus.Text = !OpenAi.IsLoaded ? _loadingAccounts > 0 ? "OpenAI-Konto wird geladen…" :
+        AccountStatus.Text = _loadError is not null && (!OpenAi.IsLoaded || OpenAi.StoredSessionUnreadable) ? OpenAiDiagnostics.UserMessage(_loadError) :
+            OpenAi.StoredSessionUnreadable ? "Die gespeicherte Anmeldung ist nicht lesbar. Gespeicherte Anmeldung zurücksetzen oder erneut versuchen." :
+            !OpenAi.IsLoaded ? _loadingAccounts > 0 ? "OpenAI-Konto wird geladen…" :
             _loadFailure ?? "OpenAI-Konto nicht geladen · erneut versuchen" :
             OpenAi.ActiveAccount?.IsSignedIn == true ? (OpenAi.CanUsePlan ? "Mit ChatGPT verbunden" : "Mit ChatGPT verbunden · Freigabe zur Nutzung des Plans fehlt") :
                 "Mit ChatGPT verbinden, um Text aus Aufnahmen zu erkennen.";
-        ResetSessionButton.Visibility = _loadError is OpenAiUserException { Error: OpenAiUserError.CredentialsUnreadable }
+        ResetSessionButton.Visibility = OpenAi.StoredSessionUnreadable
             ? Visibility.Visible : Visibility.Collapsed;
         _refreshing = false;
         SettingsChanged?.Invoke();
@@ -221,7 +229,7 @@ public partial class MainWindow : Window
         ResetSessionButton.IsEnabled = false;
         CancelLoginButton.Visibility = Visibility.Visible;
         try { if (loadFirst) await EnsureOpenAiLoadedAsync(operation.Token); await action(operation.Token); }
-        catch (OperationCanceledException) { if (!_closed) SetStatus("Vorgang abgebrochen."); }
+        catch (OperationCanceledException ex) { if (!_closed) SetStatus("Vorgang abgebrochen." + OpenAiDiagnostics.ResetPendingMessage(ex)); }
         catch (Exception ex)
         {
             if (ex is OpenAiUserException { Error: OpenAiUserError.CredentialsUnreadable }) _loadError = ex;
@@ -262,19 +270,34 @@ public partial class MainWindow : Window
         });
     }
     private async void Login_Click(object sender, RoutedEventArgs e) => await ConnectAsync();
-    private async void ResetSession_Click(object sender, RoutedEventArgs e) => await RunAccountActionAsync(async ct =>
+    private async void ResetSession_Click(object sender, RoutedEventArgs e) => await ResetStoredSessionAsync();
+    internal async Task ResetStoredSessionAsync()
     {
-        string backup = await OpenAi.ResetStoredSessionAsync(ct);
-        _loadError = null;
-        _loadFailure = null;
-        _accountPreferenceApplied = true;
-        Settings.AccountKey = "";
-        Settings.Model = "";
-        _models = Array.Empty<OpenAiModel>();
-        ModelPicker.ItemsSource = _models;
-        SaveSettings();
-        SetStatus("Gespeicherte Anmeldung zurückgesetzt. Sicherung: " + backup + ". Sie können sich jetzt mit ChatGPT anmelden.");
-    }, loadFirst: false);
+        if (!_confirmReset("Die gespeicherten Anmeldedateien im Ordner „" + OpenAi.SessionDirectory +
+            "“ werden ohne Löschung in dessen Unterordner session-backup-<Zeitstempel>-<GUID> verschoben. " +
+            "Ein unterbrochenes Zurücksetzen in session-reset.pending wird fortgesetzt. Danach ist eine neue Anmeldung mit ChatGPT erforderlich. " +
+            "Eine inzwischen wieder lesbare Anmeldung wird übernommen. Fortfahren?")) return;
+        await RunAccountActionAsync(async ct =>
+        {
+            string? backup = await OpenAi.ResetStoredSessionAsync(ct);
+            _loadError = null;
+            _loadFailure = null;
+            _accountPreferenceApplied = true;
+            if (backup is null)
+            {
+                Settings.AccountKey = OpenAi.ActiveAccount?.Key ?? "";
+                SaveSettings();
+                SetStatus("Die gespeicherte Anmeldung ist wieder lesbar.");
+                return;
+            }
+            Settings.AccountKey = "";
+            Settings.Model = "";
+            _models = Array.Empty<OpenAiModel>();
+            ModelPicker.ItemsSource = _models;
+            SaveSettings();
+            SetStatus("Gespeicherte Anmeldung zurückgesetzt. Sicherung: " + backup + ". Sie können sich jetzt mit ChatGPT anmelden.");
+        }, loadFirst: false);
+    }
     private async void AddAccount_Click(object sender, RoutedEventArgs e) => await ConnectAsync(true);
     private void CancelLogin_Click(object sender, RoutedEventArgs e) => _accountCts?.Cancel();
     private async void SignOut_Click(object sender, RoutedEventArgs e) => await RunAccountActionAsync(async ct =>
@@ -341,6 +364,7 @@ public partial class MainWindow : Window
     public void ShowFromTray()
     {
         if (_closed) return;
+        RefreshAccounts();
         Show(); WindowState = WindowState.Normal; Activate();
     }
     internal void SetStatus(string text) { if (!_closed) StatusText.Text = text; }

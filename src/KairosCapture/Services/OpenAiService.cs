@@ -47,6 +47,7 @@ public sealed partial class OpenAiService : IDisposable
     private DateTimeOffset _jwksAt;
     private bool _signingOut;
     private bool _disposed;
+    private bool _storedSessionUnreadable;
 
     internal static HttpClient CreateHttpClient() => new(new SocketsHttpHandler { AllowAutoRedirect = false })
         { Timeout = Timeout.InfiniteTimeSpan };
@@ -71,6 +72,8 @@ public sealed partial class OpenAiService : IDisposable
     }
 
     public bool IsLoaded { get { lock (_sync) return _state is not null; } }
+    public bool StoredSessionUnreadable { get { lock (_sync) return _storedSessionUnreadable; } }
+    internal string SessionDirectory => _storage.DirectoryPath;
 
     public async Task EnsureLoadedAsync(CancellationToken ct)
     {
@@ -134,7 +137,7 @@ public sealed partial class OpenAiService : IDisposable
     }
 
     // Only the explicit reset action may bypass initial loading of unreadable credentials.
-    public async Task<string> ResetStoredSessionAsync(CancellationToken ct)
+    public async Task<string?> ResetStoredSessionAsync(CancellationToken ct)
     {
         using var attempt = CancellationTokenSource.CreateLinkedTokenSource(ct, _lifetime.Token);
         attempt.CancelAfter(_loadTimeout);
@@ -151,6 +154,20 @@ public sealed partial class OpenAiService : IDisposable
                 using (await LockStorageAsync(attempt.Token).ConfigureAwait(false))
                 {
                     attempt.Token.ThrowIfCancellationRequested();
+                    try
+                    {
+                        OpenAiState readable = LoadState();
+                        lock (_sync)
+                        {
+                            ThrowIfDisposed();
+                            _state = readable;
+                            if (!readable.Registrations.Any(r => r.Key == _activeKey))
+                                _activeKey = (readable.Registrations.FirstOrDefault(r => r.Credentials is not null) ??
+                                    readable.Registrations.FirstOrDefault())?.Key;
+                        }
+                        return null;
+                    }
+                    catch (OpenAiUserException ex) when (ex.Error == OpenAiUserError.CredentialsUnreadable) { }
                     CancellationTokenSource previous;
                     lock (_sync)
                     {
@@ -168,7 +185,7 @@ public sealed partial class OpenAiService : IDisposable
                 }
             }, attempt.Token).ConfigureAwait(false);
         }
-        catch (Exception ex) { OpenAiDiagnostics.Mark(ex, OpenAiStep.Persist); throw; }
+        catch (Exception ex) { ObserveStorageFailure(ex); OpenAiDiagnostics.Mark(ex, OpenAiStep.Persist); throw; }
         finally { _gate.Release(); }
     }
 
@@ -800,13 +817,25 @@ public sealed partial class OpenAiService : IDisposable
     private async Task SaveAsync(OpenAiState state, CancellationToken ct)
     {
         try { await _storage.SaveAsync(state, ct).ConfigureAwait(false); }
-        catch (Exception ex) { OpenAiDiagnostics.Mark(ex, OpenAiStep.Persist); throw; }
+        catch (Exception ex) { ObserveStorageFailure(ex); OpenAiDiagnostics.Mark(ex, OpenAiStep.Persist); throw; }
         Publish(state);
     }
     private OpenAiState LoadState()
     {
-        try { return _readState(); }
-        catch (Exception ex) { OpenAiDiagnostics.Mark(ex, OpenAiStep.Persist); throw; }
+        try
+        {
+            OpenAiState state = _readState();
+            lock (_sync) _storedSessionUnreadable = false;
+            return state;
+        }
+        catch (Exception ex) { ObserveStorageFailure(ex); OpenAiDiagnostics.Mark(ex, OpenAiStep.Persist); throw; }
+    }
+    private void ObserveStorageFailure(Exception ex)
+    {
+        if (_storage.ResetPending) OpenAiDiagnostics.MarkResetPending(ex, _storage.ResetPath);
+        if (ex is OpenAiUserException { Error: OpenAiUserError.CredentialsUnreadable } ||
+            (ex is not OpenAiUserException { Error: OpenAiUserError.SessionBusy } && _storage.ResetPending))
+            lock (_sync) _storedSessionUnreadable = true;
     }
     private async Task<FileStream> LockStorageAsync(CancellationToken ct)
     {

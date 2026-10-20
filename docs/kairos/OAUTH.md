@@ -22,9 +22,22 @@ Das Einstellungsfenster zeigt während eines laufenden Ladeversuchs „OpenAI-Ko
 
 Fehlt die Hauptdatei und fehlen alle Temp-Dateien oder haben sie ausschließlich 0 Byte, liefert `Load()` einen frischen Zustand. Eine nicht leere unlesbare Temp kann eine vollständige Sitzung enthalten, die DPAPI vorübergehend nicht entschlüsseln kann. Ihr Fehler ist kein Beweis für Datenmüll. Ein solcher neuester Kandidat blockiert den Rückfall auf einen älteren Stand. Bei unbekannter Reihenfolge blockieren auch mehrere nicht leere Legacy-Temps, die Mischung aus Legacy- und geordneten Temps sowie gleiche höchste Ordnungsnummern. Ein erfolgreich veröffentlichter, lesbarer Hauptstand erlaubt weiterhin das Cleanup abgebrochener Schreibversuche.
 
-Bei `CredentialsUnreadable` erscheint in den Einstellungen **Gespeicherte Anmeldung zurücksetzen**. Diese ausdrückliche Nutzeraktion umgeht `EnsureLoadedAsync`, hält aber dieselbe Service-Gate und Store-Sperre. Sie verschiebt Hauptdatei und sämtliche `openai-*.tmp` unverändert in eine Sicherung unter `%LOCALAPPDATA%\KairosCapture\session-backup-<UTC-Zeitstempel>-<GUID>`. Keine dieser Dateien wird beim Reset gelöscht. Der Erfolgsstatus nennt den vollständigen Sicherungspfad. Danach sind der Service frisch geladen und Verbinden sowie Anmelden wieder möglich. Kontowahl und Modellwahl werden zurückgesetzt.
+Der Service führt den Zustand `StoredSessionUnreadable`. Jeder Store-Fehler `CredentialsUnreadable` beim Laden, Anmelden, Abmelden, Abrufen von Modellen, OCR oder Refresh setzt diesen Zustand. Ein vorgefundener unterbrochener Reset setzt ihn ebenfalls. `SessionBusy` setzt ihn nicht. Erfolgreiches Laden und ein abgeschlossener Reset setzen ihn zurück. Einstellungen und Tray lesen diesen Zustand beim Anzeigen und Aktualisieren. Auch nach einem OCR-Fehler bei bereits geladenem Konto erscheint deshalb **Gespeicherte Anmeldung zurücksetzen**.
+
+Diese ausdrückliche Nutzeraktion umgeht `EnsureLoadedAsync`, hält aber dieselbe Service-Gate und Store-Sperre. Vor dem Verschieben fragt ein Bestätigungsdialog nach. Er nennt den Sitzungsordner, den Sicherungsordner und die erforderliche neue Anmeldung. Nach Erwerb der Store-Sperre lädt der Service erneut. Ist der Stand inzwischen lesbar, übernimmt er die Konten und meldet „Die gespeicherte Anmeldung ist wieder lesbar.“ Dabei verschiebt er keine Datei. Nur bei `CredentialsUnreadable` oder einem begonnenen Reset verschiebt er Hauptdatei und sämtliche `openai-*.tmp` unverändert nach `%LOCALAPPDATA%\KairosCapture\session-backup-<UTC-Zeitstempel>-<GUID>`. Keine dieser Dateien wird beim Reset gelöscht. Der Erfolgsstatus nennt den vollständigen Sicherungspfad. Danach sind der Service frisch geladen und Verbinden sowie Anmelden wieder möglich. Kontowahl und Modellwahl werden zurückgesetzt.
 
 Während der Verschiebungen heißt der Sicherungsordner `session-reset.pending`. Seine Existenz verhindert sowohl `Load()` als auch `SaveAsync()`. Nach einem Fehler, Abbruch oder Neustart setzt dieselbe Nutzeraktion die verbleibenden Verschiebungen fort. Erst das Umbenennen dieses Ordners in den fertigen Sicherungsnamen schließt den Reset ab. Damit kann ein teilweise verschobener Dateisatz nie als ältere oder leere Sitzung erscheinen. Dauerhaft gesperrte Dateien müssen vor einer erfolgreichen Wiederholung freigegeben werden; die Meldung nennt den unvollständigen Sicherungsordner. Vorhandene Sicherungen werden weder automatisch geladen noch beim späteren Cleanup entfernt.
+
+Die Sperre durch eine neueste nicht leere, aber abgerissene Temp ist ein bewusster Fail-closed-Tausch. Der Store kann einen Schreibabbruch nicht von vorübergehend gescheitertem DPAPI unterscheiden. Er sperrt deshalb auch dann, wenn ein älterer Stand noch lesbar ist. Ein bestätigter Reset legt diesen älteren Stand ebenfalls in die Sicherung. Eine automatische Wiederherstellung daraus findet nicht statt.
+
+Für eine manuelle Wiederherstellung gilt folgende Reihenfolge.
+
+1. Alle Kairos-Instanzen über ihr Tray-Menü beenden. Einen unterbrochenen Reset zuvor mit derselben Aktion abschließen.
+2. Die aktuellen Sitzungsdateien `%LOCALAPPDATA%\KairosCapture\openai-session.bin` und alle `openai-*.tmp` aus demselben Ordner in einen eigenen Sicherungsordner verschieben. Vorhandene Sicherungen und Einstellungen unverändert lassen.
+3. Einen vollständigen lesbaren Snapshot aus `session-backup-<UTC-Zeitstempel>-<GUID>` auswählen. Eine dort vorhandene `openai-session.bin` nach `%LOCALAPPDATA%\KairosCapture\openai-session.bin` kopieren. Stammt der gewünschte Stand aus einer Temp, genau diese `openai-<Ordnungsnummer>-<GUID>.tmp` unter dem Namen `openai-session.bin` in denselben Zielordner kopieren. Keine weiteren Temps zurückkopieren.
+4. Kairos unter demselben Windows-Benutzer starten. Die manuell gewählte ältere Sitzung kann inzwischen abgelaufen oder widerrufen sein und eine neue Anmeldung erfordern. Die Sicherung für weitere Versuche erhalten.
+
+Zwei seltene Grenzen bleiben offen. Ein alter Schreiber ohne Pending-Prüfung kann während eines unterbrochenen Resets einen Dateinamen erneut erzeugen, der bereits im Pending-Ordner liegt. Beim Fortsetzen scheitert dann `File.Move` an der Namenskollision. Außerdem behandelt der Store `session-reset.pending` nur als Verzeichnis. Eine Datei mit diesem Namen verhindert das Anlegen des Verzeichnisses und ist kein unterstützter Transaktionsmarker. Diese Fälle werden dokumentiert und in dieser Runde nicht behoben.
 
 Eine Instanz-Gate und eine exklusive Store-Dateisperre serialisieren Refresh auch zwischen Prozessen. Nach Sperrerwerb wird der aktuelle Store neu gelesen. Der Refresh sendet ausgestellte Client-ID, Refresh-Token und Resource, lässt `scope` weg und ersetzt Tokens, Scope und Ablauf gemeinsam. Ein fehlender oder unveränderter Ersatz-Refresh-Token wird zurückgewiesen. `earliest_refresh_at` wird beachtet. Nach begonnenem Refresh beendet ein Aufrufer-Abbruch die Speicherung einer empfangenen Rotation nicht; ein interner Timeout begrenzt diese Phase. Bei unklarer Netzunterbrechung wird eine Rotation nicht automatisch wiederholt. Eine unterbrochene Übertragung oder ein Prozessabsturz kann weiterhin eine erneute Anmeldung erfordern. Die [Tokenreferenz](https://developers.openai.com/siwc/token-sharing-open-source/token-reference) beschreibt den Austausch gegen einen Ersatz-Refresh-Token.
 
@@ -404,3 +417,54 @@ PASS CheckOpenAiStartupRetry
 15 vollständige Aufrufe von `pwsh -File scripts/build.ps1 -BuildOnly` bestehen hintereinander mit Exit 0, 0 Warnungen und jeweils 9/9 Suiten. Jeder Aufruf führt auch die WPF-Vorschauen aus. Insgesamt sind 135 Suiten bestanden. Die Serie läuft am 20.10.2026 von 16:25:42 bis 16:35:57 Uhr in Europe/Berlin. Alle Läufe verwenden denselben DLL-SHA-256 `13A8EF8DCA8E7EA0C5C7B5207C5C52FA4813DB5A9898DBD6BB941DF5924CAE33`. `run-repeats.ps1`, `repeats.json` und `repeat/01` bis `repeat/15` enthalten den Ablauf, sämtliche Build-Ausgaben und die einzelnen `self-test.json`-Berichte. `final-source-hashes.json` bindet die geprüften Quellbytes an den finalen Stand; `verification-summary.json` fasst die Belege zusammen. Kein Invariantentest des wiederhergestellten Fixes wurde rot. Absichtlich entfernte Schutzmaßnahmen in den Mutationen zählen nicht als erneuter Verlustfall des Fixes.
 
 Das echte Anwendungslog hat vorher und nachher denselben SHA-256 `BDE9BA8D6D43BE3A2122F528EF15B6D6CCA92A413F7C2295386F99CFD7729764` und bleibt 228939 Byte groß. Die echte Sitzungsdatei wurde in diesem Durchlauf nicht geöffnet. Eigene Aufrufe setzen `KAIROS_DIAGNOSTIC_LOG_DIRECTORY` auf den privaten Temp-Ordner. Weil `build.ps1` diese Variable selbst setzt, zeigt dessen Diagnoseverzeichnis in diesem Worktree per eigener Junction ebenfalls auf den privaten Temp-Ordner. Es gab keine echten OpenAI-Anfragen, keinen Publish, Push oder PR und keine beendeten Nutzerprozesse. Alle Testdaten liegen in eigenen temporären Fixtures. Capture und Editor wurden nicht geändert.
+
+## Reset mit erneuter Prüfung und gemeinsamem Fehlerzustand (20.10.2026)
+
+Die Worker-Runde baut auf `5fefd03` auf. Der Reset prüft nach Erwerb der Store-Sperre erneut. Eine wieder lesbare oder durch eine andere Instanz erneuerte Sitzung bleibt erhalten. `ResetStoredSessionAsync` übernimmt dann den Stand und liefert `null` statt eines Sicherungspfads. Die Einstellungen melden „Die gespeicherte Anmeldung ist wieder lesbar.“ Eine abgelehnte Bestätigung verändert weder Dateien noch Kontowahl oder Modellwahl.
+
+`StoredSessionUnreadable` ist der gemeinsame Fehlerzustand für Service, Einstellungen und Tray. Die Oberfläche zeigt den Reset auch dann an, wenn ein bereits geladenes Konto erst bei OCR oder beim Abrufen von Modellen auf unlesbare Dateien oder einen Pending-Reset trifft. Ein erfolgreicher Store-Lesezugriff blendet den Reset wieder aus. Der bisherige letzte Kontofehler bleibt für die ausführliche Statusmeldung erhalten. `SessionBusy` bietet keinen Reset an.
+
+Nach einem Fehler oder Abbruch während der Verschiebungen nennt die UI den vollständigen Pfad von `session-reset.pending`. Dieser Pfad stammt aus dem eigenen Store und wird als interne Metadaten weitergegeben. Fremde Exception-Meldungen werden weiterhin nicht angezeigt. Die Diagnose schreibt den Pfad nicht ins Log.
+
+### Geprüfte Regressionen
+
+`RecoveredSessionResetCheck` prüft einen einmalig fehlschlagenden DPAPI-Zugriff und einen neueren Stand aus einer zweiten Instanz. Im zweiten Fall wartet der Reset bereits auf die Store-Sperre, während der Test den neueren Stand veröffentlicht. Auf dem Ausgangsstand wird der Test rot.
+
+```text
+Reset rechecks a recovered or newer session: W-A: reset moved a recovered or newer valid session instead of adopting it.
+```
+
+Die WPF-Checks betätigen den Reset-Button mit injizierter Bestätigung. Sie prüfen Ablehnung, Dialoginhalt, Sicherungsbytes, geleerte Konto- und Modellwahl sowie die Übernahme einer wieder lesbaren Anmeldung. Weitere Checks lösen den Store-Fehler erst im OCR- oder Modellpfad aus. Sie prüfen den sichtbaren Button und den echten Text des Tray-Menüs. Nach einem erfolgreichen Lesen verschwinden Button und Fehlerstatus wieder.
+
+`StorageResetCancellationCheck` bricht nach der ersten Verschiebung ab. Genau eine Datei muss dann im angekündigten Pending-Ordner liegen. Ein weiterer Reset verschiebt die verbleibenden Dateien. `PendingSignInResetCheck` lässt den synthetischen Browser-Login am lokalen Callback-Listener warten. Der Reset muss ihn abbrechen und innerhalb einer Sekunde abschließen. Der Test beendet im Fehlerfall seine eigene Service-Lifetime, damit die Gegenprobe nicht bis zum Anmelde-Timeout wartet.
+
+Alle 14 folgenden isolierten Mutationen kompilieren und liefern im betroffenen Check Exit 1. Nach jeder Wiederherstellung und erneutem Build liefert derselbe Check Exit 0. X4 und X5 bezeichnen hier zusätzliche Prüfungen für Modellwahl, Cache und laufende Requests.
+
+| Gegenprobe | Absichtlich entfernte Entscheidung | Mutiert / wiederhergestellt |
+| --- | --- | --- |
+| WA-recheck | Erneutes Laden vor dem Reset | 1 / 0 |
+| WA-lock | Erneutes Laden erst nach Erwerb der Store-Sperre | 1 / 0 |
+| WA-confirm | Ablehnung des Bestätigungsdialogs beendet die Aktion | 1 / 0 |
+| WB-ui | Servicezustand steuert den Button statt des lokalen Fensterfehlers | 1 / 0 |
+| WB-state | Store-Fehler setzt den zentralen Fehlerzustand | 1 / 0 |
+| X1 | `SessionBusy` bleibt ohne Reset-Button | 1 / 0 |
+| X2 | Kontofehler wird in `RunAccountActionAsync` erhalten | 1 / 0 |
+| X3 | Gespeicherte Kontowahl wird nach echtem Reset geleert | 1 / 0 |
+| X4-model | Gespeicherte Modellwahl wird nach echtem Reset geleert | 1 / 0 |
+| X5-cache | Begonnener Reset invalidiert den Service-Cache | 1 / 0 |
+| X5-request | Begonnener Reset bricht die alte Kontoanfrage ab | 1 / 0 |
+| X6 | Abbruchprüfung zwischen Verschiebungen | 1 / 0 |
+| X7 | Reset bricht die ausstehende Anmeldung ab | 1 / 0 |
+| N1-path | Vollständiger Pending-Pfad wird zur UI weitergegeben | 1 / 0 |
+
+Die lokalen Belege liegen unter `%TEMP%\Kairos-reset-worker-9eadf91cee794fa8a3200b1c4da99be4`. `baseline-build.log` und `baseline-self-test.json` enthalten die rote Ausgangsprobe. `fix-build.log` und `fix-self-test.json` enthalten den ersten vollständigen grünen Lauf. `run-mutations.ps1`, `mutations.json` und die einzelnen Build- und Testlogs halten jede Gegenprobe fest. `targeted-corrected-green.log` enthält alle acht gezielten Checks. `reset-settings.png` zeigt die außerhalb des Bildschirms gerenderte und visuell geprüfte WPF-Fehleransicht mit Reset-Button.
+
+Der erste Compilerlauf meldete ein fehlendes Argument im neuen Tray-Test. Es wurde vor dem ersten vollständigen grünen Fix-Lauf ergänzt. Der erste separate Reflection-Runner scheiterte an seinem neutralen `Application`-Objekt beim Erzeugen des echten Tray-Menüs. Der korrigierte Runner verwendet eine `App`-Unterklasse mit leerem `OnStartup`. Er startet keine Produktfunktionen. Die frühere Runner-Ausgabe ist kein UI-Nachweis. Die regulären App-Läufe verwenden ausschließlich den Diagnosemodus.
+
+Die Prinzipien „Model the Domain“ und „Prove It Works“ bestimmten die Umsetzung. Der Fehlerzustand liegt im Service. Das nullable Reset-Ergebnis unterscheidet eine übernommene Sitzung von einer abgeschlossenen Sicherung. Mutationen und wiederholte Läufe prüfen die tatsächlich gebaute App und die echte WPF-Oberfläche. Alle Arbeiten erfolgen in diesem Worker ohne Delegation. Die beiden oben beschriebenen seltenen Pending-Grenzen bleiben gemäß Auftrag unverändert.
+
+### Abschluss der Worker-Runde
+
+Zehn vollständige Aufrufe von `pwsh -File scripts/build.ps1 -BuildOnly` bestehen hintereinander mit Exit 0, jeweils 0 Warnungen und 9/9 Suiten. Die Serie läuft am 20.10.2026 von 17:15:17 bis 17:22:24 Uhr in Europe/Berlin. Sie umfasst 90 bestandene Suiten einschließlich aller bisherigen Invariantentests und die vier WPF-Vorschauen jedes Laufs. Alle zehn Läufe verwenden denselben DLL-SHA-256 `13E4BF2C4414E5041878C15F1F40C7978D7ED3156D775BF5557160B3672D1694`. `run-repeats.ps1`, `repeats.json`, `tested-source-hashes.json` und `repeat/01` bis `repeat/10` enthalten Befehle, Zeiten, Quellhashes, Build-Ausgaben, Berichte und Vorschauen. Die Quellbytes der sieben geänderten C#-Dateien sind nach der Serie unverändert. Keine Sollverletzung des unveränderten Fixes trat erneut auf. Absichtliche Mutationen dienen als Gegenproben und zählen nicht als erneute Verletzung des Fixes.
+
+Das echte Log `%LOCALAPPDATA%\KairosCapture\logs\application.log` hat vorher und nachher denselben SHA-256 `BDE9BA8D6D43BE3A2122F528EF15B6D6CCA92A413F7C2295386F99CFD7729764`. Die echte Sitzungsdatei wurde nicht geöffnet. Eigene Läufe setzen `KAIROS_DIAGNOSTIC_LOG_DIRECTORY` auf den privaten Temp-Ordner. Das Buildskript setzt seinen eigenen Diagnosepfad, der in diesem Worktree über eine eigene Junction ebenfalls in diesen Temp-Ordner zeigt. Es gab keine echten OpenAI-Anfragen, keinen Push, PR, Issue, Chat oder Deploy und keine beendeten Nutzerprozesse. `verification-summary.json`, `final-source-hashes.json` und `log-hashes.json` halten den Abschluss fest. Der lokale Commit enthält ausschließlich die acht freigegebenen Dateien.

@@ -145,6 +145,7 @@ internal sealed class OcrResultWindow : Window
         }
         finally
         {
+            _settings.RefreshAccounts();
             if (ReferenceEquals(_operation, operation))
             {
                 _operation = null;
