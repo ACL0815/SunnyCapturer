@@ -1,6 +1,6 @@
 # Kairos Capture: OpenAI OAuth und OCR
 
-Stand: 19.10.2026. Grundlage sind der lokale [Implementierungsvertrag](reverse/OPENAI-OAUTH-VERTRAG.md), die vollständig geprüften eigenen Service-Entwürfe und die unten verlinkten offiziellen OpenAI-Seiten. Es wurde kein SunnyCapturer-Quellcode übernommen. Eine echte OCR-Anfrage mit synthetischem Bild und vorhandener Nutzersitzung ist bestanden. Ein neuer echter Login, reale Tokenrotation und Widerruf wurden in dieser Prüfung nicht durchgeführt.
+Stand: 20.10.2026. Grundlage sind der lokale [Implementierungsvertrag](reverse/OPENAI-OAUTH-VERTRAG.md), die vollständig geprüften eigenen Service-Entwürfe und die unten verlinkten offiziellen OpenAI-Seiten. Es wurde kein SunnyCapturer-Quellcode übernommen. Eine echte OCR-Anfrage mit synthetischem Bild und vorhandener Nutzersitzung ist bestanden. Ein neuer echter Login, reale Tokenrotation und Widerruf wurden in dieser Prüfung nicht durchgeführt.
 
 ## Anmeldung und Identität
 
@@ -14,7 +14,30 @@ Eine neue Registrierung beginnt mit `dynamic_agent_client` und `agent_name_hint=
 
 Der Produktstore liegt ausschließlich unter `%LOCALAPPDATA%/KairosCapture/openai-session.bin`. Es werden keine Tokens anderer Programme, Browserprofile oder Umgebungsvariablen eingelesen. Jeder Datensatz ist durch Issuer, ausgestellte Client-ID und validiertes Subjekt getrennt; die E-Mail dient nur zur Anzeige.
 
-Der gesamte Snapshot wird mit Windows DPAPI im CurrentUser-Kontext und fester App-Entropie verschlüsselt. Eine temporäre Datei enthält bereits ausschließlich Chiffretext. Nach Schreiben und Flush ersetzt `File.Replace` den alten Snapshot atomar; die Erstablage nutzt `File.Move`. Klartext-Bytepuffer werden gelöscht. Beschädigte oder nicht entschlüsselbare Daten bleiben unverändert. DPAPI ist eine Kairos-Entscheidung; der [OpenAI-Vertrag zur geschützten Ablage](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions) verlangt keine spezielle Windows-Technik.
+Der gesamte Snapshot wird mit Windows DPAPI im CurrentUser-Kontext und fester App-Entropie verschlüsselt. Eine temporäre Datei enthält bereits ausschließlich Chiffretext. Nach Schreiben und synchronem Flush veröffentlicht `File.Replace` den Snapshot. Bei fehlendem Ziel nutzt der Store `File.Move`. Ein fehlgeschlagener Austausch kann den Zielnamen entfernen. Deshalb erhält der Store die Temp-Dateien, solange kein gültiger Hauptstand lesbar ist. Bei fehlendem Ziel liest er den neuesten eindeutig geordneten nicht leeren Temp-Stand. Ist dieser nicht lesbar, meldet er einen Fehler und erhält alle Dateien. Leser und Schreiber halten dabei dieselbe Sperre. Klartext-Bytepuffer werden gelöscht. Beschädigte oder nicht entschlüsselbare Daten bleiben unverändert. DPAPI ist eine Kairos-Entscheidung; der [OpenAI-Vertrag zur geschützten Ablage](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions) verlangt keine spezielle Windows-Technik.
+
+Der `OpenAiService`-Konstruktor führt keine Speicherzugriffe aus. `IsLoaded` ist zunächst `false`; `Accounts` ist leer und `ActiveAccount` ist `null`. `EnsureLoadedAsync(ct)` lädt außerhalb des UI-Threads unter Service-Gate und Dateisperre. Bei `SessionBusy` wiederholt es den Sperrerwerb in einem gemeinsamen Fenster von 35 Sekunden. Abbruch und fehlgeschlagene Ladeversuche erlauben einen neuen Aufruf. Parallele erfolgreiche Aufrufe lesen den Anfangszustand einmal. Kontenabfrage, Kontowahl, Anmeldung, Abmeldung, Modelle und OCR laden bei Bedarf vor ihrem ersten zustandsabhängigen Zugriff.
+
+Das Einstellungsfenster zeigt während eines laufenden Ladeversuchs „OpenAI-Konto wird geladen…“ und übernimmt nach Erfolg einmalig `Settings.AccountKey`. Kontenanzeige und Tray aktualisieren sich nach Erfolg, Fehler oder Abbruch. Nach Abbruch steht dort „nicht geladen · erneut versuchen“. Die `OperationCanceledException` wird an den Aufrufer weitergegeben. Nach einem Ladefehler bleibt der Service verfügbar. Verbinden, Modelle aktualisieren und Texterkennung versuchen das Laden beim nächsten Klick erneut. `OcrResultWindow.cs` lädt vor seiner Kontoprüfung; die OCR-Probe lädt vor der gespeicherten Kontowahl.
+
+Fehlt die Hauptdatei und fehlen alle Temp-Dateien oder haben sie ausschließlich 0 Byte, liefert `Load()` einen frischen Zustand. Eine nicht leere unlesbare Temp kann eine vollständige Sitzung enthalten, die DPAPI vorübergehend nicht entschlüsseln kann. Ihr Fehler ist kein Beweis für Datenmüll. Ein solcher neuester Kandidat blockiert den Rückfall auf einen älteren Stand. Bei unbekannter Reihenfolge blockieren auch mehrere nicht leere Legacy-Temps, die Mischung aus Legacy- und geordneten Temps sowie gleiche höchste Ordnungsnummern. Ein erfolgreich veröffentlichter, lesbarer Hauptstand erlaubt weiterhin das Cleanup abgebrochener Schreibversuche.
+
+Der Service führt den Zustand `StoredSessionUnreadable`. Jeder Store-Fehler `CredentialsUnreadable` beim Laden, Anmelden, Abmelden, Abrufen von Modellen, OCR oder Refresh setzt diesen Zustand. Ein vorgefundener unterbrochener Reset setzt ihn ebenfalls. `SessionBusy` setzt ihn nicht. Erfolgreiches Laden und ein abgeschlossener Reset setzen ihn zurück. Einstellungen und Tray lesen diesen Zustand beim Anzeigen und Aktualisieren. Auch nach einem OCR-Fehler bei bereits geladenem Konto erscheint deshalb **Gespeicherte Anmeldung zurücksetzen**.
+
+Diese ausdrückliche Nutzeraktion umgeht `EnsureLoadedAsync`, hält aber dieselbe Service-Gate und Store-Sperre. Vor dem Verschieben fragt ein Bestätigungsdialog nach. Er nennt den Sitzungsordner, den Sicherungsordner und die erforderliche neue Anmeldung. Nach Erwerb der Store-Sperre lädt der Service erneut. Ist der Stand inzwischen lesbar, übernimmt er die Konten und meldet „Die gespeicherte Anmeldung ist wieder lesbar.“ Dabei verschiebt er keine Datei. Nur bei `CredentialsUnreadable` oder einem begonnenen Reset verschiebt er Hauptdatei und sämtliche `openai-*.tmp` unverändert nach `%LOCALAPPDATA%\KairosCapture\session-backup-<UTC-Zeitstempel>-<GUID>`. Keine dieser Dateien wird beim Reset gelöscht. Der Erfolgsstatus nennt den vollständigen Sicherungspfad. Danach sind der Service frisch geladen und Verbinden sowie Anmelden wieder möglich. Kontowahl und Modellwahl werden zurückgesetzt.
+
+Während der Verschiebungen heißt der Sicherungsordner `session-reset.pending`. Seine Existenz verhindert sowohl `Load()` als auch `SaveAsync()`. Nach einem Fehler, Abbruch oder Neustart setzt dieselbe Nutzeraktion die verbleibenden Verschiebungen fort. Erst das Umbenennen dieses Ordners in den fertigen Sicherungsnamen schließt den Reset ab. Damit kann ein teilweise verschobener Dateisatz nie als ältere oder leere Sitzung erscheinen. Dauerhaft gesperrte Dateien müssen vor einer erfolgreichen Wiederholung freigegeben werden; die Meldung nennt den unvollständigen Sicherungsordner. Vorhandene Sicherungen werden weder automatisch geladen noch beim späteren Cleanup entfernt.
+
+Die Sperre durch eine neueste nicht leere, aber abgerissene Temp ist ein bewusster Fail-closed-Tausch. Der Store kann einen Schreibabbruch nicht von vorübergehend gescheitertem DPAPI unterscheiden. Er sperrt deshalb auch dann, wenn ein älterer Stand noch lesbar ist. Ein bestätigter Reset legt diesen älteren Stand ebenfalls in die Sicherung. Eine automatische Wiederherstellung daraus findet nicht statt.
+
+Für eine manuelle Wiederherstellung gilt folgende Reihenfolge.
+
+1. Alle Kairos-Instanzen über ihr Tray-Menü beenden. Einen unterbrochenen Reset zuvor mit derselben Aktion abschließen.
+2. Die aktuellen Sitzungsdateien `%LOCALAPPDATA%\KairosCapture\openai-session.bin` und alle `openai-*.tmp` aus demselben Ordner in einen eigenen Sicherungsordner verschieben. Vorhandene Sicherungen und Einstellungen unverändert lassen.
+3. Einen vollständigen lesbaren Snapshot aus `session-backup-<UTC-Zeitstempel>-<GUID>` auswählen. Eine dort vorhandene `openai-session.bin` nach `%LOCALAPPDATA%\KairosCapture\openai-session.bin` kopieren. Stammt der gewünschte Stand aus einer Temp, genau diese `openai-<Ordnungsnummer>-<GUID>.tmp` unter dem Namen `openai-session.bin` in denselben Zielordner kopieren. Keine weiteren Temps zurückkopieren.
+4. Kairos unter demselben Windows-Benutzer starten. Die manuell gewählte ältere Sitzung kann inzwischen abgelaufen oder widerrufen sein und eine neue Anmeldung erfordern. Die Sicherung für weitere Versuche erhalten.
+
+Zwei seltene Grenzen bleiben offen. Ein alter Schreiber ohne Pending-Prüfung kann während eines unterbrochenen Resets einen Dateinamen erneut erzeugen, der bereits im Pending-Ordner liegt. Beim Fortsetzen scheitert dann `File.Move` an der Namenskollision. Außerdem behandelt der Store `session-reset.pending` nur als Verzeichnis. Eine Datei mit diesem Namen verhindert das Anlegen des Verzeichnisses und ist kein unterstützter Transaktionsmarker. Diese Fälle werden dokumentiert und in dieser Runde nicht behoben.
 
 Eine Instanz-Gate und eine exklusive Store-Dateisperre serialisieren Refresh auch zwischen Prozessen. Nach Sperrerwerb wird der aktuelle Store neu gelesen. Der Refresh sendet ausgestellte Client-ID, Refresh-Token und Resource, lässt `scope` weg und ersetzt Tokens, Scope und Ablauf gemeinsam. Ein fehlender oder unveränderter Ersatz-Refresh-Token wird zurückgewiesen. `earliest_refresh_at` wird beachtet. Nach begonnenem Refresh beendet ein Aufrufer-Abbruch die Speicherung einer empfangenen Rotation nicht; ein interner Timeout begrenzt diese Phase. Bei unklarer Netzunterbrechung wird eine Rotation nicht automatisch wiederholt. Eine unterbrochene Übertragung oder ein Prozessabsturz kann weiterhin eine erneute Anmeldung erfordern. Die [Tokenreferenz](https://developers.openai.com/siwc/token-sharing-open-source/token-reference) beschreibt den Austausch gegen einen Ersatz-Refresh-Token.
 
@@ -30,7 +53,7 @@ Nur `response.completed` mit `response.status=completed` liefert ein erfolgreich
 
 `OpenAiRequestException` bildet Auth-, Scope-, Konto-/Workspace-, Guthaben-, Raten-, App-Limit-, Routing- und temporäre Fehler getrennt ab. HTTP-Status, begrenzte sichere Codes/Parameter, Request-ID und Antwortform bleiben erhalten; rohe Providertexte oder Tokenwerte werden nicht angezeigt. Eine `detail`-Antwort ist kein stabiler Fehlercode. Grundlage: [Fehler und Wiederherstellung](https://developers.openai.com/siwc/token-sharing-open-source/errors-and-recovery).
 
-Der interne `OpenAiUserException` ist der zusätzliche UI-Vertrag für bekannte lokale Zustände. Sein Konstruktor akzeptiert ausschließlich `OpenAiUserError`, keine freie Meldung. Die UI darf dessen feste App-Meldungen sowie `OpenAiRequestException.Message` anzeigen. Für OCR-Protokollfehler enthält `OpenAiOcrProtocolException` ausschließlich einen festen `OpenAiOcrReason` und dessen deutsche App-Meldung. Unbekannte Library-Ausnahmen erhalten weiterhin eine allgemeine Meldung. Öffentliche Account-, Model- und Service-Signaturen bleiben erhalten.
+Der interne `OpenAiUserException` ist der zusätzliche UI-Vertrag für bekannte lokale Zustände. Sein Konstruktor akzeptiert ausschließlich `OpenAiUserError`, keine freie Meldung. Die UI darf dessen feste App-Meldungen sowie `OpenAiRequestException.Message` anzeigen. Für OCR-Protokollfehler enthält `OpenAiOcrProtocolException` ausschließlich einen festen `OpenAiOcrReason` und dessen deutsche App-Meldung. Unbekannte Library-Ausnahmen erhalten weiterhin eine allgemeine Meldung. Die Kontowahl erfolgt asynchron mit `SelectAccountAsync(key, ct)`. `GetAccountsAsync(ct)` ergänzt die synchrone Anzeige um eine Kontenabfrage mit vorherigem Laden.
 
 ## Offline-Prüfung und Reproduktion
 
@@ -171,9 +194,9 @@ Die Ursachenkette wurde mit getrennten Gegenproben eingegrenzt:
 
 Der Prozess hinter den natürlichen 1175-Ausfällen wurde nicht bestimmt. Diese Win32-Ausnahme enthält keinen Dateipfad. Die Restart-Manager-Abfragen mit bekanntem Pfad lieferten keinen Halter. Defender und Indexer bleiben unbestätigte Kandidaten. Eine weitere isolierte Serie und eine Gegenprobe mit unverändertem Ersatzpfad blieben jeweils bei 2.000 Vorgängen fehlerfrei. Diese Ergebnisse zeigen die zeitliche Streuung des Fehlers, nicht dessen Abwesenheit.
 
-`SaveAsync` wiederholt den atomaren Commit jetzt ausschließlich bei den belegten Win32-Codes 32 und 1175. Es verwendet dieselbe verschlüsselte temporäre Datei und wartet zwischen Versuchen abbrechbar 100 Millisekunden. Das Zeitfenster von fünf Sekunden entspricht der vorhandenen Store-Sperre. Nach Ablauf bleibt die ursprüngliche `IOException` ein Fehler. Andere I/O-Fehler werden sofort weitergegeben. Die HTTP-Anfrage und insbesondere eine bereits verbrauchte Tokenrotation werden dadurch nicht wiederholt.
+Im damaligen Fix `4390648` wiederholt `SaveAsync` den Austausch ausschließlich bei den belegten Win32-Codes 32 und 1175. Es verwendet dieselbe verschlüsselte temporäre Datei und wartet zwischen Versuchen abbrechbar 100 Millisekunden. Das Zeitfenster von fünf Sekunden entspricht der vorhandenen Store-Sperre. Nach Ablauf bleibt die ursprüngliche `IOException` ein Fehler. Andere I/O-Fehler werden sofort weitergegeben. Die HTTP-Anfrage und insbesondere eine bereits verbrauchte Tokenrotation werden dadurch nicht wiederholt.
 
-Für 1175 garantiert der [Windows-Vertrag von ReplaceFileW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-replacefilew), dass ersetzte Datei und Ersatzdatei ihre ursprünglichen Namen behalten. Dadurch kann derselbe vorbereitete Austausch erneut versucht werden. Die Codes 1176 und 1177 beschreiben andere Zwischenstände und werden nicht als wiederholbare Konflikte behandelt.
+Für 1175 garantiert der [Windows-Vertrag von ReplaceFileW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-replacefilew), dass ersetzte Datei und Ersatzdatei ihre ursprünglichen Namen behalten. Dadurch kann derselbe vorbereitete Austausch erneut versucht werden. Die Codes 1176 und 1177 wurden in `4390648` noch nicht behandelt. Die folgende Diagnose korrigiert dessen Verlustpfade und die beiden Nachfolgeentwürfe auf `integrate/r9`.
 
 Der neue Offline-Check `Atomic snapshot replacement contention` erzwingt einmalige Fehler 32 und 1175 an einer schmalen austauschbaren `File.Replace`-Operation. Anschließend prüft er den gespeicherten Inhalt. Ein weiterer Fall hält einen echten Lesehandle bis zum nachgewiesenen ersten Konflikt und erwartet danach denselben Speichervorgang bis zum Ende. Dauerhafte Fehler, Aufrufer-Abbruch und ein anderer I/O-Code prüfen Fehlerweitergabe, Zeitgrenze, unveränderten alten Snapshot und entfernte temporäre Dateien. Die Standardimplementierung der austauschbaren Operation bleibt `File.Replace`.
 
@@ -184,3 +207,264 @@ Die abschließende isolierte Schreibprobe führte mit Fix 2.000 `SaveAsync`-Aufr
 Der Produktfix besteht 30 vollständige Self-Test-Läufe in Folge, jeweils mit Exit 0 und 9/9 Suiten. Die gemessene Fehlerquote beträgt damit 0/30 nach zuvor 3/20. `after.json` enthält alle Läufe; die einzelnen Berichte stehen unter `after/01/` bis `after/30/`. Diese Serie verwendet noch die strengere Assertion auf genau zwei Austauschversuche. Die endgültige Testfassung erlaubt weitere native Konflikte und prüft mindestens einen Wiederholungsversuch sowie den gespeicherten Inhalt. Auch diese Fassung besteht 30 direkte OpenAI-Läufe in Folge, protokolliert in `final-openai.json`. Der Produktcode ist in beiden Serien funktional gleich.
 
 Der abschließende vollständige Aufruf von `pwsh -File scripts/build.ps1` besteht mit Exit 0, 0 Warnungen und 9/9 Suiten, einschließlich WPF-Vorschauen und lokalem Publish. `final-build.log`, `final-build-result.json` und `final-build-self-test.json` enthalten den Nachweis. Die echte Nutzersitzung wurde nicht berührt, es gab keine echten OpenAI-Anfragen und kein Prozess wurde beendet.
+
+## Datenerhalt bei unterbrochener Veröffentlichung (20.10.2026)
+
+Die gemeinsame Prämisse von `8acf29c` und `d031752` lautete, dass `SaveAsync` jeden Zwischenstand vor seiner Rückkehr reparieren kann. Sie ist falsch. Nach einem destruktiven Austauschfehler kann der Hauptname fehlen und ein fremder Handle jeden anschließenden Rename verhindern. Abbruch und Frist erzwingen dann eine Rückkehr mit erhaltenen Temp-Daten. Ein Leser, der nur `openai-session.bin` kennt, meldet trotzdem einen leeren Store. Ein nachfolgendes pauschales Orphan-Cleanup vernichtet anschließend die erhaltene Kopie. Zusätzliche Retry-Codes beseitigen diese Abhängigkeit nicht.
+
+### Vertrag und Gegenproben
+
+Die folgenden Microsoft-Quellen wurden am 20.10.2026 gelesen.
+
+- [ReplaceFileW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-replacefilew), Dokumentstand 01.06.2023. Ohne Backup entfernt 1176 die alte Datei. Bei 1177 bleibt sie unter anderem Namen erhalten. Beide Fehler erhalten die Ersatzdatei. Bei 1175 und sonstigen Fehlern bleiben beide ursprünglichen Namen bestehen. Die Funktion enthält mehrere Dateisystemschritte.
+- [MoveFileExW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-movefileexw), Dokumentstand 01.06.2023. Ein Zielverzeichnis verhindert die Veröffentlichung. Quelle und Ziel des Kairos-Protokolls liegen im selben Verzeichnis und auf demselben Volume. Es gibt keinen Kopieren-und-Löschen-Wechsel zwischen Volumes.
+- [CreateFileW, dwShareMode](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew), Dokumentstand 09.02.2023. Fehlendes `FILE_SHARE_DELETE` verhindert Lösch- und Rename-Zugriffe. Ein Handle kann dennoch Lesen erlauben. Ohne Lesefreigabe ist auch das Lesen bis zur Freigabe blockiert.
+- [.NET-10-Implementierung von File.Replace und File.Move](https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Private.CoreLib/src/System/IO/FileSystem.Windows.cs). `ReplaceFile` ruft den Windows-Austausch mit dem angegebenen Backup auf. `MoveFile` reicht den Windows-Fehler weiter.
+
+Die isolierte historische Probe kompiliert jeweils die unveränderte `OpenAiStorage.cs` aus `dev`, `8acf29c` und `d031752`. Sie verwendet DPAPI mit synthetischen Zuständen in eigenen Temp-Verzeichnissen. 1176 wird durch Entfernen des eigenen alten Zielnamens nachgebildet. 1177 benennt diesen Teststand um. Der nachfolgende Move und seine Handle-Konflikte laufen nativ unter Windows. Der Halter der ursprünglich sporadischen 1175 bleibt unbestimmt. Die Probe belegt keine Beteiligung von Defender oder Indexer.
+
+Auszüge aus den unveränderten Versionen:
+
+```text
+dev code=1176 scenario=failure failure=IOException win32=1176 snapshotExists=False tmpCount=0 load=EMPTY
+8acf29c code=1176 scenario=cancel failure=TaskCanceledException win32=5435 snapshotExists=False tmpCount=0 load=EMPTY
+d031752 code=1176 scenario=blocked-temp failure=IOException win32=32 snapshotExists=False tmpCount=1 load=EMPTY
+```
+
+Bei `d031752` löscht der nächste Save die gültige erhaltene Datei noch vor dem neuen Schreibversuch. Eine weiterhin gemeldete Temp-Anzahl von eins beweist keinen Erhalt. Nach einem bereits abgebrochenen neuen Schreibversuch kann an ihrer Stelle eine leere neue Datei stehen. Der neue Regressionstest prüft deshalb Pfad, verschlüsselte Bytes und geladenen Inhalt vor und nach dem Folgeaufruf.
+
+Der zusätzliche Invariantentest auf `dev` liefert vor dem Fix Exit 1 mit `Recovery invariant: cancellation after 1176 lost the only session snapshot.` Der reguläre Build ohne diesen Test war zuvor mit 0 Warnungen und 9/9 Suiten grün.
+
+Die ergänzte Gegenprobe prüft den Folge-Abbruch auch anhand der verschlüsselten Bytes. `d031752-preservation.txt` meldet `preserved=False tmpLengths=0 load=EMPTY`. Der erzwungen neu kompilierte Fix meldet bei identischem Ablauf `preserved=True tmpLengths=278 load=new`. `fixed-probe.txt` enthält beide Codes 1176 und 1177 sowie Abbruch, Erfolg und blockierten Move. Eine erste Hilfsprobe verwendete wegen des beim Kopieren erhaltenen Quellzeitstempels noch das historische Binary. Diese Ausgabe liegt getrennt in `fixed-probe-stale-artifact.txt` und ist kein Fix-Nachweis. Der gültige Vergleich erzwingt `--no-incremental` und verwendet dieselben Quellbytes wie der Worktree.
+
+### Zustände und Leseergebnis
+
+`S` bezeichnet den kanonischen Hauptstand, `T` den neuen Temp-Stand und `P` einen gültigen Vorgänger im Temp-Verzeichnis. `neu` und `alt` meinen vollständige entschlüsselbare Snapshots. Der Einstieg ohne bisherige Speicherung darf einen neuen leeren Store erzeugen. Die Tabelle beschreibt Prozessende an den Protokollgrenzen einschließlich der von Windows dokumentierten Rename-Zwischenstände. Hardwareverlust und dauerhaft verweigerter Zugriff sind keine erfolgreich lesbaren Dateisystemzustände.
+
+| Zustand oder Schnitt | Dateien | Load auf dev | Load auf integrate/r9 mit d031752 | Load mit Fix unter Sperre |
+| --- | --- | --- | --- | --- |
+| Vor Erstellung, Teilwrite, Schreib- oder Flushfehler, Abbruch | S alt, T fehlt oder unvollständig | alt | alt | alt |
+| Vollständig geschrieben, vor Austausch | S alt, T neu | alt | alt | alt |
+| Replace 32, 1175 oder 5, Abbruch oder Frist | S alt, T neu oder entfernt | alt, Cleanup kann Fehler überdecken | alt | alt, ursprünglicher Fehler bleibt |
+| Prozessende nach 1176 | S fehlt, T neu | leer | leer | neu |
+| Prozessende nach 1177 | S fehlt, T neu, alt unter anderem Namen | leer | leer | neu |
+| Abbruch nach 1176 oder 1177 | S fehlt | leer, T wird gelöscht | neu, falls sofortiger Move gelingt | neu aus erhaltenem T, auch wenn Save abbricht |
+| Move nach 1176 oder 1177 durch Handle blockiert | S fehlt, T neu | leer | leer | neu aus T, während Rename weiter scheitern darf |
+| Folge-Save scheitert oder ist bereits abgebrochen | S fehlt, P gültig | leer | leer, gültiges P wird vorab gelöscht | P oder vollständig geschriebenes neueres T |
+| Neuer Teilwrite nach früherem Fehler | S fehlt, P gültig, T nicht leer und unlesbar | leer | leer | ausdrücklicher Fehler mit Reset-Ausweg; kein Rückfall auf P |
+| Veröffentlichung erfolgreich, vor oder nach Cleanup | S neu, P möglicherweise vorhanden | neu | neu | neu |
+| Älteres T besitzt einen größeren Zeitstempel als S | S neu, T alt | neu | neu | neu, Hauptstand hat Vorrang |
+| Kanonischer Stand beschädigt oder nicht lesbar | S vorhanden, P gültig | ausdrücklicher Fehler | ausdrücklicher Fehler | ausdrücklicher Fehler, P bleibt erhalten |
+| Verzeichnis am kanonischen Pfad | Ziel ist ein Verzeichnis, P gültig | leer durch File.Exists | leer durch File.Exists | ausdrücklicher Fehler, P bleibt erhalten |
+| Neuester Kandidat ohne Lesefreigabe | S fehlt, T gesperrt, P älter | leer | leer | ausdrücklicher I/O-Fehler statt Rückfall auf P |
+| Nur unlesbare nicht leere Kandidaten | S fehlt, T unlesbar | leer | leer | ausdrücklicher Fehler mit Reset-Ausweg; Dateien bleiben erhalten |
+| Ausschließlich leere Temps | S fehlt, T hat 0 Byte | leer | leer | frischer Zustand, Temps bleiben bis zum erfolgreichen Save |
+| Mehrere gültige Legacy-Dateien ohne Ordnungsnummer | S fehlt, mehrere GUID-Temps | leer | leer | ausdrücklicher Fehler, keine erfundene Reihenfolge |
+| Erstinstallation vor erster vollständiger Speicherung | weder S noch T | neuer leerer Store | neuer leerer Store | neuer leerer Store |
+
+Bei `8acf29c` löscht `finally` das einzige T auch dann, wenn der Abbruch oder die Frist nach 1176 beziehungsweise 1177 eintritt. Das unterscheidet diesen Stand vom anschließend ebenfalls unzureichenden sofortigen Move in `d031752`.
+
+### Gesperrte Leser und erhaltene Temp-Stände
+
+`Load()` bleibt lesend. Es benennt keine Datei um und kopiert nicht auf den kanonischen Pfad. Ein begonnener Reset wird vor jedem Leseversuch erkannt. Sonst gewinnt der gültige Hauptstand. Nur tatsächliches Fehlen des Hauptpfads eröffnet die Suche nach Temp-Snapshots. Dieselbe DPAPI- und Strukturprüfung gilt für Haupt- und Temp-Dateien. Ausschließlich leere Temps werden übersprungen. Ein nicht lesbarer neuester nicht leerer Kandidat beendet das Laden mit Fehler. Ein I/O- oder Zugriffsfehler wird weitergegeben. Weder dieser noch ein DPAPI- oder Strukturfehler beweist, dass ein älterer Stand gewählt werden darf.
+
+Alle produktiven Leser halten `LockAsync` über den vollständigen Lesevorgang. Die sechs schreibenden Service-Pfade hielten diese Sperre bereits von `LoadState` bis zum Speichern. Das initiale Lesen erfolgt inzwischen in `EnsureLoadedAsync`, ebenfalls unter dieser Sperre. Es gibt keinen verschachtelten Sperrerwerb. Ein einzelner Sperrversuch meldet nach fünf Sekunden `SessionBusy`; das initiale Laden wiederholt ihn asynchron bis zur oben beschriebenen Gesamtfrist.
+
+Ein Leser ohne Sperre könnte zuerst einen fehlenden Hauptnamen sehen und danach nur einen alten Temp-Stand finden. Dazwischen kann ein neuer Stand veröffentlicht und bei einem weiteren Save wieder umbenannt worden sein. Auch ein abschließender Recheck des Hauptnamens würde diese beiden Veröffentlichungen nicht erkennen. Die Gegenprüfung bevorzugt deshalb die bestehende Sperre gegenüber einem zusätzlichen Protokoll für Leser ohne Sperre.
+
+Neue Temp-Namen enthalten `openai-{order:D19}-{guid}.tmp`. Unter der Schreibsperre ist `order` mindestens die aktuelle UTC-Tickzahl und größer als jede noch vorhandene Temp-Ordnung. Legacy-Zeitstempel werden nur als Untergrenze für die Vergabe berücksichtigt. Für gleichzeitig erhaltene neue Kandidaten bleibt die Reihenfolge auch bei gleichen Dateizeitstempeln oder rückwärts laufender Uhr eindeutig. Eine über alle bereits entfernten Dateien global steigende Nummer ist dafür nicht erforderlich.
+
+Eine einzelne gültige GUID-Temp-Datei aus älteren Versionen bleibt wiederherstellbar. Mehrere nicht leere Legacy-Dateien haben keine beweisbare Reihenfolge. Das gilt auch für die Mischung mit geordneten Dateien. Unterschiedliche `LastWriteTimeUtc` lösen dieses Problem nach einer Uhrkorrektur nicht. Der Store erhält die Dateien und meldet `CredentialsUnreadable` mit dem Reset-Ausweg. Die neue Schreibordnung gilt für kooperierende Schreiber mit diesem Protokoll.
+
+`SaveAsync` wiederholt 32, 1175, 1176 und 1177 einschließlich `File.Move` in demselben abbrechbaren Fünf-Sekunden-Fenster. Zwischen Versuchen liegen 100 Millisekunden. Der Datenerhalt hängt davon nicht ab. Ein abgebrochener oder endgültig fehlgeschlagener Move lässt T als lesbaren Stand bestehen.
+
+Cleanup läuft unter derselben Schreibsperre ausschließlich nach vollständigem direkten Lesen und Validieren von S. Ein erfolgreiches Fallback-`Load()` genügt ausdrücklich nicht als Löschfreigabe. Bei fehlendem, beschädigtem, gesperrtem oder als Verzeichnis vorhandenem S bleiben sämtliche Kandidaten erhalten. Ein Cleanup-Fehler beendet die Bereinigung ohne die ursprüngliche Save-Ausnahme zu ersetzen. Ein späterer Save mit gültigem S kann die übrig gebliebenen Temp-Dateien entfernen.
+
+Die bei 1177 umbenannte alte Datei wird für dieses Protokoll nicht benötigt, weil das neuere gültige T erhalten bleibt. Windows nennt ohne expliziten Backup-Pfad keinen vertraglich bekannten Ersatznamen für die Altdatei. Deshalb gibt es keinen ungezielten Such- und Löschlauf. Bereits vom Altcode verlorene T-Daten lassen sich damit nicht nachträglich rekonstruieren. Ist nur eine unbekannt benannte Windows-Altdatei übrig, braucht deren Wiederherstellung einen bekannten Pfad. Das ist kein vom korrigierten Protokoll erzeugbarer Endzustand.
+
+Der Erhaltungsnachweis beruht auf dem gesamten Lade- und Schreibprotokoll. Bis zum vollständig geschriebenen und synchron geflushten T verändert der Schreiber keinen Vorgänger. Während der Veröffentlichung existiert der vollständige Inhalt unter T oder S, einschließlich der dokumentierten destruktiven Replace-Fehler. Cleanup löscht Temp-Daten erst, nachdem S unter durchgehend gehaltener Sperre vollständig lesbar ist. Der gesperrte Leser liest den Hauptstand oder den neuesten eindeutig geordneten nicht leeren Kandidaten. Kann er diesen nicht lesen oder nicht eindeutig bestimmen, liefert er einen Fehler statt eines älteren oder frischen Zustands. Ein Prozessende vor oder nach diesen Schritten beseitigt keine weitere Kopie. Ein ausdrücklicher Reset erhält die Dateien außerhalb der aktiven Kandidatenmenge und sperrt das Lesen sowie Schreiben, bis alle Verschiebungen abgeschlossen sind.
+
+### Verifikationsumfang
+
+`Session snapshot recovery invariant` prüft ausdrücklich Sols Abbruch nach 1176 sowie Opus A1 mit nativ blockierter Temp-Datei beim Move nach 1176. Die Tests prüfen auch 1177, dauerhafte Blockade, Freigabe nach einem Konflikt, Folge-Abbruch und Folge-Save. `Snapshot filesystem failures and crash cuts` injiziert die fünf Fehlercodes und Abbruch an jeder beobachtbaren Schreibgrenze, jeweils mit kanonischem Vorgänger und mit ausschließlich wiederherstellbarem Vorgänger. Replace und Move erhalten zusätzlich einmalige Fehler, Abbruch und Frist. Prozessende wird durch die entsprechenden verbliebenen Dateizustände mit einer neuen Storage-Instanz nachgebildet. Es wird kein Prozess beendet.
+
+`Snapshot recovery ordering and cleanup` prüft Hauptdatei-Vorrang, vertauschte Zeitstempel, monotone Vergabe, Fehler bei unlesbaren neueren Kandidaten, einen lesegesperrten neuesten Kandidaten, Legacy-Mehrdeutigkeit, ein Zielverzeichnis und gesperrtes Cleanup. `Constructor never waits for snapshot recovery on STA` hält die Schreibsperre länger als fünf Sekunden. Der Konstruktor muss auf einem STA-Thread mit Dispatcher-Kontext innerhalb von 100 ms zurückkehren; das anschließend gestartete Laden wartet asynchron und liest erst nach Freigabe. Weitere Checks prüfen paralleles Laden, Abbruch, Frist, erneute Aufrufe, alle sechs Operationen und ausschließlich leere erste Speicherungen. Die Shell-Suite prüft Startfehler, den Reset sowie anschließende Klicks auf Modelle, OCR und Verbinden mit synthetischen Konten und Fake-HTTP. Der vorhandene Contention-Test prüft weiterhin das echte Fünf-Sekunden-Fenster mit einer Abbruchobergrenze als Testabsicherung.
+
+Die lokalen Belege dieses Durchlaufs liegen in `%TEMP%/Kairos-oauth-diagnose-b334746080c5450b856bc9b27fa25618`. `history-*.txt` und `run-history.ps1` enthalten die historischen Proben. `baseline-invariant.json` enthält den roten Test auf dev. `fix-verified-build.log` enthält den grünen vollständigen Build. `independent-review.md` dokumentiert die einzige unabhängige Gegenprüfung durch `codex/gpt-6.1-sol`, `reasoningEffort=xhigh`, `serviceTier=default`. Ihr ungesperrter Erstentwurf wurde verworfen. Gesperrte Leser, kanonische Cleanup-Prüfung und Legacy-Mehrdeutigkeit sind im endgültigen Entwurf berücksichtigt. Eine zusätzliche unabhängige Prüfung des fertigen Diffs wurde nicht durchgeführt.
+
+Die folgenden 18 Mutationen dokumentieren den historischen Stand `e25fce9`. Sie kompilierten und lieferten im betroffenen Storage-Check Exit 1. Nach jeder Wiederherstellung lieferte derselbe Check Exit 0. `run-mutations.ps1`, `mutations.json`, `M*-test.log` und `M*-restored-test.log` enthalten Änderungen und Ausgaben. Diese gezielten Checks laufen durch Reflection gegen die reale gebaute App-Assembly. M08 schrieb damals das Überspringen unlesbarer Kandidaten fest und ist durch die unten dokumentierte W2-Gegenprobe widerlegt. M09 und M18 beschreiben ebenfalls den damaligen Stand vor der asynchronen Initialisierung. Die absichtlich veränderten Gegenproben sind keine erneuten Verlustfälle des unveränderten Fixes.
+
+| Mutation | Entfernte oder verfälschte Schutzentscheidung | Mutation | Wiederhergestellt |
+| --- | --- | --- | --- |
+| M01 | Temp-Recovery | Exit 1, Verlust nach 1176 | Exit 0 |
+| M02 | Erhalten der einzigen Kopie | Exit 1, Verlust nach 1176 | Exit 0 |
+| M03 | Vollständige kanonische Prüfung vor Cleanup | Exit 1, gültige Kandidaten gelöscht | Exit 0 |
+| M04 | Vorrang des Hauptstands | Exit 1, älterer oder nicht veröffentlichter Stand | Exit 0 |
+| M05 | Untergrenze durch vorhandene Ordnungsnummern | Exit 1, neuester Stand übergangen | Exit 0 |
+| M06 | Absteigende Auswahl | Exit 1, älterer Stand | Exit 0 |
+| M07 | Ordnungsnummer statt Dateizeit | Exit 1, älterer Stand | Exit 0 |
+| M08 | Überspringen eines nachweislich ungültigen Kandidaten | Exit 1, gültiger Vorgänger nicht gelesen | Exit 0 |
+| M09 | Fehler statt leer bei ausschließlich ungültigen Dateien | Exit 1, ungültiger Store akzeptiert | Exit 0 |
+| M10 | Weitergabe eines Lesefehlers beim neuesten Kandidaten | Exit 1, Rückfall auf älteren Stand | Exit 0 |
+| M11 | Ablehnen mehrdeutiger Legacy-Dateien | Exit 1, unbekannte Reihenfolge akzeptiert | Exit 0 |
+| M12 | Prüfung eines bereits abgebrochenen Aufrufs | Exit 1, neue Datei trotz vorherigem Abbruch | Exit 0 |
+| M13 | Abbruch vor Veröffentlichung | Exit 1, Abbruch vor Veröffentlichung ignoriert | Exit 0 |
+| M14 | Retry nach 1176 und 1177 | Exit 1, transienter Austausch nicht fortgesetzt | Exit 0 |
+| M15 | Move innerhalb desselben Retry-Blocks | Exit 1, blockierter Move nicht fortgesetzt | Exit 0 |
+| M16 | Fristgrenze | Exit 1, Versuch nach abgelaufener Frist | Exit 0 |
+| M17 | Ursprüngliche Ausnahme trotz Cleanup-Fehler | Exit 1, Fehlerkategorie überdeckt | Exit 0 |
+| M18 | Sperre im Konstruktor | Exit 1, ungesperrter Leser | Exit 0 |
+
+Der abschließende Aufruf `pwsh -File scripts/build.ps1 -BuildOnly` liefert Exit 0, 0 Warnungen und 9/9 bestandene Suiten einschließlich der Vorschauen. `final-build.log` und `final-build-self-test.json` enthalten den Nachweis. Anschließend bestehen 20 vollständige `--self-test`-Läufe in Folge mit jeweils Exit 0 und 9/9, insgesamt 180 bestandene Suiten. `run-repeats.ps1`, `repeats.json` und `repeat/01/self-test.json` bis `repeat/20/self-test.json` enthalten Ablauf und Einzelberichte. Die Berichtzeitpunkte liegen am 20.10.2026 zwischen 13:55:31 und 14:04:58 Uhr in Europe/Berlin.
+
+Jeder dieser 20 Läufe prüft denselben DLL-Hash `1BCAF5AEEA887467291E738A1E460892B2921B15A37392538B9D237316F3949A`. Es gab keinen erneuten Datenverlust des unveränderten Fixes. Die echte Sitzung und das echte Log wurden ausschließlich gehasht. Ihre SHA-256-Werte sind vor und nach der Verifikation identisch. Sitzung `7C5E17EFC6B8E2C326A1BC8EC35E74082EAA5B22FBFFB2CF71DBEC7005499BC4`. Log `BDE9BA8D6D43BE3A2122F528EF15B6D6CCA92A413F7C2295386F99CFD7729764`. Es gab keine echten OpenAI-Anfragen, keinen Publish und keinen beendeten Prozess. Eigene Läufe setzten `KAIROS_DIAGNOSTIC_LOG_DIRECTORY` auf den privaten Temp-Ordner. Das Build-Skript verwendete seinen vorgesehenen Diagnosepfad unter `test-results`.
+
+## Diagnose-Stufe 3: Lesbarkeit ist kein Altersnachweis (20.10.2026)
+
+### Belegte Ursachenkette
+
+Die Prüfung beginnt bei `8961a67` auf `integrate/r10`. `e25fce9` erhält Temp-Snapshots nach destruktiven Veröffentlichungsfehlern. Sein Leser überspringt jedoch DPAPI- und Strukturfehler. `b4604d0` erlaubt darüber hinaus einen frischen Zustand ohne lesbaren Kandidaten. `8961a67` korrigiert diesen zweiten Fall für nicht leere Dateien. Das Überspringen eines neueren unlesbaren Kandidaten bei vorhandenem lesbarem Vorgänger bleibt bestehen.
+
+Die gemeinsame falsche Prämisse lautet: „Wenn die Entschlüsselung eines Kandidaten fehlschlägt, darf dieser Kandidat bei der Auswahl verworfen werden.“ Der Leser kann eine dauerhaft beschädigte Datei und eine vollständige Datei mit vorübergehend gescheiterter Entschlüsselung anhand dieses Ergebnisses nicht unterscheiden. Die neue Gegenprobe erhält die verschlüsselten Bytes unverändert und injiziert genau einen `CryptographicException`-Fehler vor dem echten DPAPI-Aufruf. Der ältere Snapshot enthält ein Konto, der neuere zwei. Auf `8961a67` wird das Laden trotz des Fehlers erfolgreich und veröffentlicht den älteren Kontensatz im Service. Ein folgender Service-Save kann deshalb einen veralteten Snapshot veröffentlichen; das bestehende Cleanup darf danach die neuere Temp löschen. Die erste falsche Entscheidung liegt im erfolgreichen Rückfall beim Lesen.
+
+Die zweite Ursache betrifft die Erreichbarkeit einer Reparatur. Alle bisherigen Kontoaktionen einschließlich Verbinden führen zuerst `EnsureLoadedAsync` aus. Eine dauerhaft unlesbare Hauptdatei oder einzige nicht leere Temp verhindert damit auch eine neue Anmeldung. Die Meldung verweist auf Aktionen, die denselben Fehler erneut auslösen. Der Offline-Test verwendet eine einzelne 1-Byte-Temp und prüft die tatsächliche WPF-Aktion.
+
+Der erste vollständige Repro-Lauf mit unveränderter Auswahlentscheidung meldet am 20.10.2026 um 16:11 Uhr in Europe/Berlin zwei fehlgeschlagene Suiten. Die übrigen sieben Suiten bestehen. Originalausgaben aus `repro-self-test.json`:
+
+```text
+Unreadable newest snapshot never rolls back: W2: a transient DPAPI failure on the newest snapshot loaded an older account set.
+W1: unreadable credentials provide no usable reset action and backup location.
+```
+
+### Zustandsmodell und Entscheidung
+
+Der Hauptname bezeichnet den veröffentlichten Stand. Eine Temp neben einem lesbaren Hauptstand ist ein noch nicht veröffentlichter oder abgebrochener Schreibversuch. Deshalb bleibt der bestehende Vorrang des Hauptstands erhalten. Bei fehlendem Hauptnamen bilden die nicht leeren Temps die Recovery-Kandidaten. Jeder Kandidat hat eine bekannte Ordnungsnummer oder eine unbekannte Legacy-Ordnung. Seine momentane Lesbarkeit ändert diese Ordnung nicht. Ein begonnener ausdrücklicher Reset ist ein eigener Zustand vor dieser Auswahl.
+
+| Zustand unter der Store-Sperre | Vorher auf `8961a67` | Nachher |
+| --- | --- | --- |
+| Hauptdatei lesbar, Temps beliebig | Hauptstand | Hauptstand |
+| Hauptdatei vorhanden, DPAPI oder Struktur nicht lesbar | Fehler ohne Reparaturaktion | `CredentialsUnreadable`, Retry oder ausdrücklicher Reset |
+| Hauptdatei oder neueste Temp durch Handle gesperrt | I/O-Fehler | I/O-Fehler; kein Rückfall, nach Freigabe erneut laden |
+| Hauptdatei fehlt, keine Temps oder alle Temps 0 Byte | Frischer Zustand | Frischer Zustand |
+| Hauptdatei fehlt, einziger nicht leerer Kandidat lesbar | Kandidat | Kandidat |
+| Einziger nicht leerer Kandidat vorübergehend unlesbar | Fehler | Fehler, Bytes bleiben; Retry lädt nach Wegfall der Störung |
+| Einziger nicht leerer Kandidat dauerhaft unlesbar | Fehler ohne Ausweg | Fehler mit Reset-Aktion und Sicherungsort |
+| Mehrere geordnete Kandidaten, neuester lesbar | Neuester lesbarer Stand | Neuester Stand; ältere unlesbare Kandidaten spielen keine Rolle |
+| Neuerer nicht leerer Kandidat unlesbar, älterer lesbar | Älterer Stand, danach möglicher Verlust des neueren | Fehler; kein Service-Zustand veröffentlicht, neuere Datei bleibt |
+| Neuere Temp 0 Byte, älterer Kandidat lesbar | Älterer Stand | Älterer Stand; 0 Byte enthält keinen Snapshot |
+| Zwei nicht leere Kandidaten mit gleicher höchster Ordnung | Fehler nur bei zwei lesbaren Kandidaten | Fehler unabhängig von der momentanen Lesbarkeit |
+| Eine nicht leere Legacy-Temp | Lesen oder Fehler | Lesen oder Fehler mit Reset-Ausweg |
+| Mehrere nicht leere Legacy-Temps | Fehler bei mehreren lesbaren; sonst möglicher Rückfall | Fehler wegen unbekannter Reihenfolge |
+| Legacy- und geordnete nicht leere Temps gemischt | Geordneter lesbarer Kandidat verdrängt Legacy | Fehler; keine belegte gemeinsame Reihenfolge |
+| Reset begonnen, nur einige Dateien verschoben | Kein solcher Zustand modelliert | `Load` und `Save` blockieren; Reset fortsetzen |
+| Reset vollständig, Sicherungsordner fertig benannt | Keine Aktion vorhanden | Frischer Service; Sicherung bleibt bei späteren Saves erhalten |
+| Ladeversuch abgebrochen | Dauerhaft „wird geladen…“ möglich | „nicht geladen · erneut versuchen“, OCE wird weitergegeben |
+
+Der Lead-Entwurf ist damit für die Auswahl belegt. Er wird bei unbekannter Reihenfolge konservativ erweitert. Der Reset benötigt zusätzlich `session-reset.pending`, weil mehrere einzelne Renames keine gemeinsame atomare Operation bilden. Ein bloßes Verschieben ohne diesen Marker könnte nach einer Unterbrechung einen alten Rest wieder als aktuelle Sitzung laden. Eine vollständige Umstellung auf generationsbasierte Speicherverzeichnisse würde dagegen auch das bestehende Veröffentlichungsprotokoll ändern. Der Marker begrenzt die Änderung auf den ausdrücklich gewünschten Reset.
+
+Der alte Check an `OpenAiSelfChecks.cs:492-493` prüfte, dass eine neuere unlesbare Temp übersprungen wird. Er wurde durch Fehlererwartungen für nicht leere DPAPI- und Strukturfehler ersetzt. Ein leerer neuerer Kandidat bleibt ausdrücklich überspringbar. Der Testname für den ersten Speicherversuch lautet jetzt `Only empty first-save temps permit a fresh session`.
+
+### Tests und Mutationen
+
+`TransientRecoveryCheck` prüft W2 mit zwei synthetischen Konten und genau einem DPAPI-Fehler. Nach dem Fehler bleiben beide Dateien erhalten, die neueren verschlüsselten Bytes sind unverändert und `IsLoaded` bleibt `false`. Der nächste Ladeversuch liefert beide Konten. Weitere Fälle prüfen leere neuere Temps, unlesbare ältere Temps, gleiche Ordnungen sowie Legacy-Mischungen.
+
+`StorageResetChecks` unterbricht den Reset jeweils vor und nach jeder der drei Verschiebungen. Eine neue Storage-Instanz darf anschließend weder laden noch speichern. Für jede Quelldatei existiert genau eine bytegleiche Kopie im aktiven Verzeichnis oder in `session-reset.pending`. Nach Wiederholung liegen alle Dateien in der angekündigten Sicherung. Ein frischer Save verändert die Sicherungsbytes nicht. `ServiceResetChecks` prüft sowohl die beschädigte Hauptdatei als auch die einzige beschädigte Temp, gehaltene Store-Sperre, Abbruch und das anschließende Erreichen des synthetischen Browsers. `LoadedSessionResetCheck` prüft die Invalidierung geladener Konten und einer laufenden Fake-HTTP-Anfrage auch bei einem fehlgeschlagenen Reset.
+
+Die Shell-Suite betätigt den echten WPF-Reset-Button und danach Verbinden. Sie prüft die Meldung, den Sicherungspfad, unveränderte Bytes und den frischen Service. Der Abbruchtest prüft jetzt ausdrücklich, dass eine OCE beim Aufrufer ankommt, sowie den Status in Einstellungen und Tray. Ein leerer `catch (OperationCanceledException)` kann den Check nicht mehr grün machen.
+
+Alle folgenden 20 isolierten Mutationen kompilierten. Der jeweilige Check wurde rot mit Exit 1. Nach Wiederherstellung und erneutem Build wurde derselbe Check grün mit Exit 0.
+
+| Mutation | Entfernte oder verfälschte Entscheidung | Rot / wiederhergestellt |
+| --- | --- | --- |
+| M01 | Rückfall auf älteren Kandidaten nach Entschlüsselungsfehler erlaubt | 1 / 0 |
+| M02 | Leere Temps nicht aus der Kandidatenmenge ausgeschlossen | 1 / 0 |
+| M03 | Unbekannte Legacy-Reihenfolge akzeptiert | 1 / 0 |
+| M04 | Gleiche höchste Ordnungen akzeptiert | 1 / 0 |
+| M05 | `Load` ignoriert begonnenen Reset | 1 / 0 |
+| M06 | UI-Ladegrenze verschluckt OCE | 1 / 0 |
+| M07 | `SaveAsync` ignoriert begonnenen Reset | 1 / 0 |
+| M08 | Reset lässt Hauptdatei aus | 1 / 0 |
+| M09 | Reset lässt Temps aus | 1 / 0 |
+| M10 | Reset kopiert statt zu verschieben | 1 / 0 |
+| M11 | Reset schließt Sicherungsverzeichnis nicht ab | 1 / 0 |
+| M12 | Reset umgeht Store-Sperre | 1 / 0 |
+| M13 | Reset erhält den alten Zustand im Service-Cache | 1 / 0 |
+| M14 | Reset lässt die alte Kontoanfrage laufen | 1 / 0 |
+| M15 | Reset-Aktion läuft wieder durch `EnsureLoadedAsync` | 1 / 0 |
+| M16 | Reset-Button ohne Click-Handler | 1 / 0 |
+| M17 | Fehlermeldung nennt die Reset-Aktion nicht | 1 / 0 |
+| M18 | Tray behauptet nach Abbruch weiterhin „wird geladen“ | 1 / 0 |
+| M19 | Abgeschlossene UI-Ladeversuche bleiben als laufend gezählt | 1 / 0 |
+| M20 | Reset ignoriert ein bereits abgebrochenes Token | 1 / 0 |
+
+Die Belege liegen in `%TEMP%\Kairos-oauth-astra-ec90e9d2e97645a3a41ae22ee80aff2f`. `repro-self-test.json` enthält die roten W1- und W2-Proben. `fix-build.log` und `fix-self-test.json` enthalten den ersten grünen vollständigen Lauf. `targeted-final-green.log` enthält die gezielten Prüfungen. `run-mutations.ps1`, `mutations.json` und `M*-test.log` dokumentieren jede Mutation und ihre Gegenprobe. Der korrigierte Hilfsrunner verwendet eine neutrale WPF-Application ohne Produktstart. Der erste Hilfsrunner mit versehentlichem `App.OnStartup` ist kein UI-Nachweis; seine Ausgabe bleibt getrennt in `targeted-green.log`. Die reguläre App lief für die Verifikation ausschließlich im Diagnosemodus.
+
+Die Diagnose und Umsetzung erfolgten in diesem Worker ohne Delegation. Das Prinzip „Attack the Premise“ führte zum Test eines einmaligen Entschlüsselungsfehlers bei unveränderten Bytes. „Model the Domain“ führte zur Trennung zwischen Reihenfolge, Lesbarkeit und begonnenem Reset. Eine unabhängige Review-Runde wurde gemäß Auftrag nicht ausgeführt. Die WPF-Fehleransicht wurde zusätzlich außerhalb des Bildschirms gerendert und visuell geprüft; `reset-settings.png` enthält die sichtbare Aktion und den Sicherungshinweis.
+
+Aus `targeted-final-green.log` nach dem Fix:
+
+```text
+PASS TransientRecoveryCheck
+PASS StorageResetChecks
+PASS ServiceResetChecks
+PASS LoadedSessionResetCheck
+PASS CheckOpenAiReset
+PASS CheckOpenAiStartupRetry
+```
+
+### Abschluss dieses Durchlaufs
+
+15 vollständige Aufrufe von `pwsh -File scripts/build.ps1 -BuildOnly` bestehen hintereinander mit Exit 0, 0 Warnungen und jeweils 9/9 Suiten. Jeder Aufruf führt auch die WPF-Vorschauen aus. Insgesamt sind 135 Suiten bestanden. Die Serie läuft am 20.10.2026 von 16:25:42 bis 16:35:57 Uhr in Europe/Berlin. Alle Läufe verwenden denselben DLL-SHA-256 `13A8EF8DCA8E7EA0C5C7B5207C5C52FA4813DB5A9898DBD6BB941DF5924CAE33`. `run-repeats.ps1`, `repeats.json` und `repeat/01` bis `repeat/15` enthalten den Ablauf, sämtliche Build-Ausgaben und die einzelnen `self-test.json`-Berichte. `final-source-hashes.json` bindet die geprüften Quellbytes an den finalen Stand; `verification-summary.json` fasst die Belege zusammen. Kein Invariantentest des wiederhergestellten Fixes wurde rot. Absichtlich entfernte Schutzmaßnahmen in den Mutationen zählen nicht als erneuter Verlustfall des Fixes.
+
+Das echte Anwendungslog hat vorher und nachher denselben SHA-256 `BDE9BA8D6D43BE3A2122F528EF15B6D6CCA92A413F7C2295386F99CFD7729764` und bleibt 228939 Byte groß. Die echte Sitzungsdatei wurde in diesem Durchlauf nicht geöffnet. Eigene Aufrufe setzen `KAIROS_DIAGNOSTIC_LOG_DIRECTORY` auf den privaten Temp-Ordner. Weil `build.ps1` diese Variable selbst setzt, zeigt dessen Diagnoseverzeichnis in diesem Worktree per eigener Junction ebenfalls auf den privaten Temp-Ordner. Es gab keine echten OpenAI-Anfragen, keinen Publish, Push oder PR und keine beendeten Nutzerprozesse. Alle Testdaten liegen in eigenen temporären Fixtures. Capture und Editor wurden nicht geändert.
+
+## Reset mit erneuter Prüfung und gemeinsamem Fehlerzustand (20.10.2026)
+
+Die Worker-Runde baut auf `5fefd03` auf. Der Reset prüft nach Erwerb der Store-Sperre erneut. Eine wieder lesbare oder durch eine andere Instanz erneuerte Sitzung bleibt erhalten. `ResetStoredSessionAsync` übernimmt dann den Stand und liefert `null` statt eines Sicherungspfads. Die Einstellungen melden „Die gespeicherte Anmeldung ist wieder lesbar.“ Eine abgelehnte Bestätigung verändert weder Dateien noch Kontowahl oder Modellwahl.
+
+`StoredSessionUnreadable` ist der gemeinsame Fehlerzustand für Service, Einstellungen und Tray. Die Oberfläche zeigt den Reset auch dann an, wenn ein bereits geladenes Konto erst bei OCR oder beim Abrufen von Modellen auf unlesbare Dateien oder einen Pending-Reset trifft. Ein erfolgreicher Store-Lesezugriff blendet den Reset wieder aus. Der bisherige letzte Kontofehler bleibt für die ausführliche Statusmeldung erhalten. `SessionBusy` bietet keinen Reset an.
+
+Nach einem Fehler oder Abbruch während der Verschiebungen nennt die UI den vollständigen Pfad von `session-reset.pending`. Dieser Pfad stammt aus dem eigenen Store und wird als interne Metadaten weitergegeben. Fremde Exception-Meldungen werden weiterhin nicht angezeigt. Die Diagnose schreibt den Pfad nicht ins Log.
+
+### Geprüfte Regressionen
+
+`RecoveredSessionResetCheck` prüft einen einmalig fehlschlagenden DPAPI-Zugriff und einen neueren Stand aus einer zweiten Instanz. Im zweiten Fall wartet der Reset bereits auf die Store-Sperre, während der Test den neueren Stand veröffentlicht. Auf dem Ausgangsstand wird der Test rot.
+
+```text
+Reset rechecks a recovered or newer session: W-A: reset moved a recovered or newer valid session instead of adopting it.
+```
+
+Die WPF-Checks betätigen den Reset-Button mit injizierter Bestätigung. Sie prüfen Ablehnung, Dialoginhalt, Sicherungsbytes, geleerte Konto- und Modellwahl sowie die Übernahme einer wieder lesbaren Anmeldung. Weitere Checks lösen den Store-Fehler erst im OCR- oder Modellpfad aus. Sie prüfen den sichtbaren Button und den echten Text des Tray-Menüs. Nach einem erfolgreichen Lesen verschwinden Button und Fehlerstatus wieder.
+
+`StorageResetCancellationCheck` bricht nach der ersten Verschiebung ab. Genau eine Datei muss dann im angekündigten Pending-Ordner liegen. Ein weiterer Reset verschiebt die verbleibenden Dateien. `PendingSignInResetCheck` lässt den synthetischen Browser-Login am lokalen Callback-Listener warten. Der Reset muss ihn abbrechen und innerhalb einer Sekunde abschließen. Der Test beendet im Fehlerfall seine eigene Service-Lifetime, damit die Gegenprobe nicht bis zum Anmelde-Timeout wartet.
+
+Alle 14 folgenden isolierten Mutationen kompilieren und liefern im betroffenen Check Exit 1. Nach jeder Wiederherstellung und erneutem Build liefert derselbe Check Exit 0. X4 und X5 bezeichnen hier zusätzliche Prüfungen für Modellwahl, Cache und laufende Requests.
+
+| Gegenprobe | Absichtlich entfernte Entscheidung | Mutiert / wiederhergestellt |
+| --- | --- | --- |
+| WA-recheck | Erneutes Laden vor dem Reset | 1 / 0 |
+| WA-lock | Erneutes Laden erst nach Erwerb der Store-Sperre | 1 / 0 |
+| WA-confirm | Ablehnung des Bestätigungsdialogs beendet die Aktion | 1 / 0 |
+| WB-ui | Servicezustand steuert den Button statt des lokalen Fensterfehlers | 1 / 0 |
+| WB-state | Store-Fehler setzt den zentralen Fehlerzustand | 1 / 0 |
+| X1 | `SessionBusy` bleibt ohne Reset-Button | 1 / 0 |
+| X2 | Kontofehler wird in `RunAccountActionAsync` erhalten | 1 / 0 |
+| X3 | Gespeicherte Kontowahl wird nach echtem Reset geleert | 1 / 0 |
+| X4-model | Gespeicherte Modellwahl wird nach echtem Reset geleert | 1 / 0 |
+| X5-cache | Begonnener Reset invalidiert den Service-Cache | 1 / 0 |
+| X5-request | Begonnener Reset bricht die alte Kontoanfrage ab | 1 / 0 |
+| X6 | Abbruchprüfung zwischen Verschiebungen | 1 / 0 |
+| X7 | Reset bricht die ausstehende Anmeldung ab | 1 / 0 |
+| N1-path | Vollständiger Pending-Pfad wird zur UI weitergegeben | 1 / 0 |
+
+Die lokalen Belege liegen unter `%TEMP%\Kairos-reset-worker-9eadf91cee794fa8a3200b1c4da99be4`. `baseline-build.log` und `baseline-self-test.json` enthalten die rote Ausgangsprobe. `fix-build.log` und `fix-self-test.json` enthalten den ersten vollständigen grünen Lauf. `run-mutations.ps1`, `mutations.json` und die einzelnen Build- und Testlogs halten jede Gegenprobe fest. `targeted-corrected-green.log` enthält alle acht gezielten Checks. `reset-settings.png` zeigt die außerhalb des Bildschirms gerenderte und visuell geprüfte WPF-Fehleransicht mit Reset-Button.
+
+Der erste Compilerlauf meldete ein fehlendes Argument im neuen Tray-Test. Es wurde vor dem ersten vollständigen grünen Fix-Lauf ergänzt. Der erste separate Reflection-Runner scheiterte an seinem neutralen `Application`-Objekt beim Erzeugen des echten Tray-Menüs. Der korrigierte Runner verwendet eine `App`-Unterklasse mit leerem `OnStartup`. Er startet keine Produktfunktionen. Die frühere Runner-Ausgabe ist kein UI-Nachweis. Die regulären App-Läufe verwenden ausschließlich den Diagnosemodus.
+
+Die Prinzipien „Model the Domain“ und „Prove It Works“ bestimmten die Umsetzung. Der Fehlerzustand liegt im Service. Das nullable Reset-Ergebnis unterscheidet eine übernommene Sitzung von einer abgeschlossenen Sicherung. Mutationen und wiederholte Läufe prüfen die tatsächlich gebaute App und die echte WPF-Oberfläche. Alle Arbeiten erfolgen in diesem Worker ohne Delegation. Die beiden oben beschriebenen seltenen Pending-Grenzen bleiben gemäß Auftrag unverändert.
+
+### Abschluss der Worker-Runde
+
+Zehn vollständige Aufrufe von `pwsh -File scripts/build.ps1 -BuildOnly` bestehen hintereinander mit Exit 0, jeweils 0 Warnungen und 9/9 Suiten. Die Serie läuft am 20.10.2026 von 17:15:17 bis 17:22:24 Uhr in Europe/Berlin. Sie umfasst 90 bestandene Suiten einschließlich aller bisherigen Invariantentests und die vier WPF-Vorschauen jedes Laufs. Alle zehn Läufe verwenden denselben DLL-SHA-256 `13E4BF2C4414E5041878C15F1F40C7978D7ED3156D775BF5557160B3672D1694`. `run-repeats.ps1`, `repeats.json`, `tested-source-hashes.json` und `repeat/01` bis `repeat/10` enthalten Befehle, Zeiten, Quellhashes, Build-Ausgaben, Berichte und Vorschauen. Die Quellbytes der sieben geänderten C#-Dateien sind nach der Serie unverändert. Keine Sollverletzung des unveränderten Fixes trat erneut auf. Absichtliche Mutationen dienen als Gegenproben und zählen nicht als erneute Verletzung des Fixes.
+
+Das echte Log `%LOCALAPPDATA%\KairosCapture\logs\application.log` hat vorher und nachher denselben SHA-256 `BDE9BA8D6D43BE3A2122F528EF15B6D6CCA92A413F7C2295386F99CFD7729764`. Die echte Sitzungsdatei wurde nicht geöffnet. Eigene Läufe setzen `KAIROS_DIAGNOSTIC_LOG_DIRECTORY` auf den privaten Temp-Ordner. Das Buildskript setzt seinen eigenen Diagnosepfad, der in diesem Worktree über eine eigene Junction ebenfalls in diesen Temp-Ordner zeigt. Es gab keine echten OpenAI-Anfragen, keinen Push, PR, Issue, Chat oder Deploy und keine beendeten Nutzerprozesse. `verification-summary.json`, `final-source-hashes.json` und `log-hashes.json` halten den Abschluss fest. Der lokale Commit enthält ausschließlich die acht freigegebenen Dateien.
