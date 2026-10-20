@@ -247,7 +247,8 @@ public sealed partial class OpenAiService : IDisposable
                 if (revocationFailure is OperationCanceledException && _lifetime.IsCancellationRequested) throw revocationFailure;
                 _lifetime.Token.ThrowIfCancellationRequested();
                 if (revocationFailure is null) Report(OpenAiStep.Revoke, OpenAiOutcome.Succeeded);
-                else FinishFailure(revocationFailure, OpenAiStep.Revoke, ct);
+                // A revocation that already failed stays Failed even if the caller cancels afterwards.
+                else FinishFailure(revocationFailure, OpenAiStep.Revoke, revocationFailure is OperationCanceledException ? ct : default);
                 return warning;
             }
         }

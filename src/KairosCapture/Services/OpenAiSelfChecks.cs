@@ -913,10 +913,12 @@ public static class OpenAiSelfChecks
             Require(!ReferenceEquals(first, request) && body == firstBody, "Retry must recreate the identical form.");
             return Json("{}");
         });
-        using var recovery = new OpenAiService(recoveryHttp, fixture.Storage);
+        var recoveryLogs = new List<string>();
+        using var recovery = new OpenAiService(recoveryHttp, fixture.Storage, diagnostic: recoveryLogs.Add);
         using JsonDocument result = recovery.ExchangeAuthorizationCodeAsync("oaiapp_test", "test-code", "test-verifier",
             new Uri("http://127.0.0.1:42123/auth/callback"), CancellationToken.None).GetAwaiter().GetResult();
         Require(recoveryAttempts == 2, "A safe retry did not recover.");
+        RequireLogSequence(recoveryLogs, "Token/Started", "Token/Retrying/Dns", "Token/Started", "Token/Response");
     }
 
     private static async Task RefreshChecks()
