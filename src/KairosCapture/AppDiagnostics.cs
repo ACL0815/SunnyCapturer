@@ -328,9 +328,12 @@ internal static class AppDiagnostics
                 OpenAiProtocol.Scope.Split(' '), DateTimeOffset.UtcNow.AddHours(1), DateTimeOffset.MinValue);
             var account = new OpenAiRegistration(OpenAiProtocol.AccountKey("oaiapp_recovered", "recovered"), "oaiapp_recovered", "recovered",
                 "recovered@example.invalid", "Recovered", credentials);
+            // The preferred account is deliberately not the first one, so a first-account fallback is detected.
+            var first = account with { Key = OpenAiProtocol.AccountKey("oaiapp_first", "first"), ClientId = "oaiapp_first", Subject = "first" };
             using (storage.LockAsync(CancellationToken.None).GetAwaiter().GetResult())
-                storage.SaveAsync(new OpenAiState("urn:uuid:recovered", new[] { account }), CancellationToken.None).GetAwaiter().GetResult();
+                storage.SaveAsync(new OpenAiState("urn:uuid:recovered", new[] { first, account }), CancellationToken.None).GetAwaiter().GetResult();
             byte[] before = File.ReadAllBytes(snapshot);
+            window.Settings.AccountKey = account.Key;
             window.Settings.Model = "keep-model";
             AwaitOnDispatcher(window.ResetStoredSessionAsync());
             Require(window.StatusText.Text == "Die gespeicherte Anmeldung ist wieder lesbar." && service.ActiveAccount?.Key == account.Key &&

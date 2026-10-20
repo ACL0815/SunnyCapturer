@@ -285,9 +285,11 @@ public partial class MainWindow : Window
             _accountPreferenceApplied = true;
             if (backup is null)
             {
-                Settings.AccountKey = OpenAi.ActiveAccount?.Key ?? "";
-                SaveSettings();
-                SetStatus("Die gespeicherte Anmeldung ist wieder lesbar.");
+                // A recovered store keeps the saved account choice instead of falling back to the first account.
+                if (OpenAi.Accounts.Any(a => a.Key == Settings.AccountKey)) await OpenAi.SelectAccountAsync(Settings.AccountKey, ct);
+                else if (OpenAi.ActiveAccount is { } active) { Settings.AccountKey = active.Key; SaveSettings(); }
+                SetStatus(OpenAi.Accounts.Any() ? "Die gespeicherte Anmeldung ist wieder lesbar." :
+                    "Keine gespeicherte Anmeldung vorhanden. Bitte mit ChatGPT anmelden.");
                 return;
             }
             Settings.AccountKey = "";
