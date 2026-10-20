@@ -313,35 +313,43 @@ internal static class AppDiagnostics
 
     private static void CheckOpenAiRecoveredReset()
     {
-        string directory = Path.Combine(Path.GetTempPath(), "KairosCapture-recovered-ui-" + Guid.NewGuid().ToString("N"));
-        var storage = new OpenAiStorage(directory);
-        using var http = new HttpClient(new OfflineHandler());
-        using var service = new OpenAiService(http, storage);
-        Directory.CreateDirectory(directory);
-        string snapshot = Path.Combine(directory, "openai-session.bin");
-        File.WriteAllBytes(snapshot, new byte[] { 1 });
-        var window = new MainWindow(true, service, _ => true);
-        try
+        // Scenarios: saved preference present, saved preference gone (adopt active), store recovered but empty.
+        foreach (string scenario in new[] { "preferred", "missing", "empty" })
         {
-            AwaitOnDispatcher(window.OpenAiInitialization);
-            var credentials = new OpenAiCredentials("recovered-access", "recovered-refresh", "recovered-id", "recovered-nonce",
-                OpenAiProtocol.Scope.Split(' '), DateTimeOffset.UtcNow.AddHours(1), DateTimeOffset.MinValue);
-            var account = new OpenAiRegistration(OpenAiProtocol.AccountKey("oaiapp_recovered", "recovered"), "oaiapp_recovered", "recovered",
-                "recovered@example.invalid", "Recovered", credentials);
-            // The preferred account is deliberately not the first one, so a first-account fallback is detected.
-            var first = account with { Key = OpenAiProtocol.AccountKey("oaiapp_first", "first"), ClientId = "oaiapp_first", Subject = "first" };
-            using (storage.LockAsync(CancellationToken.None).GetAwaiter().GetResult())
-                storage.SaveAsync(new OpenAiState("urn:uuid:recovered", new[] { first, account }), CancellationToken.None).GetAwaiter().GetResult();
-            byte[] before = File.ReadAllBytes(snapshot);
-            window.Settings.AccountKey = account.Key;
-            window.Settings.Model = "keep-model";
-            AwaitOnDispatcher(window.ResetStoredSessionAsync());
-            Require(window.StatusText.Text == "Die gespeicherte Anmeldung ist wieder lesbar." && service.ActiveAccount?.Key == account.Key &&
-                window.Settings.AccountKey == account.Key && window.Settings.Model == "keep-model" &&
-                window.ResetSessionButton.Visibility == Visibility.Collapsed && File.ReadAllBytes(snapshot).SequenceEqual(before) &&
-                !Directory.EnumerateDirectories(directory).Any(), "W-A: recovered reset did not adopt the valid account and explain recovery without moving files.");
+            string directory = Path.Combine(Path.GetTempPath(), "KairosCapture-recovered-ui-" + Guid.NewGuid().ToString("N"));
+            var storage = new OpenAiStorage(directory);
+            using var http = new HttpClient(new OfflineHandler());
+            using var service = new OpenAiService(http, storage);
+            Directory.CreateDirectory(directory);
+            string snapshot = Path.Combine(directory, "openai-session.bin");
+            File.WriteAllBytes(snapshot, new byte[] { 1 });
+            var window = new MainWindow(true, service, _ => true);
+            try
+            {
+                AwaitOnDispatcher(window.OpenAiInitialization);
+                var credentials = new OpenAiCredentials("recovered-access", "recovered-refresh", "recovered-id", "recovered-nonce",
+                    OpenAiProtocol.Scope.Split(' '), DateTimeOffset.UtcNow.AddHours(1), DateTimeOffset.MinValue);
+                var account = new OpenAiRegistration(OpenAiProtocol.AccountKey("oaiapp_recovered", "recovered"), "oaiapp_recovered", "recovered",
+                    "recovered@example.invalid", "Recovered", credentials);
+                // The preferred account is deliberately not the first one, so a first-account fallback is detected.
+                var first = account with { Key = OpenAiProtocol.AccountKey("oaiapp_first", "first"), ClientId = "oaiapp_first", Subject = "first" };
+                var accounts = scenario == "empty" ? Array.Empty<OpenAiRegistration>() : new[] { first, account };
+                using (storage.LockAsync(CancellationToken.None).GetAwaiter().GetResult())
+                    storage.SaveAsync(new OpenAiState("urn:uuid:recovered", accounts), CancellationToken.None).GetAwaiter().GetResult();
+                byte[] before = File.ReadAllBytes(snapshot);
+                window.Settings.AccountKey = scenario == "preferred" ? account.Key : "gone-account";
+                window.Settings.Model = "keep-model";
+                AwaitOnDispatcher(window.ResetStoredSessionAsync());
+                string? expectedActive = scenario switch { "preferred" => account.Key, "missing" => first.Key, _ => null };
+                string expectedStatus = scenario == "empty" ? "Keine gespeicherte Anmeldung vorhanden. Bitte mit ChatGPT anmelden." :
+                    "Die gespeicherte Anmeldung ist wieder lesbar.";
+                Require(window.StatusText.Text == expectedStatus && service.ActiveAccount?.Key == expectedActive &&
+                    window.Settings.AccountKey == (expectedActive ?? "gone-account") && window.Settings.Model == "keep-model" &&
+                    window.ResetSessionButton.Visibility == Visibility.Collapsed && File.ReadAllBytes(snapshot).SequenceEqual(before) &&
+                    !Directory.EnumerateDirectories(directory).Any(), "W-A: recovered reset (" + scenario + ") did not keep the right account and explain recovery without moving files.");
+            }
+            finally { window.Close(); Directory.Delete(directory, true); }
         }
-        finally { window.Close(); Directory.Delete(directory, true); }
     }
 
     private static void CheckOpenAiStoreStatus()
