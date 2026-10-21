@@ -149,7 +149,7 @@ internal static class AppDiagnostics
         {
             FrameworkElement content = LayoutPreview(window, 560, 660);
             Require(content.ActualWidth == 560 && content.ActualHeight == 660, "Settings must arrange at compact dimensions.");
-            foreach (string name in new[] { "HotkeyBox", "FolderText", "AskSave", "SaveCopy", "AccountPicker", "ModelPicker", "AutoCopy", "StartupCheck" })
+            foreach (string name in new[] { "HotkeyBox", "FolderText", "AskSave", "SaveCopy", "AccountPicker", "ModelPicker", "AutoCopy", "StartupCheck", "OverlayDiagnosticsCheck" })
                 Require(window.FindName(name) is FrameworkElement, "Settings field missing: " + name);
             Require(window.FindName("CropCanvas") == null && !window.AllowDrop, "Settings must not host a workbench or image drop target.");
             Require(((TextBox)window.FindName("HotkeyBox")).Text == "Strg+Alt+A", "Default shortcut must be visible.");
@@ -416,6 +416,9 @@ internal static class AppDiagnostics
         try
         {
             var defaults = AppSettings.Load(file);
+            using (var json = JsonDocument.Parse(JsonSerializer.Serialize(defaults)))
+                Require(json.RootElement.TryGetProperty("OverlayDiagnosticsEnabled", out var enabled) && enabled.ValueKind == JsonValueKind.False,
+                    "Overlay diagnostics must be a persisted setting that defaults to false.");
             Require(defaults.Hotkey == "Strg+Alt+A" && defaults.AutoCopyOcr && !defaults.SaveWithoutDialog && !defaults.SaveOnCopy &&
                 defaults.SaveFolder == AppSettings.DefaultSaveFolder, "Missing settings must produce expected defaults.");
             var settings = new AppSettings { SaveFolder = Path.Combine(directory, "Bilder"), Hotkey = "Strg+Umschalt+F8", SaveWithoutDialog = true,

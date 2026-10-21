@@ -43,6 +43,9 @@ else {
     $kairosDotnet = $kairosCommand.Source
 }
 
+$kairosDiagnosticDirectory = if ([string]::IsNullOrWhiteSpace($env:KAIROS_DIAGNOSTIC_LOG_DIRECTORY)) {
+    Join-Path $kairosRoot 'test-results\diagnostic-logs'
+} else { $env:KAIROS_DIAGNOSTIC_LOG_DIRECTORY }
 $kairosEnvironment = @{
     DOTNET_CLI_HOME = Join-Path $kairosRoot '.tools\dotnet-home'
     NUGET_PACKAGES = Join-Path $kairosSharedRoot '.tools\nuget-packages'
@@ -52,7 +55,7 @@ $kairosEnvironment = @{
     DOTNET_GENERATE_ASPNET_CERTIFICATE = 'false'
     DOTNET_NOLOGO = '1'
     # Self-tests and previews must never append to the personal application.log, even after a regression.
-    KAIROS_DIAGNOSTIC_LOG_DIRECTORY = Join-Path $kairosRoot 'test-results\diagnostic-logs'
+    KAIROS_DIAGNOSTIC_LOG_DIRECTORY = $kairosDiagnosticDirectory
 }
 $kairosPreviousEnvironment = @{}
 foreach ($kairosName in $kairosEnvironment.Keys) {
