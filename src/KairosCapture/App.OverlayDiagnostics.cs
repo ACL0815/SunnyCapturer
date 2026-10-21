@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Immutable;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -9,23 +10,31 @@ namespace KairosCapture;
 
 public partial class App
 {
-    internal const int OverlayLogLimit = 1024 * 1024;
+    internal const int OverlayLogLimit = 8 * 1024 * 1024;
     internal static string DiagnosticLogDirectory => Environment.GetEnvironmentVariable("KAIROS_DIAGNOSTIC_LOG_DIRECTORY") ??
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "KairosCapture", "logs");
 
-    internal static RegionOverlay.LogWriteResult TryLogOverlayTraceRow(string row)
+    internal static RegionOverlay.LogWriteResult TryLogOverlayTraceSnapshot(ImmutableArray<string> rows)
     {
         if (Current is App { _diagnostics: true }) return new(RegionOverlay.LogWriteStatus.Suppressed);
-        return AppendOverlayTraceRow(DiagnosticLogDirectory, row);
+        return AppendOverlayTraceSnapshot(DiagnosticLogDirectory, rows);
     }
 
-    internal static RegionOverlay.LogWriteResult AppendOverlayTraceRow(string directory, string row)
+    internal static RegionOverlay.LogWriteResult AppendOverlayTraceSnapshot(string directory, ImmutableArray<string> rows)
     {
         try
         {
-            byte[] bytes = Encoding.UTF8.GetBytes(row + Environment.NewLine);
-            if (bytes.Length > OverlayLogLimit || row.Contains('\r') || row.Contains('\n'))
-                return new(RegionOverlay.LogWriteStatus.Failed, 87);
+            if (rows.IsDefaultOrEmpty) return new(RegionOverlay.LogWriteStatus.Failed, 87);
+            var batch = new StringBuilder();
+            long byteCount = 0;
+            foreach (string row in rows)
+            {
+                byteCount += Encoding.UTF8.GetByteCount(row) + Environment.NewLine.Length;
+                if (byteCount > OverlayLogLimit || row.Contains('\r') || row.Contains('\n'))
+                    return new(RegionOverlay.LogWriteStatus.Failed, 87);
+                batch.AppendLine(row);
+            }
+            byte[] bytes = Encoding.UTF8.GetBytes(batch.ToString());
             if (string.IsNullOrWhiteSpace(directory)) return new(RegionOverlay.LogWriteStatus.Failed, 87);
             string target = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
             string key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(target.ToUpperInvariant())));

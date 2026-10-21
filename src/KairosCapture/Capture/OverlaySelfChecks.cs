@@ -47,7 +47,8 @@ public static class OverlaySelfChecks
             () => CheckInterruptedFrameInput(background), () => CheckReleaseModes(background),
             () => CheckOverlayTrace(background), () => CheckDiagnosticLogGuard(background), () => CheckClosingFrameInput(background),
             () => CheckLiveOverlayTrace(background), () => CheckDiagnosticRoutes(background), () => CheckDiagnosticMeasurements(background),
-            CheckDiagnosticTransforms, () => CheckDiagnosticFileStream(background), CheckDiagnosticRotation })
+            CheckDiagnosticTransforms, () => CheckDiagnosticFileStream(background), CheckDiagnosticRotation,
+            () => CheckDiagnosticActivePointer(background), () => CheckDiagnosticKeyAdapter(background), () => CheckDiagnosticRetention(background) })
         {
             try { check(); }
             catch (SelfCheckFailure error) { failures.Add(error.Message); }
@@ -602,12 +603,12 @@ public static class OverlaySelfChecks
 
     private static RegionOverlay DiagnosticOverlay(BitmapSource background, List<string> rows, bool enabled = true,
         Action<string>? offSink = null, bool editing = true, bool ocr = false, AnnotationCanvas? editor = null,
-        Func<string, RegionOverlay.LogWriteResult>? sink = null, Func<IntPtr, RegionOverlay.NativeOverlaySnapshot>? native = null) => new(background,
+        Func<ImmutableArray<string>, RegionOverlay.LogWriteResult>? sink = null, Func<IntPtr, RegionOverlay.NativeOverlaySnapshot>? native = null) => new(background,
             new DrawingRectangle(-1600, -900, background.PixelWidth, background.PixelHeight), editing: editing,
             settings: new AppSettings { OverlayDiagnosticsEnabled = enabled }, ocrMode: ocr, editor: editor,
             logState: offSink, readCursor: () => new Point(100, 100), readLeftButton: () => MouseButtonState.Released,
             captureMouse: () => true, hasCapture: () => false, releaseCapture: () => { },
-            appendTraceRow: sink ?? (row => { rows.Add(row); return new(RegionOverlay.LogWriteStatus.Written); }),
+            appendTraceSnapshot: sink ?? (batch => { rows.AddRange(batch); return new(RegionOverlay.LogWriteStatus.Written); }),
             readNativeSnapshot: native ?? (_ => DiagnosticNative()));
 
     private static JsonElement[] DiagnosticRows(List<string> rows, string type, string? reason = null) => rows.Select(row =>
@@ -619,18 +620,30 @@ public static class OverlaySelfChecks
 
     private static void RequireCompleteSnapshots(List<string> rows)
     {
-        var all = DiagnosticRows(rows, "State");
         long expected = 1;
-        foreach (var state in all)
+        int offset = 0;
+        while (offset < rows.Count)
         {
+            using var first = JsonDocument.Parse(rows[offset]);
+            JsonElement state = first.RootElement;
             long seq = state.GetProperty("seq").GetInt64();
-            Require(seq == expected++, "The live trace must retain every snapshot with a monotone sequence.");
+            Require(seq == expected++ && state.GetProperty("value").GetProperty("type").GetString() == "State",
+                "The live trace must retain every snapshot from Created with a monotone sequence.");
             int count = state.GetProperty("parts").GetInt32();
-            using var end = JsonDocument.Parse(rows[rows.FindIndex(row => row == state.GetRawText()) + count - 1]);
-            Require(end.RootElement.GetProperty("seq").GetInt64() == seq && end.RootElement.GetProperty("part").GetInt32() == count - 1 &&
-                end.RootElement.GetProperty("value").GetProperty("type").GetString() == "Complete", "Every live snapshot must finish synchronously.");
+            Require(count > 1 && offset + count <= rows.Count, "Every live snapshot must retain all declared parts.");
+            for (int part = 0; part < count; part++)
+            {
+                using var item = JsonDocument.Parse(rows[offset + part]);
+                JsonElement value = item.RootElement;
+                Require(value.GetProperty("seq").GetInt64() == seq && value.GetProperty("capture").GetInt32() == state.GetProperty("capture").GetInt32() &&
+                    value.GetProperty("run").GetString() == state.GetProperty("run").GetString() && value.GetProperty("parts").GetInt32() == count &&
+                    value.GetProperty("part").GetInt32() == part && value.GetProperty("writeFailures").GetInt64() == 0 &&
+                    (part != count - 1 || value.GetProperty("value").GetProperty("type").GetString() == "Complete"),
+                    "Every retained snapshot must have ordered, correlated parts and a Complete terminator without write loss.");
+            }
+            offset += count;
         }
-        Require(all.Length > 0 && all.Sum(row => row.GetProperty("parts").GetInt32()) == rows.Count, "Live trace rows must form complete snapshots.");
+        Require(expected > 1, "The live trace must contain snapshots.");
     }
 
     private static void CheckLiveOverlayTrace(BitmapSource background)
@@ -694,7 +707,7 @@ public static class OverlaySelfChecks
             var settings = new AppSettings { OverlayDiagnosticsEnabled = enabled };
             var rows = new List<string>();
             var overlay = new RegionOverlay(background, new DrawingRectangle(0, 0, background.PixelWidth, background.PixelHeight), settings: settings,
-                hasCapture: () => false, appendTraceRow: row => { rows.Add(row); return new(RegionOverlay.LogWriteStatus.Written); }, readNativeSnapshot: _ => DiagnosticNative());
+                hasCapture: () => false, appendTraceSnapshot: batch => { rows.AddRange(batch); return new(RegionOverlay.LogWriteStatus.Written); }, readNativeSnapshot: _ => DiagnosticNative());
             try
             {
                 settings.OverlayDiagnosticsEnabled = !enabled;
@@ -703,6 +716,182 @@ public static class OverlaySelfChecks
                 Require(enabled ? rows.Count > count : rows.Count == 0, "The diagnostic preference must be captured once per overlay, never changed during a capture.");
             }
             finally { overlay.Cancel(); }
+        }
+    }
+
+    private static void CheckDiagnosticActivePointer(BitmapSource background)
+    {
+        var rows = new List<string>();
+        Point point = new(100, 100);
+        var overlay = new RegionOverlay(background, new DrawingRectangle(-1600, -900, 1024, 768),
+            settings: new() { OverlayDiagnosticsEnabled = true }, readCursor: () => point,
+            readLeftButton: () => MouseButtonState.Pressed, hasCapture: () => false,
+            appendTraceSnapshot: batch => { rows.AddRange(batch); return new(RegionOverlay.LogWriteStatus.Written); }, readNativeSnapshot: _ => DiagnosticNative());
+        try
+        {
+            Require(overlay.BeginFrameGesture(point), "The active diagnostic fixture must start a frame gesture.");
+            point = new(400, 300);
+            RaiseMove(overlay);
+            RenderScene(overlay, background);
+            RegionOverlay.DiagnosticSnapshotCommand.Execute(null, overlay);
+            long revision = DiagnosticRows(rows, "State").Last().GetProperty("value").GetProperty("revision").GetInt64();
+            int before = rows.Count;
+            for (int i = 0; i < 8; i++) RaiseMove(overlay);
+            Require(rows.Count == before && overlay.IsFrameGestureActive && overlay.Selection == new Int32Rect(100, 100, 300, 200),
+                "Identical Pressed positions during an active gesture must not emit diagnostic snapshots.");
+            RegionOverlay.DiagnosticSnapshotCommand.Execute(null, overlay);
+            Require(DiagnosticRows(rows, "State").Last().GetProperty("value").GetProperty("revision").GetInt64() == revision,
+                "Identical active pointer callbacks must not advance diagnostic revisions.");
+            before = DiagnosticRows(rows, "State", "RegionChanged").Length;
+            point = new(401, 300);
+            RaiseMove(overlay);
+            Require(DiagnosticRows(rows, "State", "RegionChanged").Length == before + 1, "A changed active pointer position must remain observable.");
+            overlay.EndFrameGesture();
+            Require(DiagnosticRows(rows, "State", "GestureEnded").Length == 1 && overlay.Selection == new Int32Rect(100, 100, 301, 200),
+                "Gesture completion at the same selection must remain observable.");
+            before = DiagnosticRows(rows, "State", "Rendered").Length;
+            RenderScene(overlay, background);
+            Require(DiagnosticRows(rows, "State", "Rendered").Length > before, "Actual renders after identical callbacks must remain observable.");
+            Int32Rect selection = overlay.Selection;
+            Require(overlay.BeginFrameGesture(new(200, 150)), "The unchanged-selection fixture must begin a move gesture.");
+            overlay.EndFrameGesture();
+            Require(overlay.Selection == selection && DiagnosticRows(rows, "State", "GestureBegan").Length == 2 &&
+                DiagnosticRows(rows, "State", "GestureEnded").Length == 2, "Gesture begin and end at an unchanged selection must remain observable.");
+            overlay.Toolbar.Visibility = Visibility.Collapsed;
+            before = DiagnosticRows(rows, "State", "RegionChanged").Length;
+            overlay.SetRegion(selection);
+            Require(overlay.ToolbarVisible && DiagnosticRows(rows, "State", "RegionChanged").Length == before + 1,
+                "Visibility changes during an otherwise identical refresh must remain observable.");
+        }
+        finally { overlay.Cancel(); }
+    }
+
+    private sealed class OffscreenKeySource : PresentationSource
+    {
+        public override Visual RootVisual { get; set; } = null!;
+        public override bool IsDisposed => false;
+        protected override CompositionTarget GetCompositionTargetCore() => null!;
+    }
+
+    private static bool RaiseDiagnosticKey(UIElement source, Key key = Key.F12)
+    {
+        var args = new KeyEventArgs(Keyboard.PrimaryDevice, new OffscreenKeySource(), 0, key)
+            { RoutedEvent = Keyboard.PreviewKeyDownEvent, Source = source };
+        source.RaiseEvent(args);
+        return args.Handled;
+    }
+
+    private static void CheckDiagnosticKeyAdapter(BitmapSource background)
+    {
+        foreach (bool enabled in new[] { true, false })
+        {
+            var rows = new List<string>();
+            ModifierKeys modifiers = ModifierKeys.Control | ModifierKeys.Shift;
+            var overlay = new RegionOverlay(background, new DrawingRectangle(-1600, -900, 1024, 768),
+                settings: new() { OverlayDiagnosticsEnabled = enabled }, hasCapture: () => false,
+                appendTraceSnapshot: batch => { rows.AddRange(batch); return new(RegionOverlay.LogWriteStatus.Written); },
+                readNativeSnapshot: _ => DiagnosticNative(), readDiagnosticModifiers: () => modifiers);
+            void SnapshotKey(UIElement source, bool pending = false)
+            {
+                int before = DiagnosticRows(rows, "State", "SnapshotRequested").Length;
+                bool handled = RaiseDiagnosticKey(source);
+                Require(DiagnosticRows(rows, "State", "SnapshotRequested").Length == before + (enabled ? 1 : 0) &&
+                    (pending && !enabled || handled == enabled),
+                    "The production preview-key adapter must route exactly one Ctrl+Shift+F12 snapshot before text, output and selection guards when On.");
+            }
+            try
+            {
+                SnapshotKey(overlay.Editor);
+                overlay.SetRegion(new(100, 100, 400, 300));
+                overlay.Editor.Tool = EditorTool.Text;
+                overlay.Editor.BeginGesture(new(180, 180));
+                var text = overlay.Editor.Children.OfType<TextBox>().Single();
+                text.Text = "PRIVATE-KEY-SENTINEL";
+                SnapshotKey(text);
+                modifiers = ModifierKeys.Control;
+                int before = rows.Count;
+                Require(!RaiseDiagnosticKey(text) && rows.Count == before, "F12 with other modifiers must remain outside the diagnostic route.");
+                modifiers |= ModifierKeys.Shift;
+                Require(!RaiseDiagnosticKey(text, Key.F11) && rows.Count == before, "Other keys must remain outside the diagnostic route.");
+                overlay.Editor.CommitText();
+                bool verifiedPending = false;
+                overlay.ExecuteOutput(CaptureCompletion.Copied, _ => { SnapshotKey(overlay.Editor, pending: true); verifiedPending = true; return false; });
+                Require(verifiedPending && !overlay.IsClosed && !overlay.IsVisible && new System.Windows.Interop.WindowInteropHelper(overlay).Handle == IntPtr.Zero,
+                    "Key-adapter checks must exercise pending output without a visible or native window.");
+                Require(!rows.Any(row => row.Contains("PRIVATE-KEY-SENTINEL", StringComparison.Ordinal)), "Key snapshots must omit text content.");
+            }
+            finally { overlay.Cancel(); }
+        }
+    }
+
+    private static void CheckDiagnosticRetention(BitmapSource background)
+    {
+        string directory = DiagnosticDirectory("capture-retention");
+        var history = Enumerable.Range(1, 30000).Select(seq => JsonSerializer.Serialize(new
+            { capture = 0, seq, part = 0, parts = 1, value = new { type = "Complete" } })).ToImmutableArray();
+        Require(App.AppendOverlayTraceSnapshot(directory, history).Status == RegionOverlay.LogWriteStatus.Written,
+            "Retention fixture must seed earlier scalar history to exercise both actual segments.");
+        long historyBytes = new FileInfo(Path.Combine(directory, "overlay-diagnostics.log")).Length;
+        for (int capture = 0; capture < 2; capture++)
+        {
+            var overlay = DiagnosticOverlay(background, new List<string>(), sink: batch => App.AppendOverlayTraceSnapshot(directory, batch));
+            try
+            {
+                Require(overlay.BeginFrameGesture(new(100, 100)), "Retention fixture must begin an actual frame gesture.");
+                for (int move = 1; move <= 64; move++)
+                {
+                    overlay.HandlePointerMove(new(400 + move, 300), MouseButtonState.Pressed);
+                    RenderScene(overlay, background);
+                }
+                overlay.EndFrameGesture();
+                RenderScene(overlay, background);
+                Require(!overlay.IsVisible && new System.Windows.Interop.WindowInteropHelper(overlay).Handle == IntPtr.Zero,
+                    "Retention captures must render offscreen without creating an HWND.");
+                var current = File.ReadAllLines(Path.Combine(directory, "overlay-diagnostics.log"));
+                Require(!overlay.IsClosed && DiagnosticRows(current.ToList(), "State", "Rendered").Length > 0,
+                    "Real capture renders must reach the writer before close.");
+            }
+            finally { overlay.Cancel(); }
+        }
+        string[] segments = new[] { Path.Combine(directory, "overlay-diagnostics.log.previous"), Path.Combine(directory, "overlay-diagnostics.log") }
+            .Where(File.Exists).ToArray();
+        var retained = segments.SelectMany(File.ReadLines).ToList();
+        var states = DiagnosticRows(retained, "State");
+        var captures = states.GroupBy(row => row.GetProperty("capture").GetInt32()).ToArray();
+        var snapshots = retained.Select(row => { using var json = JsonDocument.Parse(row); return (row, json.RootElement.Clone()); })
+            .Where(item => item.Item2.GetProperty("capture").GetInt32() != 0)
+            .GroupBy(item => (Capture: item.Item2.GetProperty("capture").GetInt32(), Sequence: item.Item2.GetProperty("seq").GetInt64()))
+            .Select(group => new { group.Key.Capture, group.Key.Sequence, bytes = group.Sum(item => Encoding.UTF8.GetByteCount(item.row + Environment.NewLine)) }).ToArray();
+        File.WriteAllText(Path.Combine(directory, "retention.json"), JsonSerializer.Serialize(new
+        {
+            segmentBytes = segments.Select(segment => new FileInfo(segment).Length).ToArray(),
+            historyBytes,
+            snapshotBytesMin = snapshots.Min(snapshot => snapshot.bytes), snapshotBytesMax = snapshots.Max(snapshot => snapshot.bytes),
+            captures = captures.Select(group => new { capture = group.Key, snapshots = group.Count(),
+                bytes = snapshots.Where(snapshot => snapshot.Capture == group.Key).Sum(snapshot => snapshot.bytes),
+                firstSequence = group.First().GetProperty("seq").GetInt64(),
+                created = group.Count(row => row.GetProperty("event").GetString() == "Created"),
+                closed = group.Count(row => row.GetProperty("event").GetString() == "WindowClosed"),
+                moves = group.Count(row => row.GetProperty("event").GetString() == "RegionChanged"),
+                renders = group.Count(row => row.GetProperty("event").GetString() == "Rendered") }).ToArray()
+        }));
+        Require(segments.Length == 2 && captures.Length == 2 && captures.All(group => group.Count(row => row.GetProperty("event").GetString() == "Created") == 1 &&
+            group.Count(row => row.GetProperty("event").GetString() == "WindowClosed") == 1 &&
+            group.Count(row => row.GetProperty("event").GetString() == "RegionChanged") == 64 &&
+            group.Count(row => row.GetProperty("event").GetString() == "Rendered") >= 64),
+            "Two complete 64-Move+Render captures must retain both Created and WindowClosed in the actual two files.");
+        foreach (var capture in captures)
+        {
+            var rows = retained.Where(row => { using var json = JsonDocument.Parse(row); return json.RootElement.GetProperty("capture").GetInt32() == capture.Key; }).ToList();
+            RequireCompleteSnapshots(rows);
+        }
+        foreach (string segment in segments)
+        {
+            var parts = File.ReadLines(segment).Select(row => { using var json = JsonDocument.Parse(row); return json.RootElement.Clone(); })
+                .GroupBy(row => (row.GetProperty("capture").GetInt32(), row.GetProperty("seq").GetInt64()));
+            Require(parts.All(group => group.Count() == group.First().GetProperty("parts").GetInt32() &&
+                group.Select(row => row.GetProperty("part").GetInt32()).SequenceEqual(Enumerable.Range(0, group.Count()))),
+                "Rotation must keep each snapshot entirely in one actual segment.");
         }
     }
 
@@ -715,8 +904,6 @@ public static class OverlaySelfChecks
             var overlay = DiagnosticOverlay(background, rows, enabled, off.Add);
             try
             {
-                Require(overlay.InputBindings.OfType<KeyBinding>().Any(binding => binding.Command == RegionOverlay.DiagnosticSnapshotCommand) == enabled,
-                    "Only On may register the diagnostic key binding.");
                 overlay.SetRegion(new(100, 100, 400, 300));
                 RenderScene(overlay, background);
                 overlay.Toolbar.Visibility = Visibility.Collapsed;
@@ -738,8 +925,6 @@ public static class OverlaySelfChecks
                 before = rows.Count;
                 RegionOverlay.DiagnosticSnapshotCommand.Execute(null, text);
                 Require(enabled ? rows.Count > before : rows.Count == before, "The snapshot command must route through a live text editor.");
-                Require(overlay.HandleSessionKey(Key.F12, ModifierKeys.Control | ModifierKeys.Shift) == enabled,
-                    "The diagnostic key must run before the text-edit guard, and remain unhandled when Off.");
                 overlay.Editor.CommitText();
                 overlay.Toolbar.InvalidateArrange();
                 bool arranged = overlay.Toolbar.IsArrangeValid;
@@ -747,24 +932,22 @@ public static class OverlaySelfChecks
                 Require(!arranged && !overlay.Toolbar.IsArrangeValid && overlay.Selection == selection && !overlay.IsFrameGestureActive &&
                     !overlay.IsMouseCaptured && new System.Windows.Interop.WindowInteropHelper(overlay).Handle == IntPtr.Zero,
                     "Snapshot reading must not arrange, change selection, capture input or create an HWND.");
+                bool verifiedPending = false;
                 overlay.ExecuteOutput(CaptureCompletion.Copied, _ =>
                 {
                     int count = rows.Count;
                     RegionOverlay.DiagnosticSnapshotCommand.Execute(null, overlay.Editor);
                     Require(enabled ? rows.Count > count : rows.Count == count, "The routed snapshot must run while output is pending.");
-                    if (enabled) Require(overlay.HandleSessionKey(Key.F12, ModifierKeys.Control | ModifierKeys.Shift), "The diagnostic key must precede the pending-output guard.");
+                    verifiedPending = true;
                     return false;
                 });
+                Require(verifiedPending, "The pending-output snapshot assertion must complete outside the output error boundary.");
                 Require(!rows.Any(row => row.Contains("PRIVATE-TEXT-SENTINEL", StringComparison.Ordinal)), "Snapshots must never read inline text.");
                 overlay.Toolbar.Visibility = Visibility.Visible;
             }
             finally { overlay.Cancel(); }
             Require(off.Count == 0, "Snapshot routes must not contaminate the Off anomaly buffer.");
         }
-        var emptyRows = new List<string>();
-        var empty = DiagnosticOverlay(background, emptyRows);
-        try { Require(empty.HandleSessionKey(Key.F12, ModifierKeys.Control | ModifierKeys.Shift), "Snapshot must run before the empty-selection guard."); }
-        finally { empty.Cancel(); }
     }
 
     private static void CheckDiagnosticMeasurements(BitmapSource background)
@@ -854,17 +1037,21 @@ public static class OverlaySelfChecks
                 new(RegionOverlay.ObservationStatus.Known, 144), new(RegionOverlay.ObservationStatus.Known, 144)), DiagnosticNative().Monitors[1])
         };
         var overlay = new RegionOverlay(background, new DrawingRectangle(-1440, -540, 3360, 2560), settings: new() { OverlayDiagnosticsEnabled = true },
-            hasCapture: () => false, appendTraceRow: row => { rows.Add(row); return new(RegionOverlay.LogWriteStatus.Written); }, readNativeSnapshot: _ => native);
+            hasCapture: () => false, appendTraceSnapshot: batch => { rows.AddRange(batch); return new(RegionOverlay.LogWriteStatus.Written); }, readNativeSnapshot: _ => native);
         try
         {
             overlay.SetRegion(new(1540, 540, 400, 1080));
             RenderScene(overlay, background);
             RegionOverlay.DiagnosticSnapshotCommand.Execute(null, overlay.Editor);
-            var intersections = DiagnosticRows(rows, "Intersection", "SnapshotRequested").Select(r => r.GetProperty("value"))
-                .Where(v => v.GetProperty("role").GetString() is "Toolbar" or "Chip").ToArray();
-            Require(intersections.Length == 4 && intersections.All(v => v.GetProperty("expectedMonitorStatus").GetString() == "Empty"),
-                "Separate monitor intersections must reveal toolbar and chip in a physical monitor gap.");
             var monitors = DiagnosticRows(rows, "Monitor", "SnapshotRequested").Select(r => r.GetProperty("value")).ToArray();
+            var elements = DiagnosticRows(rows, "Element", "SnapshotRequested").Select(r => r.GetProperty("value"))
+                .Where(v => v.GetProperty("role").GetString() is "Toolbar" or "Chip").ToArray();
+            Rect Rectangle(JsonElement row, string prefix) => new(row.GetProperty(prefix + "X").GetDouble(), row.GetProperty(prefix + "Y").GetDouble(),
+                row.GetProperty(prefix + "Width").GetDouble(), row.GetProperty(prefix + "Height").GetDouble());
+            Require(elements.Length == 2 && elements.All(element => monitors.All(monitor =>
+                Rect.Intersect(Rectangle(element, "expectedScreen"), Rectangle(monitor, "bounds")).IsEmpty &&
+                Rect.Intersect(Rectangle(element, "expectedScreen"), Rectangle(monitor, "workarea")).IsEmpty)),
+                "Raw screen rectangles, monitors and workareas must reveal toolbar and chip in a physical monitor gap offline.");
             Require(monitors[0].GetProperty("boundsX").GetInt32() == -1440 && monitors[0].GetProperty("dpiX").GetInt32() == 144 &&
                 monitors[1].GetProperty("dpiX").GetInt32() == 96 && monitors[1].GetProperty("workareaHeight").GetInt32() == 1040,
                 "Monitors must retain negative origins, independent workareas and 96/144 DPI.");
@@ -884,22 +1071,25 @@ public static class OverlaySelfChecks
         string path = Path.Combine(directory, "overlay-diagnostics.log");
         var rows = new List<string>();
         int failures = 0;
-        var overlay = DiagnosticOverlay(background, rows, sink: row =>
+        var overlay = DiagnosticOverlay(background, rows, sink: batch =>
         {
-            rows.Add(row);
+            rows.AddRange(batch);
             if (failures++ == 0) return new(RegionOverlay.LogWriteStatus.Failed, 5);
-            return App.AppendOverlayTraceRow(directory, row);
+            return App.AppendOverlayTraceSnapshot(directory, batch);
         });
         try
         {
             overlay.SetRegion(new(100, 100, 400, 300));
             string[] disk = File.ReadAllLines(path);
-            Require(!overlay.IsClosed && disk.Length > 1 && disk.Any(row => row.Contains("\"event\":\"Created\"", StringComparison.Ordinal)) &&
+            Require(!overlay.IsClosed && disk.Length > 1 && !disk.Any(row => row.Contains("\"event\":\"Created\"", StringComparison.Ordinal)) &&
                 disk.Any(row => row.Contains("\"event\":\"RegionChanged\"", StringComparison.Ordinal)), "The actual temp file must be readable with current snapshots before close.");
             using var recovered = JsonDocument.Parse(disk[0]);
+            Require(failures == DiagnosticRows(rows, "State").Length, "Each overlay snapshot must make exactly one writer attempt.");
             Require(recovered.RootElement.GetProperty("writeFailures").GetInt64() == 1 && recovered.RootElement.GetProperty("lastWriteCode").GetInt32() == 5,
-                "The next written row must report preceding sink failures and the numeric error code.");
-            Require(App.TryLogOverlayTraceRow("guard-check").Status == RegionOverlay.LogWriteStatus.Suppressed,
+                "A failed snapshot must be entirely absent and the next batch must report its loss and numeric error code.");
+            Require(disk.All(row => { using var item = JsonDocument.Parse(row); return item.RootElement.GetProperty("writeFailures").GetInt64() == 1; }) &&
+                recovered.RootElement.GetProperty("seq").GetInt64() == 2, "Every row in a recovered batch must carry the same cumulative snapshot-loss count.");
+            Require(App.TryLogOverlayTraceSnapshot(ImmutableArray.Create("guard-check")).Status == RegionOverlay.LogWriteStatus.Suppressed,
                 "App diagnostics mode must suppress the On production sink.");
             string? previous = Environment.GetEnvironmentVariable("KAIROS_DIAGNOSTIC_LOG_DIRECTORY");
             try
@@ -921,27 +1111,30 @@ public static class OverlaySelfChecks
         string application = Path.Combine(directory, "application.log");
         File.WriteAllText(application, "OFF-LOGGER-SENTINEL");
         string row = "{\"type\":\"Ütf8\",\"value\":\"" + new string('ä', 1024) + "\"}";
-        int bytes = Encoding.UTF8.GetByteCount(row + Environment.NewLine), rotations = 0;
+        var batch = Enumerable.Repeat(row, 32).ToImmutableArray();
+        int bytes = Encoding.UTF8.GetByteCount(row + Environment.NewLine) * batch.Length, rotations = 0;
         long previousLength = 0;
-        for (int i = 0; i < 1100; i++)
+        for (int i = 0; i < 270; i++)
         {
-            Require(App.AppendOverlayTraceRow(directory, row).Status == RegionOverlay.LogWriteStatus.Written, "Hard rotation fixture must write every bounded UTF-8 row.");
+            Require(App.AppendOverlayTraceSnapshot(directory, batch).Status == RegionOverlay.LogWriteStatus.Written, "Hard rotation fixture must write every bounded UTF-8 batch.");
             long length = new FileInfo(path).Length;
-            Require(length <= App.OverlayLogLimit, "Every UTF-8 append must keep the current segment within 1 MiB.");
+            Require(length <= 8 * 1024 * 1024, "Every UTF-8 batch must keep the current segment within 8 MiB.");
             if (length < previousLength) rotations++;
             previousLength = length;
-            if (File.Exists(path + ".previous")) Require(new FileInfo(path + ".previous").Length <= App.OverlayLogLimit,
+            if (File.Exists(path + ".previous")) Require(new FileInfo(path + ".previous").Length <= 8 * 1024 * 1024,
                 "The previous segment must also retain the hard byte limit.");
         }
         Require(rotations >= 2 && Directory.GetFiles(directory, "overlay-diagnostics.log*").Length == 2 &&
             new FileInfo(path).Length % bytes == 0 && File.ReadAllText(application) == "OFF-LOGGER-SENTINEL",
             "Rotation must retain exactly two complete bounded segments and leave application.log unchanged.");
+        File.WriteAllText(Path.Combine(directory, "rotation.json"), JsonSerializer.Serialize(new
+            { rotations, batchBytes = bytes, currentBytes = new FileInfo(path).Length, previousBytes = new FileInfo(path + ".previous").Length }));
         foreach (string segment in new[] { path, path + ".previous" })
             foreach (string line in File.ReadLines(segment)) using (JsonDocument.Parse(line)) { }
         long before = new FileInfo(path).Length;
-        Require(App.AppendOverlayTraceRow(directory, new string('x', App.OverlayLogLimit)).Status == RegionOverlay.LogWriteStatus.Failed &&
-            new FileInfo(path).Length == before && App.AppendOverlayTraceRow("\0invalid", row).Status == RegionOverlay.LogWriteStatus.Failed,
-            "Oversized rows and invalid explicit directories must fail without fallback or oversized writes.");
+        Require(App.AppendOverlayTraceSnapshot(directory, ImmutableArray.Create(new string('x', 8 * 1024 * 1024))).Status == RegionOverlay.LogWriteStatus.Failed &&
+            new FileInfo(path).Length == before && App.AppendOverlayTraceSnapshot("\0invalid", batch).Status == RegionOverlay.LogWriteStatus.Failed,
+            "Oversized batches and invalid explicit directories must fail without fallback or oversized writes.");
     }
 
     private static void CheckDiagnosticSchema(List<string> rows)
@@ -980,7 +1173,6 @@ public static class OverlaySelfChecks
             "Clip" => "role depth clipToBounds isVisible opacity accuracy",
             "Handle" => "handle wanted parentVisible parentOpacity renderNumber renderRevision",
             "Monitor" => "index primary",
-            "Intersection" => "role handle monitor",
             "Complete" => "",
             _ => throw new SelfCheckFailure("Unknown diagnostic row type.")
         };
@@ -988,9 +1180,9 @@ public static class OverlaySelfChecks
         string rectangles = type switch
         {
             "State" => "selection desktop renderSelection", "Dpi" => "previous current", "NativeWindow" => "window client clientScreen",
-            "Element" => "calculated observedScene expectedScreen measuredScreen clippedScene clientIntersection", "Clip" => "bounds explicit",
-            "Handle" => "expectedScene submittedScene expectedScreen measuredScreen sceneClipIntersection clientIntersection",
-            "Monitor" => "bounds workarea", "Intersection" => "expectedMonitor measuredMonitor expectedWorkarea measuredWorkarea", _ => ""
+            "Element" => "calculated observedScene expectedScreen measuredScreen clippedScene", "Clip" => "bounds explicit",
+            "Handle" => "expectedScene submittedScene expectedScreen measuredScreen",
+            "Monitor" => "bounds workarea", _ => ""
         };
         foreach (string prefix in rectangles.Split(' ', StringSplitOptions.RemoveEmptyEntries))
             foreach (string suffix in new[] { "Status", "Code", "X", "Y", "Width", "Height" }) fields.Add(prefix + suffix);

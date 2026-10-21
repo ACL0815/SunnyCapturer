@@ -12,6 +12,7 @@ using System.Windows.Interop;
 using System.Windows.Media.Effects;
 using System.Windows.Controls.Primitives;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -86,7 +87,8 @@ internal sealed partial class RegionOverlay : Window
         Func<BitmapSource, Window, AppSettings, string?>? saveImage = null, Action<BitmapSource>? copyImage = null,
         Action<string>? logState = null, Func<Point?>? readCursor = null, Func<MouseButtonState>? readLeftButton = null,
         Func<bool>? captureMouse = null, Func<bool>? hasCapture = null, Action? releaseCapture = null,
-        Func<string, LogWriteResult>? appendTraceRow = null, Func<IntPtr, NativeOverlaySnapshot>? readNativeSnapshot = null)
+        Func<ImmutableArray<string>, LogWriteResult>? appendTraceSnapshot = null, Func<IntPtr, NativeOverlaySnapshot>? readNativeSnapshot = null,
+        Func<ModifierKeys>? readDiagnosticModifiers = null)
     {
         ArgumentNullException.ThrowIfNull(screenshot);
         CaptureGeometry.ValidateSize(bounds.Width, bounds.Height);
@@ -105,6 +107,7 @@ internal sealed partial class RegionOverlay : Window
         _captureMouse = captureMouse ?? CaptureMouse;
         _hasCapture = hasCapture ?? (() => IsMouseCaptured);
         _releaseCapture = releaseCapture ?? ReleaseMouseCapture;
+        _readDiagnosticModifiers = readDiagnosticModifiers ?? (() => Keyboard.Modifiers);
         Title = "Kairos Capture – auf dem Bildschirm bearbeiten";
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize;
@@ -218,7 +221,7 @@ internal sealed partial class RegionOverlay : Window
         Content = new Viewbox { Stretch = Stretch.Fill, Child = _scene };
         Editor.Changed += OnEditorChanged;
         UpdateTools();
-        InitializeDiagnostics(appendTraceRow, readNativeSnapshot);
+        InitializeDiagnostics(appendTraceSnapshot, readNativeSnapshot);
         TraceState(OverlayEvent.Created);
     }
 
@@ -388,9 +391,8 @@ internal sealed partial class RegionOverlay : Window
     protected override void OnPreviewKeyDown(KeyEventArgs e)
     {
         base.OnPreviewKeyDown(e);
-        if (_liveTrace != null && DiagnosticSnapshotGesture.Matches(this, e))
+        if (RouteDiagnosticKey(e.Key, _readDiagnosticModifiers()))
         {
-            DiagnosticSnapshotCommand.Execute(null, this);
             e.Handled = true;
             return;
         }
@@ -402,7 +404,6 @@ internal sealed partial class RegionOverlay : Window
 
     internal bool HandleSessionKey(Key key, ModifierKeys modifiers = ModifierKeys.None)
     {
-        if (RouteDiagnosticKey(key, modifiers)) return true;
         if (_closed || _outputPending) return true;
         if (Editor.IsEditingText) return false;
         if (key == Key.Escape)
@@ -547,7 +548,8 @@ internal sealed partial class RegionOverlay : Window
 
     private void RefreshRegion(OverlayEvent reason = OverlayEvent.RegionChanged)
     {
-        AdvanceDiagnosticRevision();
+        long diagnosticRevision = _visualRevision;
+        ObserveRegionDiagnosticChange();
         Visibility toolbarBefore = _toolbar.Visibility, chipBefore = _chip.Visibility;
         bool ready = Selection.Width >= 2 && Selection.Height >= 2;
         Editor.Clip = new RectangleGeometry(ready ? new Rect(Selection.X, Selection.Y, Selection.Width, Selection.Height) : Rect.Empty);
@@ -557,7 +559,8 @@ internal sealed partial class RegionOverlay : Window
         _chip.Visibility = ChromeState == FrameChromeState.Ready ? Visibility.Visible : Visibility.Collapsed;
         PositionToolbar();
         _chrome.InvalidateVisual();
-        if (_liveTrace != null || toolbarBefore != _toolbar.Visibility || chipBefore != _chip.Visibility || reason != OverlayEvent.RegionChanged)
+        if (toolbarBefore != _toolbar.Visibility || chipBefore != _chip.Visibility || reason != OverlayEvent.RegionChanged ||
+            (_liveTrace != null && diagnosticRevision != _visualRevision))
             TraceState(reason);
     }
 
@@ -565,7 +568,6 @@ internal sealed partial class RegionOverlay : Window
     private void PositionToolbar()
     {
         if (_toolbar.Visibility != Visibility.Visible) return;
-        AdvanceDiagnosticRevision();
         _toolbar.Measure(new Size(_toolbar.Width, _toolbar.MaxHeight));
         Size size = _toolbar.DesiredSize;
         _glassImage.Width = size.Width;

@@ -57,6 +57,8 @@ internal sealed partial class RegionOverlay
     private sealed record SessionObservation(FrameChromeState Chrome, FrameGesture Gesture, FrameHandle Handle, GestureEnd End, EditorTool Tool,
         long Revision, double PointX, double PointY, bool Editing, bool Ocr, bool Closed, bool OutputPending, bool Active, bool Promoted,
         bool Capture, bool EditorGesture, bool EditingText, WindowState WindowState, bool Topmost);
+    private readonly record struct RegionObservation(Int32Rect Selection, FrameGesture Gesture, FrameHandle Handle, GestureEnd End,
+        FrameChromeState Chrome, Point Point);
     private sealed record DpiObservation(double WindowX, double WindowY, double SceneX, double SceneY, DiagnosticMatrix ToDevice,
         DiagnosticMatrix SceneToClient, DiagnosticRect Previous, DiagnosticRect Current);
     private sealed record OverlaySnapshot(SessionObservation State, DiagnosticRect Selection, DiagnosticRect Desktop,
@@ -66,8 +68,11 @@ internal sealed partial class RegionOverlay
     internal static readonly KeyGesture DiagnosticSnapshotGesture = new(Key.F12, ModifierKeys.Control | ModifierKeys.Shift);
     private OverlayTrace? _liveTrace;
     private Func<IntPtr, NativeOverlaySnapshot>? _readNativeSnapshot;
+    private readonly Func<ModifierKeys> _readDiagnosticModifiers;
     private long _visualRevision, _calculatedRevision;
     private Int32Rect _calculatedSelection;
+    private RegionObservation? _lastRegionObservation;
+    private DiagnosticRect _calculatedToolbar = new(ObservationStatus.NotObserved);
     private DiagnosticRect _calculatedChip = new(ObservationStatus.NotObserved);
     private DiagnosticRect _previousDpi = new(ObservationStatus.NotObserved), _currentDpi = new(ObservationStatus.NotObserved);
     private ChromeRenderObservation _lastChromeRender = new(0, 0, 0, FrameChromeState.Empty,
@@ -75,15 +80,14 @@ internal sealed partial class RegionOverlay
     private string? _lastDiagnosticValues;
     private bool _diagnosticReading;
 
-    private void InitializeDiagnostics(Func<string, LogWriteResult>? appendRow, Func<IntPtr, NativeOverlaySnapshot>? nativeReader)
+    private void InitializeDiagnostics(Func<ImmutableArray<string>, LogWriteResult>? appendSnapshot, Func<IntPtr, NativeOverlaySnapshot>? nativeReader)
     {
         if (!_settings.OverlayDiagnosticsEnabled) return;
         _readNativeSnapshot = nativeReader ?? ReadNativeSnapshot;
-        _liveTrace = new(_traceId, appendRow ?? App.TryLogOverlayTraceRow);
+        _liveTrace = new(_traceId, appendSnapshot ?? App.TryLogOverlayTraceSnapshot);
         CommandBindings.Add(new CommandBinding(DiagnosticSnapshotCommand,
             (_, e) => { TraceLiveOnly(OverlayEvent.SnapshotRequested); e.Handled = true; },
             (_, e) => { e.CanExecute = !_liveTrace.Terminal; e.Handled = true; }));
-        InputBindings.Add(new KeyBinding(DiagnosticSnapshotCommand, DiagnosticSnapshotGesture));
         Loaded += OnDiagnosticLoaded;
         foreach (FrameworkElement element in new FrameworkElement[] { _scene, _toolbar, _chip, _chrome })
         {
@@ -110,12 +114,24 @@ internal sealed partial class RegionOverlay
     private void OnDiagnosticVisibilityChanged(object sender, DependencyPropertyChangedEventArgs e) => TraceLiveOnly(OverlayEvent.VisibilityChanged, onlyIfChanged: true);
     private void OnDiagnosticLayoutUpdated(object? sender, EventArgs e) => TraceLiveOnly(OverlayEvent.LayoutChanged, onlyIfChanged: true);
     private void AdvanceDiagnosticRevision() { if (_liveTrace != null) _visualRevision++; }
+    private void ObserveRegionDiagnosticChange()
+    {
+        if (_liveTrace == null) return;
+        var current = new RegionObservation(Selection, _gesture, _frameHandle, _lastGestureEnd, ChromeState, _lastPoint);
+        if (_lastRegionObservation == current) return;
+        _lastRegionObservation = current;
+        _visualRevision++;
+    }
     private void ObserveCalculatedChrome()
     {
         if (_liveTrace == null) return;
+        var toolbar = DiagnosticRect.Known(ToolbarBounds);
+        var chip = DiagnosticRect.Known(new(Canvas.GetLeft(_chip), Canvas.GetTop(_chip), _chip.DesiredSize.Width, _chip.DesiredSize.Height));
+        if (_calculatedToolbar != toolbar || _calculatedChip != chip || _calculatedSelection != Selection) _visualRevision++;
         _calculatedRevision = _visualRevision;
         _calculatedSelection = Selection;
-        _calculatedChip = DiagnosticRect.Known(new(Canvas.GetLeft(_chip), Canvas.GetTop(_chip), _chip.DesiredSize.Width, _chip.DesiredSize.Height));
+        _calculatedToolbar = toolbar;
+        _calculatedChip = chip;
     }
     private void ObserveDpiChange(DpiScale before, DpiScale after)
     {
@@ -167,7 +183,7 @@ internal sealed partial class RegionOverlay
         bool ready = ChromeState == FrameChromeState.Ready;
         var elements = ImmutableArray.Create(
             ReadElement(_scene, ElementRole.Scene, !_closed, DiagnosticRect.Known(new(0, 0, _bounds.Width, _bounds.Height)), _visualRevision, native, dpi),
-            ReadElement(_toolbar, ElementRole.Toolbar, ready, _calculatedRevision == 0 ? new(ObservationStatus.NotObserved) : DiagnosticRect.Known(ToolbarBounds), _calculatedRevision, native, dpi),
+            ReadElement(_toolbar, ElementRole.Toolbar, ready, _calculatedToolbar, _calculatedRevision, native, dpi),
             ReadElement(_chip, ElementRole.Chip, ready, _calculatedChip, _calculatedRevision, native, dpi),
             ReadElement(_chrome, ElementRole.FrameChrome, !_closed, DiagnosticRect.Known(new(0, 0, _bounds.Width, _bounds.Height)), _visualRevision, native, dpi));
         return new(new(ChromeState, _gesture, _frameHandle, _lastGestureEnd, Editor.Tool, _visualRevision, _lastPoint.X, _lastPoint.Y,
@@ -249,7 +265,7 @@ internal sealed partial class RegionOverlay
     private static DiagnosticRect Intersect(DiagnosticRect a, DiagnosticRect b) => a.Status != ObservationStatus.Known ? a :
         b.Status != ObservationStatus.Known ? b : DiagnosticRect.Known(Rect.Intersect(a.Rectangle, b.Rectangle));
 
-    private sealed class OverlayTrace(int captureId, Func<string, LogWriteResult> appendRow)
+    private sealed class OverlayTrace(int captureId, Func<ImmutableArray<string>, LogWriteResult> appendSnapshot)
     {
         private static readonly Guid Run = Guid.NewGuid();
         private static readonly Guid Build = typeof(RegionOverlay).Module.ModuleVersionId;
@@ -262,6 +278,7 @@ internal sealed partial class RegionOverlay
         {
             long sequence = ++_sequence, ticks = Stopwatch.GetTimestamp();
             DateTimeOffset utc = DateTimeOffset.UtcNow;
+            var rows = ImmutableArray.CreateBuilder<string>(values.Length + 1);
             for (int part = 0; part <= values.Length; part++)
             {
                 using var buffer = new MemoryStream();
@@ -280,9 +297,10 @@ internal sealed partial class RegionOverlay
                     else { json.WriteStartObject(); json.WriteString("type", "Complete"); json.WriteEndObject(); }
                     json.WriteEndObject();
                 }
-                LogWriteResult result = appendRow(Encoding.UTF8.GetString(buffer.ToArray()));
-                if (result.Status == LogWriteStatus.Failed) { _writeFailures++; _lastWriteCode = result.Code; }
+                rows.Add(Encoding.UTF8.GetString(buffer.ToArray()));
             }
+            LogWriteResult result = appendSnapshot(rows.MoveToImmutable());
+            if (result.Status == LogWriteStatus.Failed) { _writeFailures++; _lastWriteCode = result.Code; }
             if (reason == OverlayEvent.WindowClosed) Terminal = true;
         }
     }
@@ -364,7 +382,6 @@ internal sealed partial class RegionOverlay
                 WriteRect(j, "calculated", element.Calculated); j.WriteNumber("calculatedRevision", element.CalculatedRevision); j.WriteBoolean("calculatedCurrent", element.CalculatedCurrent);
                 WriteRect(j, "observedScene", element.ObservedScene); WriteRect(j, "expectedScreen", element.ExpectedScreen); WriteRect(j, "measuredScreen", element.MeasuredScreen);
                 WriteMatrix(j, "toClient", element.ToClient); WriteRect(j, "clippedScene", element.ClippedScene);
-                WriteRect(j, "clientIntersection", Intersect(element.MeasuredScreen, n.ClientScreen));
             }));
             foreach (ClipObservation clip in element.Clips)
                 rows.Add(Row("Clip", j =>
@@ -373,8 +390,6 @@ internal sealed partial class RegionOverlay
                     j.WriteBoolean("isVisible", clip.Visible); j.WriteNumber("opacity", clip.Opacity); j.WriteString("accuracy", clip.Accuracy.ToString());
                     WriteRect(j, "bounds", clip.Bounds); WriteRect(j, "explicit", clip.ExplicitClip);
                 }));
-            foreach (MonitorObservation monitor in n.Monitors)
-                rows.Add(IntersectionRow(element.Role.ToString(), FrameHandle.None, monitor, element.ExpectedScreen, element.MeasuredScreen));
         }
         ElementObservation chrome = snapshot.Elements[3];
         foreach (var handle in FrameHandles())
@@ -390,11 +405,8 @@ internal sealed partial class RegionOverlay
                 j.WriteBoolean("parentVisible", chrome.IsVisible); j.WriteNumber("parentOpacity", chrome.EffectiveOpacity);
                 j.WriteNumber("renderNumber", snapshot.Render.Number); j.WriteNumber("renderRevision", snapshot.Render.Revision);
                 WriteRect(j, "expectedScene", expected); WriteRect(j, "submittedScene", drawn); WriteRect(j, "expectedScreen", expectedScreen);
-                WriteRect(j, "measuredScreen", measured); WriteRect(j, "sceneClipIntersection", Intersect(drawn, chrome.ClippedScene));
-                WriteRect(j, "clientIntersection", Intersect(measured, n.ClientScreen));
+                WriteRect(j, "measuredScreen", measured);
             }));
-            foreach (MonitorObservation monitor in n.Monitors)
-                rows.Add(IntersectionRow(ElementRole.FrameChrome.ToString(), handle.Handle, monitor, expectedScreen, measured));
         }
         foreach (MonitorObservation monitor in n.Monitors)
             rows.Add(Row("Monitor", j =>
@@ -405,12 +417,6 @@ internal sealed partial class RegionOverlay
             }));
         return rows.ToImmutable();
     }
-    private static string IntersectionRow(string role, FrameHandle handle, MonitorObservation monitor, DiagnosticRect expected, DiagnosticRect measured) => Row("Intersection", j =>
-    {
-        j.WriteString("role", role); j.WriteString("handle", handle.ToString()); j.WriteNumber("monitor", monitor.Index);
-        WriteRect(j, "expectedMonitor", Intersect(expected, monitor.Bounds)); WriteRect(j, "measuredMonitor", Intersect(measured, monitor.Bounds));
-        WriteRect(j, "expectedWorkarea", Intersect(expected, monitor.Workarea)); WriteRect(j, "measuredWorkarea", Intersect(measured, monitor.Workarea));
-    });
 
     private static NativeOverlaySnapshot ReadNativeSnapshot(IntPtr hwnd)
     {

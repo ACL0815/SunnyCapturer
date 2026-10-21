@@ -6,7 +6,9 @@ Aktiviere in den Einstellungen unter **System** die Option **Diagnose: Aufnahme-
 
 Bei ausgeschalteter Option bleibt die bisherige Anomalieprotokollierung in `application.log` erhalten. Sie schreibt beim Schließen eines auffälligen Overlays höchstens die letzten 20 Einträge. Bei eingeschalteter Option beginnt jede neue Aufnahme synchron mit `Created`, auch ohne Auswahl oder Präsentationsquelle. Regions-, Gesten-, Sichtbarkeits-, Layout-, Render- und Ausgabestatusänderungen erreichen den getrennten On-Stream bereits vor dem Schließen. Unveränderte Pointer- und Layoutcallbacks erzeugen keine zusätzlichen vollständigen Snapshots.
 
-Das Ziel ist `%LOCALAPPDATA%\KairosCapture\logs`. Ein gesetzter `KAIROS_DIAGNOSTIC_LOG_DIRECTORY` gilt auch für den Ordnerbutton und den On-Writer. Ein ungültiges explizites Ziel wird nicht durch den persönlichen Logordner ersetzt. Jede Zeile bleibt einschließlich UTF-8-Zeilenende innerhalb des Segmentlimits von 1 MiB. Vor einem überschreitenden Append rotiert der Writer; er behält genau eine Vorgängerdatei. Beide Segmente zusammen benötigen höchstens 2 MiB, sofern keine fremde Anwendung diese Dateien verändert. Größenprüfung, Rotation und Append verwenden gemeinsam eine benannte Prozesssperre mit höchstens 100 ms Wartezeit pro Zeile.
+Das Ziel ist `%LOCALAPPDATA%\KairosCapture\logs`. Ein gesetzter `KAIROS_DIAGNOSTIC_LOG_DIRECTORY` gilt auch für den Ordnerbutton und den On-Writer. Ein ungültiges explizites Ziel wird nicht durch den persönlichen Logordner ersetzt. Ein vollständiger Snapshot wird als Batch einschließlich aller UTF-8-Zeilenenden vor dem Schreiben geprüft. Vor einer Überschreitung von 8 MiB rotiert der Writer; er behält höchstens eine Vorgängerdatei. Beide Segmente zusammen benötigen höchstens 16 MiB, sofern keine fremde Anwendung diese Dateien verändert. Größenprüfung, Rotation und ein Open/Write/Flush verwenden gemeinsam eine benannte Prozesssperre mit höchstens einem 100-ms-Sperrversuch pro Snapshot. Ein Snapshot bleibt innerhalb eines Segments.
+
+Die Offlineprüfung schreibt zwei aufeinanderfolgende Aufnahmen mit jeweils `Created`, 64 unterschiedlichen aktiven Bewegungen, tatsächlichen Offscreen-Renderdurchläufen und `WindowClosed` in echte Temp-Dateien. Sie prüft beide Anfänge und Abschlüsse sowie jede Sequenz und jeden Teil. Dieses begrenzte Aufnahmeszenario muss vollständig aufbewahrt werden. Längere oder viele Aufnahmen können weiterhin frühere Segmente verdrängen.
 
 ## Feldreferenz
 
@@ -16,7 +18,7 @@ Jede JSONL-Zeile besitzt eine feste Hülle und ein skalares `value`-Objekt. Ein 
 |---|---|
 | `schema`, `run`, `build`, `process`, `processStartUtc`, `capture` | Schema 1, erzeugte Laufkennung, Assembly-MVID als Buildidentität, Prozess und Aufnahme. Die Capture-ID ist nur zusammen mit der Laufkennung eindeutig. |
 | `seq`, `ticks`, `frequency`, `utc`, `event`, `source`, `data` | Fortlaufende Snapshotnummer pro Aufnahme, monotone Uhr samt Frequenz, UTC, feste Ereignis- und Herkunftswerte sowie ein numerischer Ereigniscode. |
-| `part`, `parts`, `writeFailures`, `lastWriteCode` | Teilezuordnung und kumulative Schreibfehler mit letztem numerischem Fehlercode. Fehlende Teile und Rotationslücken bleiben anhand der Nummern erkennbar. |
+| `part`, `parts`, `writeFailures`, `lastWriteCode` | Teilezuordnung und Zahl fehlgeschlagener Snapshot-Batches mit letztem numerischem Fehlercode. Der nächste erfolgreiche Batch trägt den aktualisierten Fehlerzähler in allen Zeilen. Fehlende Sequenzen, Teile und Rotationslücken bleiben erkennbar. |
 | `State` | Chrome-Sollzustand, Rahmengeste, Griff, Endgrund, Werkzeug, Visualrevision, letzter Szenenpunkt, Aufnahme-, Editor-, Aktivierungs-, Capture- und Ausgabestatus. `selection*` ist die aktuelle Auswahl. |
 | `renderNumber`, `renderTicks`, `renderRevision`, `renderChrome`, `renderSelection*`, `submittedHandles` | Zuletzt tatsächlich ausgeführter `FrameChrome.OnRender` samt damaliger Auswahl und Anzahl eingereichter Griffrechtecke. Eine spätere Auswahländerung überschreibt diese Beobachtung nicht. |
 | `Element` | Szene, Toolbar, Chip und FrameChrome. `wanted` bezeichnet das Sichtbarkeitssoll. `visibility`, `isVisible`, `loaded`, `hitTestVisible`, `effectiveOpacity`, `measureValid`, `arrangeValid`, `actual*`, `desired*` und `render*` sind getrennte WPF-Messwerte. |
@@ -24,11 +26,12 @@ Jede JSONL-Zeile besitzt eine feste Hülle und ein skalares `value`-Objekt. Ein 
 | `expectedScreen*`, `measuredScreen*`, `toClient*` | Sollabbildung aus Desktopursprung plus Szene. Die gemessene Abbildung verwendet unabhängig Element-zu-Client-Matrix, `TransformToDevice` und nativen Clientursprung. Screenwerte sind physische Pixel; Szenenwerte sind Rastereinheiten. |
 | `Dpi` | WPF-DPI für Fenster und Szene, `sceneToClient*`, `toDevice*` sowie beim DPI-Ereignis die alten und neuen WPF-Skalen in `previousWidth/Height` und `currentWidth/Height`. |
 | `NativeWindow` | Fensterrechteck, lokales Clientrechteck, absolute Client-Ecken, native Sichtbarkeit, Iconic-Status, Fenster-DPI, Prozess- und Thread-Awareness, PMv2-Status und Monitorabfragestatus. Keine HWND-Werte. |
-| `Handle` | Acht aktuelle Sollgriffe und davon getrennt die zuletzt tatsächlich eingereichten Rechtecke. Enthält Renderzuordnung, Elternsichtbarkeit, Opazität sowie Szenenclip- und Client-Schnittrechtecke. |
+| `Handle` | Acht aktuelle Sollgriffe und davon getrennt die zuletzt tatsächlich eingereichten Rechtecke. Enthält Renderzuordnung, Elternsichtbarkeit, Opazität und unabhängige Soll- und gemessene Screenrechtecke. |
 | `Monitor` | Numerischer Index, Primary-Flag, physische Monitorfläche, unabhängige Workarea und effektive X-/Y-DPI. Negative Ursprünge bleiben erhalten. Monitor-DPI müssen im Kontext der aufgezeichneten Awareness gelesen werden. |
-| `Intersection` | Je Element oder Griff und Monitor getrennte Schnittrechtecke mit Monitorfläche und Workarea, jeweils für Soll und gemessenen Stand. Keine neue Platzierungsregel. |
 | `Clip` | Bekannte Vorfahren mit Tiefe, Sichtbarkeit, Opazität, ClipToBounds, Bounds und explizitem Clip. Tiefe -1 bezeichnet den Toolbarinhalt. `BoundsOnly` kennzeichnet insbesondere gerundete oder andere nicht exakt ausgewertete Clips. |
 | `*Status`, `*Code` | `Known`, `Empty`, `NotObserved`, `NoPresentationSource`, `TransformFailure` oder `NativeFailure`. Fehlende Messungen erhalten keine erfundenen Nullkoordinaten. Legitime gemessene Nullgrößen bleiben `Known`. |
+
+Schnittrechtecke mit Client, Monitor und Workarea werden offline aus den aufgezeichneten Eingangsrechtecken berechnet. `Intersection`-Zeilen, `clientIntersection*` und `sceneClipIntersection*` entfallen. `Clip`-Zeilen und `clippedScene*` bewahren die beobachteten Grenzen der bekannten WPF-Hierarchie. Diese Daten enthalten keine pauschale Sichtbarkeitsklassifikation.
 
 ## Aussagegrenzen
 
@@ -40,4 +43,4 @@ Die Diagnose liest keine Annotationen, OCR-Texte, Titel, Pfade, Tokens, Bilddate
 
 ## Designauswahl
 
-Die verbindliche Auswahl steht unter `C:\Users\AXEL_D~1\AppData\Local\Temp\kairos-overlay-r12-20261021\synthesis.md`. Basis ist `design-sol.md`; `design-judge.md` bewertet dessen Vertrag mit 14/15 gegenüber 9/15 für den anderen Entwurf. Übernommen wurde der getrennte injizierbare On-Sink. Die Umsetzung verwendet kleine konkrete Records ohne generisches Probe-Framework; der unveränderte Off-Puffer verbleibt im Overlay.
+Die verbindliche Auswahl steht unter `C:\Users\AXEL_D~1\AppData\Local\Temp\kairos-overlay-r12-20261021\synthesis.md`, korrigiert durch `review-r1-triage.md`. Basis ist `design-sol.md`; `design-judge.md` bewertet dessen Vertrag mit 14/15 gegenüber 9/15 für den anderen Entwurf. Die Umsetzung verwendet kleine private Snapshotwerte, einen getrennten injizierbaren On-Batchsink und die App-Dateigrenze. Der Off-Puffer verbleibt im Overlay. Die Reviewkorrektur umfasst Diagnosefilter, Aufbewahrung, Batchwriter und die einzige Produktionsroute `OnPreviewKeyDown` zum RoutedCommand. Sie ändert keine Produktgesten oder Platzierungsregeln.

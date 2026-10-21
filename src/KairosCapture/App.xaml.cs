@@ -242,8 +242,7 @@ public partial class App : Application
         try
         {
             // Never persist exception messages: provider URLs, tokens and image text can occur in them.
-            string directory = Environment.GetEnvironmentVariable("KAIROS_DIAGNOSTIC_LOG_DIRECTORY") ??
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "KairosCapture", "logs");
+            string directory = DiagnosticLogDirectory;
             Directory.CreateDirectory(directory);
             string path = Path.Combine(directory, "application.log");
             if (File.Exists(path) && new FileInfo(path).Length > 256 * 1024) File.Move(path, path + ".previous", true);
