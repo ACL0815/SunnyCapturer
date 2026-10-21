@@ -58,6 +58,8 @@
   <Border Style="{StaticResource GlassPanel}" Padding="16"><StackPanel>
    <StackPanel Orientation="Horizontal" Margin="0,0,0,10"><Path Data="{StaticResource Glyph.Settings}" Style="{StaticResource GlassIcon}" Stroke="{StaticResource LavenderBrush}"/><TextBlock Text="System" FontSize="16" FontWeight="SemiBold" Margin="10,0,0,0"/></StackPanel>
    <CheckBox Foreground="{StaticResource TextBrush}" x:Name="StartupCheck" Content="Mit Windows starten" Click="Startup_Click" Margin="0,0,0,10"/>
+   <CheckBox x:Name="OverlayDiagnosticsCheck" Content="Diagnose: Aufnahme-Overlay protokollieren" Click="Settings_Click" Margin="0,0,0,6"/>
+   <TextBlock Text="Gilt ab der nächsten Aufnahme. Protokolliert Fenster-, Layout- und DPI-Daten, keine Bildinhalte oder Texte." TextWrapping="Wrap" FontSize="12" Foreground="{StaticResource MutedBrush}" Margin="40,0,0,12"/>
    <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="Version 0.4.0" Foreground="{StaticResource MutedBrush}" FontSize="12" VerticalAlignment="Center"/><Button Grid.Column="1" Content="Protokollordner öffnen" Click="Logs_Click" Style="{StaticResource SmallButton}"/></Grid>
   </StackPanel></Border>
   <TextBlock x:Name="StatusText" TextWrapping="Wrap" Margin="6,10,6,0" Foreground="{StaticResource LavenderBrush}" FontSize="12"/>

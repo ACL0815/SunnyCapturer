@@ -52,6 +52,7 @@ public partial class MainWindow : Window
         AskSave.IsChecked = Settings.SaveWithoutDialog;
         SaveCopy.IsChecked = Settings.SaveOnCopy;
         AutoCopy.IsChecked = Settings.AutoCopyOcr;
+        OverlayDiagnosticsCheck.IsChecked = Settings.OverlayDiagnosticsEnabled;
         OpenAi = openAi ?? (diagnosticsMode ? AppDiagnostics.CreateIsolatedService() : new OpenAiService());
         RefreshAccounts();
         if (!diagnosticsMode)
@@ -141,6 +142,7 @@ public partial class MainWindow : Window
         Settings.SaveWithoutDialog = AskSave.IsChecked == true;
         Settings.SaveOnCopy = SaveCopy.IsChecked == true;
         Settings.AutoCopyOcr = AutoCopy.IsChecked == true;
+        Settings.OverlayDiagnosticsEnabled = OverlayDiagnosticsCheck.IsChecked == true;
         SaveSettings();
     }
 
@@ -174,7 +176,7 @@ public partial class MainWindow : Window
     private void OpenFolder_Click(object sender, RoutedEventArgs e) => OpenSaveFolder();
     private void Logs_Click(object sender, RoutedEventArgs e)
     {
-        try { string path = Path.Combine(AppSettings.DirectoryPath, "logs"); Directory.CreateDirectory(path); GlassWindow.Open(path); }
+        try { string path = App.DiagnosticLogDirectory; Directory.CreateDirectory(path); GlassWindow.Open(path); }
         catch (Exception ex) { ReportError("Protokollordner konnte nicht geöffnet werden", ex); }
     }
     private void Startup_Click(object sender, RoutedEventArgs e)

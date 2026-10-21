@@ -21,7 +21,7 @@ using DrawingRectangle = System.Drawing.Rectangle;
 namespace KairosCapture.Capture;
 
 /// <summary>One physical desktop raster, one live object editor, and a movable export crop.</summary>
-internal sealed class RegionOverlay : Window
+internal sealed partial class RegionOverlay : Window
 {
     [Flags]
     internal enum FrameHandle { None = 0, Left = 1, Right = 2, Top = 4, Bottom = 8 }
@@ -29,7 +29,9 @@ internal sealed class RegionOverlay : Window
     private enum GestureEnd { None, Released, ReleasedMove, MouseUp, Deactivated, CaptureLost, Escape }
     private enum FrameChromeState { Closed, Raw, Dragging, Empty, Ready }
     private enum OverlayEvent { Created, Activated, Deactivated, ContentRendered, GestureBegan, GestureEnded, GestureCancelled,
-        ReleasedMove, CaptureRequested, CaptureGained, CaptureLost, RegionChanged, ToolbarMeasured, PointerUpIdle, SecondPress, CursorReadFailed, Closing, Closed }
+        ReleasedMove, CaptureRequested, CaptureGained, CaptureLost, RegionChanged, ToolbarMeasured, PointerUpIdle, SecondPress, CursorReadFailed, Closing, Closed,
+        SourceInitialized, Loaded, DpiChanged, PlacementApplied, PlacementFailed, LayoutChanged, VisibilityChanged, ElementSizeChanged,
+        Rendered, EditorChanged, ToolChanged, OutputPending, OutputCompleted, OutputFailed, SnapshotRequested, WindowClosed }
     private enum InputSource { None, Overlay, Editor, Control, Other }
     private static int _nextTraceId;
     private readonly int _traceId = Interlocked.Increment(ref _nextTraceId);
@@ -83,7 +85,8 @@ internal sealed class RegionOverlay : Window
         AppSettings? settings = null, bool ocrMode = false, AnnotationCanvas? editor = null,
         Func<BitmapSource, Window, AppSettings, string?>? saveImage = null, Action<BitmapSource>? copyImage = null,
         Action<string>? logState = null, Func<Point?>? readCursor = null, Func<MouseButtonState>? readLeftButton = null,
-        Func<bool>? captureMouse = null, Func<bool>? hasCapture = null, Action? releaseCapture = null)
+        Func<bool>? captureMouse = null, Func<bool>? hasCapture = null, Action? releaseCapture = null,
+        Func<string, LogWriteResult>? appendTraceRow = null, Func<IntPtr, NativeOverlaySnapshot>? readNativeSnapshot = null)
     {
         ArgumentNullException.ThrowIfNull(screenshot);
         CaptureGeometry.ValidateSize(bounds.Width, bounds.Height);
@@ -154,7 +157,7 @@ internal sealed class RegionOverlay : Window
                 Tag = choice.Tool, GroupName = "OverlayTools", Focusable = false, Width = 34, Height = 34,
                 Margin = new Thickness(1), Padding = new Thickness(5) };
             System.Windows.Automation.AutomationProperties.SetName(button, choice.Label);
-            button.Click += (_, _) => { if (_closed || _outputPending) return; Editor.Tool = choice.Tool; UpdateTools(); Editor.Focus(); };
+            button.Click += (_, _) => { if (_closed || _outputPending) return; Editor.Tool = choice.Tool; UpdateTools(); TraceLiveOnly(OverlayEvent.ToolChanged); Editor.Focus(); };
             _toolButtons.Add(button); tools.Children.Add(button);
         }
         AddDivider(tools);
@@ -215,10 +218,15 @@ internal sealed class RegionOverlay : Window
         Content = new Viewbox { Stretch = Stretch.Fill, Child = _scene };
         Editor.Changed += OnEditorChanged;
         UpdateTools();
+        InitializeDiagnostics(appendTraceRow, readNativeSnapshot);
         TraceState(OverlayEvent.Created);
     }
 
-    private void OnEditorChanged(object? sender, EventArgs e) => UpdateTools();
+    private void OnEditorChanged(object? sender, EventArgs e)
+    {
+        UpdateTools();
+        TraceLiveOnly(OverlayEvent.EditorChanged, onlyIfChanged: true);
+    }
 
     private static SolidColorBrush Brush(string colour) => new((Color)ColorConverter.ConvertFromString(colour));
 
@@ -247,6 +255,7 @@ internal sealed class RegionOverlay : Window
     {
         base.OnSourceInitialized(e);
         _handle = new WindowInteropHelper(this).Handle;
+        TraceLiveOnly(OverlayEvent.SourceInitialized);
         PlaceOverDesktop();
     }
 
@@ -275,15 +284,18 @@ internal sealed class RegionOverlay : Window
     protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
     {
         base.OnDpiChanged(oldDpi, newDpi);
+        ObserveDpiChange(oldDpi, newDpi);
         Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() => { if (!_closed) PlaceOverDesktop(); }));
     }
 
     private void PlaceOverDesktop()
     {
         if (_handle == IntPtr.Zero || _closed) return;
+        AdvanceDiagnosticRevision();
         if (!SetWindowPos(_handle, new IntPtr(-1), _bounds.X, _bounds.Y, _bounds.Width, _bounds.Height, 0x0040))
         {
             Failure = new Win32Exception(Marshal.GetLastWin32Error(), "Das Overlay konnte nicht über dem Desktop platziert werden.");
+            TraceLiveOnly(OverlayEvent.PlacementFailed, data: ((Win32Exception)Failure).NativeErrorCode);
             Cancel();
             return;
         }
@@ -292,6 +304,8 @@ internal sealed class RegionOverlay : Window
             Failure = new Win32Exception(Marshal.GetLastWin32Error(), "Die physischen Fenstergrenzen konnten nicht geprüft werden.");
         else if (origin.X != _bounds.X || origin.Y != _bounds.Y || client.Right - client.Left != _bounds.Width || client.Bottom - client.Top != _bounds.Height)
             Failure = new InvalidOperationException("Das Overlay deckt das Desktopraster nicht pixelgenau ab.");
+        TraceLiveOnly(Failure == null ? OverlayEvent.PlacementApplied : OverlayEvent.PlacementFailed,
+            data: Failure is Win32Exception nativeFailure ? nativeFailure.NativeErrorCode : Failure?.HResult ?? 0);
         if (Failure != null) Cancel();
     }
 
@@ -374,6 +388,12 @@ internal sealed class RegionOverlay : Window
     protected override void OnPreviewKeyDown(KeyEventArgs e)
     {
         base.OnPreviewKeyDown(e);
+        if (_liveTrace != null && DiagnosticSnapshotGesture.Matches(this, e))
+        {
+            DiagnosticSnapshotCommand.Execute(null, this);
+            e.Handled = true;
+            return;
+        }
         // The inline text box owns Space, Ctrl+C, Delete and local undo, including Esc to discard text.
         if (IsControlSource(e.OriginalSource as DependencyObject) && Editor.IsEditingText) return;
         if (Editor.IsEditingText) return;
@@ -382,6 +402,7 @@ internal sealed class RegionOverlay : Window
 
     internal bool HandleSessionKey(Key key, ModifierKeys modifiers = ModifierKeys.None)
     {
+        if (RouteDiagnosticKey(key, modifiers)) return true;
         if (_closed || _outputPending) return true;
         if (Editor.IsEditingText) return false;
         if (key == Key.Escape)
@@ -403,7 +424,7 @@ internal sealed class RegionOverlay : Window
         {
             EditorTool? tool = key switch { Key.V => EditorTool.Select, Key.R => EditorTool.Rectangle, Key.E => EditorTool.Ellipse,
                 Key.A => EditorTool.Arrow, Key.P => EditorTool.Pen, Key.T => EditorTool.Text, Key.H => EditorTool.Highlight, Key.B => EditorTool.Redact, _ => null };
-            if (tool != null) { Editor.Tool = tool.Value; UpdateTools(); return true; }
+            if (tool != null) { Editor.Tool = tool.Value; UpdateTools(); TraceLiveOnly(OverlayEvent.ToolChanged); return true; }
         }
         return false;
     }
@@ -526,6 +547,7 @@ internal sealed class RegionOverlay : Window
 
     private void RefreshRegion(OverlayEvent reason = OverlayEvent.RegionChanged)
     {
+        AdvanceDiagnosticRevision();
         Visibility toolbarBefore = _toolbar.Visibility, chipBefore = _chip.Visibility;
         bool ready = Selection.Width >= 2 && Selection.Height >= 2;
         Editor.Clip = new RectangleGeometry(ready ? new Rect(Selection.X, Selection.Y, Selection.Width, Selection.Height) : Rect.Empty);
@@ -535,7 +557,7 @@ internal sealed class RegionOverlay : Window
         _chip.Visibility = ChromeState == FrameChromeState.Ready ? Visibility.Visible : Visibility.Collapsed;
         PositionToolbar();
         _chrome.InvalidateVisual();
-        if (toolbarBefore != _toolbar.Visibility || chipBefore != _chip.Visibility || reason != OverlayEvent.RegionChanged)
+        if (_liveTrace != null || toolbarBefore != _toolbar.Visibility || chipBefore != _chip.Visibility || reason != OverlayEvent.RegionChanged)
             TraceState(reason);
     }
 
@@ -543,6 +565,7 @@ internal sealed class RegionOverlay : Window
     private void PositionToolbar()
     {
         if (_toolbar.Visibility != Visibility.Visible) return;
+        AdvanceDiagnosticRevision();
         _toolbar.Measure(new Size(_toolbar.Width, _toolbar.MaxHeight));
         Size size = _toolbar.DesiredSize;
         _glassImage.Width = size.Width;
@@ -566,6 +589,7 @@ internal sealed class RegionOverlay : Window
         _chip.Measure(new Size(_bounds.Width, _bounds.Height));
         Canvas.SetLeft(_chip, Math.Clamp(Selection.X + 10, 0, Math.Max(0, _bounds.Width - _chip.DesiredSize.Width)));
         Canvas.SetTop(_chip, Math.Clamp(Selection.Y - _chip.DesiredSize.Height - 10, 0, Math.Max(0, _bounds.Height - _chip.DesiredSize.Height)));
+        ObserveCalculatedChrome();
     }
 
     internal (FrameHandle Handle, Point Center)[] FrameHandles()
@@ -612,6 +636,7 @@ internal sealed class RegionOverlay : Window
     {
         if (_closed || _outputPending || Selection.IsEmpty || completion == CaptureCompletion.Cancelled) return false;
         _outputPending = true;
+        TraceLiveOnly(OverlayEvent.OutputPending, data: (int)completion);
         try
         {
             Editor.EndGesture(); Editor.CommitText();
@@ -622,11 +647,12 @@ internal sealed class RegionOverlay : Window
             Editor.Clip = null;
             Result = new CaptureSessionResult(completion, Editor, Selection)
                 { Screenshot = _screenshot, Bounds = _bounds, Image = completion is CaptureCompletion.Ocr or CaptureCompletion.Pinned ? image : null, SavedPath = _savedPath };
+            TraceLiveOnly(OverlayEvent.OutputCompleted, data: (int)completion);
             Close();
             return true;
         }
         catch (Exception exception) { ShowOutputError(exception); return false; }
-        finally { _outputPending = false; }
+        finally { _outputPending = false; TraceLiveOnly(OverlayEvent.OutputPending); }
     }
 
     private void ShowOutputError(Exception exception)
@@ -635,6 +661,7 @@ internal sealed class RegionOverlay : Window
         _error.Text = "Ausgabe fehlgeschlagen: " + exception.Message;
         _error.Visibility = Visibility.Visible;
         PositionToolbar();
+        TraceLiveOnly(OverlayEvent.OutputFailed, data: exception.HResult);
     }
 
     internal void Cancel()
@@ -656,6 +683,7 @@ internal sealed class RegionOverlay : Window
         _traceAnomaly |= _gesture != FrameGesture.None ||
             (ChromeState == FrameChromeState.Ready && (!ToolbarVisible || _chip.Visibility != Visibility.Visible));
         TraceState(OverlayEvent.Closing);
+        AdvanceDiagnosticRevision();
         _closed = true;
         _toolbar.Visibility = _chip.Visibility = Visibility.Collapsed;
         Editor.IsHitTestVisible = false;
@@ -675,13 +703,16 @@ internal sealed class RegionOverlay : Window
         _scene.Children.Remove(Editor);
         Editor.Clip = null;
         if (_hasCapture()) _releaseCapture();
-        if (_traceAnomaly) _logState(string.Join(Environment.NewLine, _trace));
+        if (_liveTrace == null && _traceAnomaly) _logState(string.Join(Environment.NewLine, _trace));
         _trace.Clear();
         base.OnClosed(e);
+        TraceLiveOnly(OverlayEvent.WindowClosed);
+        DetachDiagnostics();
     }
 
     private void TraceState(OverlayEvent reason, DependencyObject? source = null, int data = 0)
     {
+        if (_liveTrace != null) { TraceLiveOnly(reason, source, data); return; }
         if (_closed && reason != OverlayEvent.Closed) return;
         _traceAnomaly |= reason is OverlayEvent.CursorReadFailed or OverlayEvent.SecondPress ||
             (reason == OverlayEvent.CaptureRequested && data == 0);
@@ -732,17 +763,26 @@ internal sealed class RegionOverlay : Window
     {
         protected override void OnRender(DrawingContext dc)
         {
-            var full = new Rect(0, 0, Width, Height);
-            Int32Rect s = overlay.Selection;
-            var mask = new GeometryGroup { FillRule = FillRule.EvenOdd };
-            mask.Children.Add(new RectangleGeometry(full));
-            if (s.Width > 0 && s.Height > 0) mask.Children.Add(new RectangleGeometry(new Rect(s.X, s.Y, s.Width, s.Height)));
-            dc.DrawGeometry(new SolidColorBrush(Color.FromArgb(150, 9, 14, 19)), null, mask);
-            if (s.Width <= 0 || s.Height <= 0) return;
-            dc.DrawRectangle(null, new Pen(Brush("#B097E9"), 1), new Rect(s.X + .5, s.Y + .5, Math.Max(0, s.Width - 1), Math.Max(0, s.Height - 1)));
-            if (overlay.ChromeState != FrameChromeState.Ready) return;
-            foreach (var handle in overlay.FrameHandles())
-                dc.DrawRectangle(Brush("#D3B576"), new Pen(Brush("#090E13"), 1), new Rect(handle.Center.X - 4, handle.Center.Y - 4, 8, 8));
+            var submitted = overlay._liveTrace == null ? null : new List<SubmittedHandle>();
+            try
+            {
+                var full = new Rect(0, 0, Width, Height);
+                Int32Rect s = overlay.Selection;
+                var mask = new GeometryGroup { FillRule = FillRule.EvenOdd };
+                mask.Children.Add(new RectangleGeometry(full));
+                if (s.Width > 0 && s.Height > 0) mask.Children.Add(new RectangleGeometry(new Rect(s.X, s.Y, s.Width, s.Height)));
+                dc.DrawGeometry(new SolidColorBrush(Color.FromArgb(150, 9, 14, 19)), null, mask);
+                if (s.Width <= 0 || s.Height <= 0) return;
+                dc.DrawRectangle(null, new Pen(Brush("#B097E9"), 1), new Rect(s.X + .5, s.Y + .5, Math.Max(0, s.Width - 1), Math.Max(0, s.Height - 1)));
+                if (overlay.ChromeState != FrameChromeState.Ready) return;
+                foreach (var handle in overlay.FrameHandles())
+                {
+                    var rectangle = new Rect(handle.Center.X - 4, handle.Center.Y - 4, 8, 8);
+                    dc.DrawRectangle(Brush("#D3B576"), new Pen(Brush("#090E13"), 1), rectangle);
+                    submitted?.Add(new(handle.Handle, DiagnosticRect.Known(rectangle)));
+                }
+            }
+            finally { if (submitted != null) overlay.ObserveChromeRender(submitted); }
         }
     }
 }

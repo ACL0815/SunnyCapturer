@@ -155,9 +155,23 @@ internal static class AppDiagnostics
             Require(((TextBox)window.FindName("HotkeyBox")).Text == "Strg+Alt+A", "Default shortcut must be visible.");
             Require(((CheckBox)window.FindName("AutoCopy")).IsChecked == true && ((CheckBox)window.FindName("AskSave")).IsChecked != true,
                 "Settings UI must reflect robust defaults.");
-            foreach (string name in new[] { "AskSave", "SaveCopy", "AutoCopy", "StartupCheck" })
+            var overlayDiagnostics = (CheckBox)window.FindName("OverlayDiagnosticsCheck");
+            Require(overlayDiagnostics.IsChecked == false && Equals(overlayDiagnostics.Content, "Diagnose: Aufnahme-Overlay protokollieren"),
+                "Overlay diagnostics must be visibly off by default with its documented label.");
+            int settingChanges = 0;
+            window.SettingsChanged += () => settingChanges++;
+            foreach (bool enabled in new[] { true, false })
+            {
+                overlayDiagnostics.IsChecked = enabled;
+                overlayDiagnostics.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent, overlayDiagnostics));
+                Require(window.Settings.OverlayDiagnosticsEnabled == enabled, "The routed settings click must update overlay diagnostics.");
+            }
+            Require(settingChanges == 2, "The diagnostic preference must use the existing settings-save route.");
+            foreach (string name in new[] { "AskSave", "SaveCopy", "AutoCopy", "StartupCheck", "OverlayDiagnosticsCheck" })
                 Require(((CheckBox)window.FindName(name)).Foreground is SolidColorBrush { Color.R: > 180, Color.G: > 180, Color.B: > 180 }, "Settings toggles must retain a readable light foreground.");
             LayoutPreview(window, 500, 550);
+            Require(overlayDiagnostics.ActualWidth >= 360 && overlayDiagnostics.DesiredSize.Width <= overlayDiagnostics.ActualWidth,
+                "The diagnostic toggle must fit at minimum settings width.");
             Require(!window.IsVisible && new WindowInteropHelper(window).Handle == IntPtr.Zero, "Shell checks must stay offscreen.");
         }
         finally { window.Close(); }
@@ -424,19 +438,25 @@ internal static class AppDiagnostics
             var settings = new AppSettings { SaveFolder = Path.Combine(directory, "Bilder"), Hotkey = "Strg+Umschalt+F8", SaveWithoutDialog = true,
                 SaveOnCopy = true, AutoCopyOcr = false, Model = "test-model", AccountKey = "test-account", WelcomeShown = true, RecentFiles = new[] { "test.png" } };
             settings.Save(file); var loaded = AppSettings.Load(file);
+            foreach (bool enabled in new[] { true, false })
+            {
+                settings.OverlayDiagnosticsEnabled = enabled;
+                settings.Save(file);
+                Require(AppSettings.Load(file).OverlayDiagnosticsEnabled == enabled, "Overlay diagnostics must roundtrip on and off.");
+            }
             Require(loaded.SaveFolder == settings.SaveFolder && loaded.Hotkey == settings.Hotkey && loaded.SaveWithoutDialog && loaded.SaveOnCopy && !loaded.AutoCopyOcr &&
                 loaded.Model == "test-model" && loaded.AccountKey == "test-account" && loaded.WelcomeShown && loaded.RecentFiles.SequenceEqual(settings.RecentFiles), "Settings must roundtrip every preference.");
             settings.Save(file);
             Require(Directory.GetFiles(directory, "*.tmp").Length == 0, "Atomic settings writes must leave no temporary files.");
             File.WriteAllText(file, "{\"AskBeforeSaving\":false,\"Hotkey\":\"Strg+Alt+F8\"}");
             var legacy = AppSettings.Load(file);
-            Require(!legacy.SaveWithoutDialog && legacy.Hotkey == "Strg+Alt+F8",
+            Require(!legacy.SaveWithoutDialog && !legacy.OverlayDiagnosticsEnabled && legacy.Hotkey == "Strg+Alt+F8",
                 "Legacy AskBeforeSaving false must be ignored while keeping save dialog enabled and other preferences intact.");
             Require(!JsonSerializer.Serialize(legacy).Contains("AskBeforeSaving", StringComparison.Ordinal), "Legacy field must not be persisted again.");
-            foreach (string corrupt in new[] { "{broken", "null", "[]", "{\"Hotkey\":null,\"SaveFolder\":null,\"Model\":null,\"RecentFiles\":null}" })
+            foreach (string corrupt in new[] { "{broken", "null", "[]", "{\"OverlayDiagnosticsEnabled\":\"yes\"}", "{\"Hotkey\":null,\"SaveFolder\":null,\"Model\":null,\"RecentFiles\":null}" })
             {
                 File.WriteAllText(file, corrupt); var recovered = AppSettings.Load(file);
-                Require(recovered.Hotkey == "Strg+Alt+A" && recovered.AutoCopyOcr && recovered.SaveFolder == AppSettings.DefaultSaveFolder,
+                Require(recovered.Hotkey == "Strg+Alt+A" && recovered.AutoCopyOcr && !recovered.OverlayDiagnosticsEnabled && recovered.SaveFolder == AppSettings.DefaultSaveFolder,
                     "Broken or partial settings must fall back safely.");
             }
             BitmapSource image = BitmapSource.Create(2, 2, 96, 96, PixelFormats.Bgra32, null, new byte[16], 8);

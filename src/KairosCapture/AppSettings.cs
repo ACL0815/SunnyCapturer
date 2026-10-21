@@ -24,6 +24,7 @@ internal sealed class AppSettings
     public bool SaveWithoutDialog { get; set; }
     public bool SaveOnCopy { get; set; }
     public bool AutoCopyOcr { get; set; } = true;
+    public bool OverlayDiagnosticsEnabled { get; set; }
     public string Model { get; set; } = "";
     public string AccountKey { get; set; } = "";
     public bool WelcomeShown { get; set; }
