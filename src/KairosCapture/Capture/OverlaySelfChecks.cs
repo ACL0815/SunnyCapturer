@@ -34,6 +34,9 @@ public static class OverlaySelfChecks
         CheckSelectedStyle(background);
         CheckRoutesAndText(background);
         CheckCompletion(background);
+        CheckCopyButtons(background);
+        CheckCopyFailures(background);
+        CheckCopyRoutes(background);
         CheckSaveDialog(background);
         CheckPins(background);
         CheckNativePinBounds();
@@ -41,6 +44,7 @@ public static class OverlaySelfChecks
         CheckOcrMode(background);
         CheckGestureEscape(background);
         CheckRendering(background);
+        CheckToolbarReachability();
         var failures = new List<string>();
         foreach (Action check in new Action[] { () => CheckFrameReleasePosition(background), CheckFrameInputRecovery,
             () => CheckRoutedFrameInput(background), () => CheckSynchronousCaptureRelease(background),
@@ -1215,7 +1219,7 @@ public static class OverlaySelfChecks
                 "First empty click must leave a valid selection without a zero-sized draft.");
             PointerClick(overlay, empty, 2);
             Require(copies == 1 && overlay.IsClosed && overlay.Result.Completion == CaptureCompletion.Copied &&
-                overlay.Result.Region == crop && ReferenceEquals(overlay.Result.Editor, overlay.Editor) &&
+                overlay.Result.Region == crop && !overlay.Result.ReturnToPreviousForeground && ReferenceEquals(overlay.Result.Editor, overlay.Editor) &&
                 copied != null && expected.SequenceEqual(Bytes(copied)) && !overlay.Editor.HasActiveGesture,
                 "Double-click must use the copy completion with the exact annotated crop and retained editor.");
             overlay.HandlePointerDown(empty, 2);
@@ -1590,11 +1594,25 @@ public static class OverlaySelfChecks
         overlay.SetRegion(new Int32Rect(80, 70, 760, 410));
         Layout(overlay.PreviewRoot, background.PixelWidth, background.PixelHeight);
         string[] actions = Buttons(overlay.Toolbar).Select(b => b.Tag).OfType<string>().ToArray();
-        Require(actions.TakeLast(5).SequenceEqual(new[] { "Ocr", "Close", "Pin", "Save", "Check" }) && !actions.Contains("Copy"),
-            "Right action group must be Ocr, then Close, Pin, Save, Check, and contain no Copy button.");
+        Require(actions.TakeLast(6).SequenceEqual(new[] { "Ocr", "Close", "Pin", "Save", "Copy", "Check" }),
+            "Right action group must be Ocr, Close, Pin, Save, Copy, Check.");
         ButtonBase ocr = Buttons(overlay.Toolbar).Single(b => Equals(b.Tag, "Ocr"));
         ButtonBase close = Buttons(overlay.Toolbar).Single(b => Equals(b.Tag, "Close"));
         ButtonBase delete = Buttons(overlay.Toolbar).Single(b => Equals(b.Tag, "Delete"));
+        ButtonBase copy = Buttons(overlay.Toolbar).Single(b => Equals(b.Tag, "Copy"));
+        ButtonBase check = Buttons(overlay.Toolbar).Single(b => Equals(b.Tag, "Check"));
+        var actionPanel = (Panel)ocr.Parent;
+        Require(actionPanel.Children.Cast<FrameworkElement>().Select(child => child is Border ? "Divider" : child.Tag as string)
+            .SequenceEqual(new[] { "Ocr", "Divider", "Close", "Pin", "Save", "Copy", "Check" }),
+            "The action divider and adjacent Copy/Check buttons must retain their exact order.");
+        Require(Equals(copy.ToolTip, "Bild kopieren und schließen · Enter / Strg+C") &&
+            Equals(check.ToolTip, "Fertig · Bild kopieren und zur letzten Anwendung zurückkehren") &&
+            Buttons(overlay.Toolbar).Count(button => button.ToolTip is string tip && tip.Contains("Enter / Strg+C", StringComparison.Ordinal)) == 1,
+            "Only Copy must advertise Enter / Strg+C; both action tooltips must be exact.");
+        Require(ReferenceEquals(copy.Style, overlay.FindResource("GlassIconButton")) &&
+            ReferenceEquals(check.Style, overlay.FindResource("GlassConfirmButton")) &&
+            copy.Content is System.Windows.Shapes.Path copyIcon && ReferenceEquals(copyIcon.Data, overlay.FindResource("Glyph.Copy")),
+            "Copy must reuse Glyph.Copy and the secondary style; Check must remain highlighted.");
         Require(ReferenceEquals(ocr.Parent, close.Parent) && !ReferenceEquals(ocr.Parent, delete.Parent),
             "Text recognition must sit in the right action group, not beside the editing tools.");
         ButtonBase rectangle = Buttons(overlay.Toolbar).Single(b => Equals(b.Tag, EditorTool.Rectangle));
@@ -1696,6 +1714,148 @@ public static class OverlaySelfChecks
         right.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Right)
             { RoutedEvent = UIElement.PreviewMouseRightButtonDownEvent });
         Require(right.IsClosed && right.Result.Completion == CaptureCompletion.Cancelled, "Right-click route must cancel.");
+    }
+
+    private static byte[] PrepareCopy(RegionOverlay overlay, Int32Rect crop)
+    {
+        overlay.SetRegion(crop);
+        Draw(overlay.Editor, EditorTool.Redact, new Point(80, 70), new Point(120, 110));
+        Draw(overlay.Editor, EditorTool.Ellipse, new Point(180, 170), new Point(220, 210));
+        overlay.Editor.Undo();
+        overlay.Editor.Tool = EditorTool.Select;
+        overlay.Editor.BeginGesture(new Point(100, 90));
+        overlay.Editor.EndGesture();
+        return Bytes(overlay.Editor.Flatten(crop));
+    }
+
+    private static void ClickAction(RegionOverlay overlay, string action) =>
+        Buttons(overlay.Toolbar).Single(button => Equals(button.Tag, action)).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+
+    private static void CheckCopyButtons(BitmapSource background)
+    {
+        string directory = Path.Combine(AppContext.BaseDirectory, $"copy-buttons-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var crop = new Int32Rect(30, 20, 700, 430);
+            foreach (bool saveOnCopy in new[] { false, true })
+            {
+                var copies = new List<BitmapSource>();
+                RegionOverlay? active = null;
+                Action<BitmapSource> copyImage = image =>
+                {
+                    Require(active != null && !active.IsClosed && active.Result.Completion == CaptureCompletion.Cancelled &&
+                        !active.Result.ReturnToPreviousForeground, "Return intent and completion must not be published before the copy succeeds.");
+                    copies.Add(image);
+                };
+                foreach (string action in new[] { "Copy", "Check" })
+                {
+                    string folder = Path.Combine(directory, $"{saveOnCopy}-{action}");
+                    var settings = new AppSettings { SaveOnCopy = saveOnCopy, SaveFolder = folder };
+                    var overlay = new RegionOverlay(background, new DrawingRectangle(0, 0, background.PixelWidth, background.PixelHeight),
+                        settings: settings, copyImage: copyImage);
+                    active = overlay;
+                    byte[] expected = PrepareCopy(overlay, crop);
+                    ClickAction(overlay, action);
+                    BitmapSource copied = copies.Last();
+                    Require(copies.Count == (action == "Copy" ? 1 : 2) && overlay.IsClosed &&
+                        overlay.Result.Completion == CaptureCompletion.Copied && overlay.Result.ReturnToPreviousForeground == (action == "Check") &&
+                        overlay.Result.Region == crop && ReferenceEquals(overlay.Result.Editor, overlay.Editor) &&
+                        copied.PixelWidth == crop.Width && copied.PixelHeight == crop.Height && expected.SequenceEqual(Bytes(copied)),
+                        $"{action}/SaveOnCopy={saveOnCopy}: the real button must copy the annotated crop and publish only its own return intent.");
+                    Require(Pixel(copied, 70, 70).SequenceEqual(new byte[] { 0, 0, 0, 255 }) &&
+                        !Pixel(background, 100, 90).SequenceEqual(Pixel(copied, 70, 70)),
+                        "The copied crop must contain the independently known black redaction pixel.");
+                    if (saveOnCopy)
+                        Require(overlay.Result.SavedPath != null && Directory.GetFiles(folder).Single() == overlay.Result.SavedPath &&
+                            expected.SequenceEqual(Bytes(ImageOutput.Load(overlay.Result.SavedPath))),
+                            "Both buttons must save the exact copied pixels through SaveOnCopy.");
+                    else Require(overlay.Result.SavedPath == null && !Directory.Exists(folder), "SaveOnCopy=false must not write a file.");
+                }
+                Require(Bytes(copies[0]).SequenceEqual(Bytes(copies[1])), "Copy and Check must export identical annotated pixels.");
+            }
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    private static void CheckCopyFailures(BitmapSource background)
+    {
+        string directory = Path.Combine(AppContext.BaseDirectory, $"copy-failures-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var crop = new Int32Rect(30, 20, 700, 430);
+            foreach (string action in new[] { "Copy", "Check" })
+            foreach (string fault in new[] { "Clipboard", "ClipboardAfterSave", "Save" })
+            {
+                string folder = Path.Combine(directory, action + fault);
+                if (fault == "Save") File.WriteAllText(folder, "This file blocks directory creation.");
+                var settings = new AppSettings { SaveOnCopy = fault != "Clipboard", SaveFolder = folder };
+                int copies = 0;
+                bool failCopy = true;
+                var overlay = new RegionOverlay(background, new DrawingRectangle(0, 0, background.PixelWidth, background.PixelHeight),
+                    settings: settings, copyImage: _ => { copies++; if (failCopy) throw new InvalidOperationException("offline clipboard failure"); });
+                byte[] expected = PrepareCopy(overlay, crop);
+                AnnotationCanvas editor = overlay.Editor;
+                object? identity = editor.SelectedIdentity;
+                ClickAction(overlay, action);
+                Require(!overlay.IsClosed && overlay.ToolbarVisible && overlay.Selection == crop && ReferenceEquals(overlay.Editor, editor) &&
+                    identity != null && ReferenceEquals(editor.SelectedIdentity, identity) && editor.CanUndo && editor.CanRedo &&
+                    expected.SequenceEqual(Bytes(editor.Flatten(crop))) && overlay.Result.Completion == CaptureCompletion.Cancelled &&
+                    !overlay.Result.ReturnToPreviousForeground && copies == (fault == "Save" ? 0 : 1),
+                    $"{action}/{fault}: failure must retain the live editor, crop, selected annotation and history without return intent.");
+                if (fault == "ClipboardAfterSave")
+                    Require(expected.SequenceEqual(Bytes(ImageOutput.Load(Directory.GetFiles(folder).Single()))),
+                        "SaveOnCopy must finish the exact file before a clipboard failure leaves the editor open.");
+                editor.Undo();
+                Require(!expected.SequenceEqual(Bytes(editor.Flatten(crop))), "Undo after failed output must still remove the annotation.");
+                editor.Redo();
+                Require(expected.SequenceEqual(Bytes(editor.Flatten(crop))) && editor.CanRedo, "Redo after failed output must restore pixels and retain later history.");
+                settings.SaveOnCopy = false;
+                failCopy = false;
+                ClickAction(overlay, "Copy");
+                Require(overlay.IsClosed && overlay.Result.Completion == CaptureCompletion.Copied && !overlay.Result.ReturnToPreviousForeground &&
+                    copies == (fault == "Save" ? 1 : 2), "A successful Copy after either failed button must not inherit return intent.");
+            }
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    private static void CheckCopyRoutes(BitmapSource background)
+    {
+        var crop = new Int32Rect(30, 20, 700, 430);
+        foreach (string route in new[] { "Copy", "Enter", "CtrlC", "DoubleClick", "Save", "Pin", "Ocr", "Close" })
+        {
+            var original = new RegionOverlay(background, new DrawingRectangle(0, 0, background.PixelWidth, background.PixelHeight), copyImage: _ => { });
+            byte[] expected = PrepareCopy(original, crop);
+            ClickAction(original, "Check");
+            CaptureService.Remember(original.Result);
+            CaptureSessionResult session = CaptureService.LastSession!;
+            Require(session.ReturnToPreviousForeground, "Resume fixture must remember a successful Check with return intent.");
+            bool failCopy = true;
+            int copies = 0;
+            var resumed = new RegionOverlay(session.Screenshot!, session.Bounds, editor: session.Editor,
+                copyImage: image =>
+                {
+                    if (failCopy) throw new InvalidOperationException("offline clipboard failure before alternate completion");
+                    Require(expected.SequenceEqual(Bytes(image)), "Resumed copy must export the original annotated crop.");
+                    copies++;
+                }, saveImage: (image, _, _) => { Require(expected.SequenceEqual(Bytes(image)), "Resumed Save must export the same crop."); return "offline-save.png"; });
+            resumed.SetRegion(session.Region);
+            Require(!resumed.Result.ReturnToPreviousForeground, "A resumed overlay must start without historical return intent.");
+            ClickAction(resumed, "Check");
+            Require(!resumed.IsClosed && !resumed.Result.ReturnToPreviousForeground, "A failed Check must not publish return intent before another route.");
+            failCopy = false;
+            if (route == "Enter") Require(resumed.HandleSessionKey(Key.Enter), "Enter must remain a copy shortcut.");
+            else if (route == "CtrlC") Require(resumed.HandleSessionKey(Key.C, ModifierKeys.Control), "Ctrl+C must remain a copy shortcut.");
+            else if (route == "DoubleClick") PointerClick(resumed, new Point(600, 260), 2);
+            else ClickAction(resumed, route);
+            CaptureCompletion completion = route switch { "Save" => CaptureCompletion.Saved, "Pin" => CaptureCompletion.Pinned,
+                "Ocr" => CaptureCompletion.Ocr, "Close" => CaptureCompletion.Cancelled, _ => CaptureCompletion.Copied };
+            Require(resumed.IsClosed && resumed.Result.Completion == completion && !resumed.Result.ReturnToPreviousForeground &&
+                copies == (completion == CaptureCompletion.Copied ? 1 : 0),
+                $"{route}: completion after Resume and a failed Check must retain its route without historical return intent.");
+        }
     }
 
     private static void CheckSaveDialog(BitmapSource background)
@@ -1875,6 +2035,54 @@ public static class OverlaySelfChecks
         BitmapSource demo = RenderPreview(background);
         Require(demo.IsFrozen && demo.PixelWidth == background.PixelWidth && demo.PixelHeight == background.PixelHeight,
             "Preview must render the actual fullscreen overlay tree without showing a window.");
+    }
+
+    private static void CheckToolbarReachability()
+    {
+        foreach (int width in new[] { 800, 1024, 1440 })
+        {
+            BitmapSource background = Pattern(width, 768);
+            var overlay = Create(background);
+            foreach (bool error in new[] { false, true })
+            foreach (Int32Rect crop in new[] { new Int32Rect(0, 0, 2, 2), new Int32Rect(width - 2, 0, 2, 2),
+                new Int32Rect(0, 766, 2, 2), new Int32Rect(width - 2, 766, 2, 2), new Int32Rect(0, 0, width, 768) })
+            {
+                overlay.SetRegion(crop);
+                if (error) Require(!overlay.ExecuteOutput(CaptureCompletion.Copied,
+                    _ => throw new InvalidOperationException("Offline output failure. The toolbar must retain every editing and output control.")),
+                    "Reachability fixture must leave an output error visible.");
+                RemeasureToolbar(overlay);
+                Layout(overlay.PreviewRoot, width, 768);
+                Rect desktop = new(0, 0, width, 768);
+                Require(desktop.Contains(overlay.ToolbarBounds), $"{width}/{crop}/error={error}: measured toolbar must stay in the desktop.");
+                FrameworkElement[] controls = Buttons(overlay.Toolbar).Cast<FrameworkElement>()
+                    .Append(Descendant<ComboBox>(overlay.Toolbar)!).ToArray();
+                var rectangles = new List<Rect>();
+                foreach (FrameworkElement control in controls)
+                {
+                    Rect bounds = control.TransformToAncestor(overlay.PreviewRoot).TransformBounds(new Rect(control.RenderSize));
+                    Require(bounds.Width >= 24 && bounds.Height >= 30 && desktop.Contains(bounds) && overlay.ToolbarBounds.Contains(bounds),
+                        $"{width}/{crop}/error={error}: {control.Tag ?? control.ToolTip} must have a full visible button rectangle, actual={bounds}.");
+                    Require(rectangles.All(other => { Rect overlap = Rect.Intersect(other, bounds); return overlap.IsEmpty || overlap.Width == 0 || overlap.Height == 0; }),
+                        "Toolbar controls must not overlap after wrapping.");
+                    rectangles.Add(bounds);
+                    if (!control.IsEnabled) continue;
+                    foreach (Point sample in new[] { new Point(.25, .5), new Point(.5, .25), new Point(.5, .5), new Point(.75, .5), new Point(.5, .75) })
+                    {
+                        Point point = new(bounds.X + bounds.Width * sample.X, bounds.Y + bounds.Height * sample.Y);
+                        DependencyObject? hit = null;
+                        VisualTreeHelper.HitTest(overlay.PreviewRoot,
+                            candidate => candidate is UIElement element && (!element.IsHitTestVisible || element.Visibility != Visibility.Visible)
+                                ? HitTestFilterBehavior.ContinueSkipSelfAndChildren : HitTestFilterBehavior.Continue,
+                            result => { hit = result.VisualHit; return HitTestResultBehavior.Stop; }, new PointHitTestParameters(point));
+                        while (hit != null && !ReferenceEquals(hit, control)) hit = VisualTreeHelper.GetParent(hit);
+                        Require(ReferenceEquals(hit, control),
+                            $"{width}/{crop}/error={error}: {control.Tag ?? control.ToolTip} must be reachable by a real hit-test at {point}.");
+                    }
+                }
+            }
+            overlay.Cancel();
+        }
     }
 
     public static BitmapSource RenderPreview(BitmapSource background)

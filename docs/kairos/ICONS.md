@@ -1,6 +1,6 @@
 # Kairos Capture: Icons und Glas
 
-Stand und Quellenabruf: **2026-10-19**. Originale WPF-Vektorzeichnungen, inspiriert von Apple Liquid Glass und der optischen Disziplin von SF Symbols. Keine Apple-Symbolpfade, Apple-Schriften oder Icon-Composer-Assets werden mitgeliefert.
+Produktstand: **2026-10-22**. Quellenabruf: **2026-10-19**. Originale WPF-Vektorzeichnungen, inspiriert von Apple Liquid Glass und der optischen Disziplin von SF Symbols. Keine Apple-Symbolpfade, Apple-Schriften oder Icon-Composer-Assets werden mitgeliefert.
 
 ## Entwurf und Raster
 
@@ -22,7 +22,7 @@ Alle acht Vertragsschlüssel bleiben erhalten: `GlassFill`, `GlassStroke`, `Glas
 
 - `GlassPanel`: Border, Radius 22, Padding 10; einziger kleiner DropShadowEffect (16 Blur / 4 Tiefe / 28 %). Keine Schatten pro Icon-Button.
 - `GlassIconButton`: Button, 36×36, Radius 13. Content ist ein Path mit `GlassIcon`.
-- `GlassConfirmButton`: abgeleiteter Icon-Button für den rechten Fertig-Haken mit dezent violetter Füllung und hellem Lavendel-Glyph. Die Overlay-Aktionsgruppe trennt eine feine Linie von OCR und den Werkzeugen; Reihenfolge: Close, Pin, Download (Tag `Save`), Check.
+- `GlassConfirmButton`: abgeleiteter Icon-Button für den rechten Fertig-Haken mit dezent violetter Füllung und hellem Lavendel-Glyph. Die Overlay-Aktionsgruppe enthält Ocr, Trenner, Close, Pin, Download (Tag `Save`), Copy, Check. Der Kopierbutton verwendet `Glyph.Copy` und den vorhandenen Nebenaktionsstil `GlassIconButton`.
 - `GlassToolToggle`: TargetType ToggleButton; funktioniert ausdrücklich auch auf RadioButton. Checked färbt die Kapsel tiefviolett und den Glyphen in helles Lavendel (#D8C8FA) für Kontrast. Der normale Glyph bleibt #F4F2FA.
 - Hover: weißer Reflex und 1 DIP angehoben. Pressed: abgedunkelt und 1 DIP abgesenkt. Disabled: echte Control-Opacity 0.35. `GlassFocus` liefert bei Tastaturfokus einen 2-DIP-Lavendelring außen; nicht durch einen gefärbten Glyph allein ersetzen.
 - `GlassSwatch`: 28×28, Farbpunkt aus Background mit Glasring; Checked hat einen weißen 2-DIP-Außenring. Farben brauchen zusätzlich Namen/Tooltips im Aufrufer.

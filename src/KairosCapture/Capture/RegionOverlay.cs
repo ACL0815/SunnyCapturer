@@ -195,7 +195,8 @@ internal sealed partial class RegionOverlay : Window
         AddButton(actions, "Pin", "Anpinnen · I", () => _ = CompleteAsync(CaptureCompletion.Pinned));
         Button save = AddButton(actions, "Download", "Speichern · Strg+S", () => _ = CompleteAsync(CaptureCompletion.Saved));
         save.Tag = "Save";
-        Button check = AddButton(actions, "Check", "Fertig · Bild kopieren und schließen · Enter / Strg+C", () => _ = CompleteAsync(CaptureCompletion.Copied));
+        AddButton(actions, "Copy", "Bild kopieren und schließen · Enter / Strg+C", () => _ = CompleteAsync(CaptureCompletion.Copied));
+        Button check = AddButton(actions, "Check", "Fertig · Bild kopieren und zur letzten Anwendung zurückkehren", () => _ = CompleteAsync(CaptureCompletion.Copied, returnToPreviousForeground: true));
         check.Style = (Style)FindResource("GlassConfirmButton");
         var toolbarRow = new Grid();
         toolbarRow.ColumnDefinitions.Add(new ColumnDefinition());
@@ -430,7 +431,6 @@ internal sealed partial class RegionOverlay : Window
         return false;
     }
 
-    // Shared by routed pointer input and offline checks; completion uses the same path as Enter/Check.
     internal bool HandlePointerDown(Point point, int clickCount = 1, bool move = false)
     {
         if (_closed || _outputPending) return true;
@@ -617,7 +617,7 @@ internal sealed partial class RegionOverlay : Window
         return result;
     }
 
-    internal Task<bool> CompleteAsync(CaptureCompletion completion)
+    internal Task<bool> CompleteAsync(CaptureCompletion completion, bool returnToPreviousForeground = false)
     {
         if (completion == CaptureCompletion.Copied)
             return Task.FromResult(ExecuteOutput(completion, image =>
@@ -628,13 +628,13 @@ internal sealed partial class RegionOverlay : Window
                     _savedPath = ImageOutput.SaveDirect(image, _settings.SaveFolder, DateTime.Now);
                 }
                 _copyImage(image); return true;
-            }));
+            }, returnToPreviousForeground));
         if (completion == CaptureCompletion.Saved)
             return Task.FromResult(ExecuteOutput(completion, image => (_savedPath = _saveImage(image, this, _settings)) != null));
         return Task.FromResult(completion is CaptureCompletion.Ocr or CaptureCompletion.Pinned && ExecuteOutput(completion, _ => true));
     }
 
-    internal bool ExecuteOutput(CaptureCompletion completion, Func<BitmapSource, bool> write)
+    internal bool ExecuteOutput(CaptureCompletion completion, Func<BitmapSource, bool> write, bool returnToPreviousForeground = false)
     {
         if (_closed || _outputPending || Selection.IsEmpty || completion == CaptureCompletion.Cancelled) return false;
         _outputPending = true;
@@ -648,7 +648,8 @@ internal sealed partial class RegionOverlay : Window
             _scene.Children.Remove(Editor);
             Editor.Clip = null;
             Result = new CaptureSessionResult(completion, Editor, Selection)
-                { Screenshot = _screenshot, Bounds = _bounds, Image = completion is CaptureCompletion.Ocr or CaptureCompletion.Pinned ? image : null, SavedPath = _savedPath };
+                { Screenshot = _screenshot, Bounds = _bounds, Image = completion is CaptureCompletion.Ocr or CaptureCompletion.Pinned ? image : null,
+                    SavedPath = _savedPath, ReturnToPreviousForeground = returnToPreviousForeground };
             TraceLiveOnly(OverlayEvent.OutputCompleted, data: (int)completion);
             Close();
             return true;
