@@ -115,7 +115,6 @@ public static class CaptureService
                         owner.Visibility = visibility;
                     }
                 }
-                // The overlay activated itself. Return focus for a pin or an explicit copy-and-return request.
                 if ((overlay?.Result.Completion == CaptureCompletion.Pinned || overlay?.Result.ReturnToPreviousForeground == true) && previousForeground != IntPtr.Zero && IsWindow(previousForeground))
                     SetForegroundWindow(previousForeground);
             }
