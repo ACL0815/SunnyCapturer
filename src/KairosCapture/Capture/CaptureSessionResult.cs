@@ -14,4 +14,5 @@ public sealed record CaptureSessionResult(CaptureCompletion Completion, Annotati
     internal BitmapSource? Image { get; init; }
     internal Rectangle Bounds { get; init; }
     internal string? SavedPath { get; init; }
+    internal bool ReturnToPreviousForeground { get; init; }
 }
