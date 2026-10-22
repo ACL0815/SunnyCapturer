@@ -431,7 +431,6 @@ internal sealed partial class RegionOverlay : Window
         return false;
     }
 
-    // Shared by routed pointer input and offline checks; completion uses the same path as Enter/Check.
     internal bool HandlePointerDown(Point point, int clickCount = 1, bool move = false)
     {
         if (_closed || _outputPending) return true;
